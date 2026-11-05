@@ -62,3 +62,5 @@ CONFIG_LWIP_MAX_SOCKETS=16
 # pool ran out with both pages populated and crashed in lv_draw_add_task.
 CONFIG_LV_USE_CLIB_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
+# Built-in lv_snprintf has no float support ("$%.2f" rendered as "$f").
+CONFIG_LV_USE_CLIB_SPRINTF=y

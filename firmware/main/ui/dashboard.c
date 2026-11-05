@@ -14,6 +14,7 @@
 #define C_BG        0x0B0F14
 #define C_CARD      0x151B23
 #define C_BORDER    0x222B36
+#define C_TRACK     0x30394A  // empty part of progress bars, visible on C_CARD
 #define C_TEXT      0xE6EDF3
 #define C_DIM       0x7D8590
 #define C_CPU       0x4C9AFF
@@ -198,7 +199,8 @@ static void build_io(lv_obj_t *scr)
     lv_obj_set_size(s_disk_bar, 128, 10);
     lv_obj_set_pos(s_disk_bar, 0, 58);
     lv_bar_set_range(s_disk_bar, 0, 100);
-    lv_obj_set_style_bg_color(s_disk_bar, lv_color_hex(C_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_disk_bar, lv_color_hex(C_TRACK), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_disk_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_disk_bar, lv_color_hex(C_MEM), LV_PART_INDICATOR);
 
     s_footer = label(scr, &lv_font_montserrat_12, C_DIM, "");
