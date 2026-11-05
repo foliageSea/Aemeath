@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "quota.h"
 
 static metrics_t s_m;
 static SemaphoreHandle_t s_lock;
@@ -47,6 +48,14 @@ bool metrics_ingest(const char *json, size_t len)
     cJSON *root = cJSON_ParseWithLength(json, len);
     if (!root) {
         return false;
+    }
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    if (cJSON_IsString(type)) {
+        if (strcmp(type->valuestring, "quota") == 0) {
+            quota_ingest(root);
+        }
+        cJSON_Delete(root);
+        return true;
     }
     metrics_t m;
     memset(&m, 0, sizeof(m));

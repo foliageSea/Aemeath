@@ -7,6 +7,7 @@
 #include "metrics.h"
 #include "net.h"
 #include "nvs_flash.h"
+#include "quota.h"
 
 static const char *TAG = "main";
 
@@ -26,6 +27,7 @@ void app_main(void)
 {
     nvs_init();
     metrics_init();
+    quota_init();
     ESP_ERROR_CHECK(board_init());
     ESP_ERROR_CHECK(display_start());
     dashboard_create();

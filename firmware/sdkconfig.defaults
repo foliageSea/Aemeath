@@ -57,3 +57,8 @@ CONFIG_LV_USE_PERF_MONITOR=n
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 CONFIG_LWIP_MAX_SOCKETS=16
+
+# LVGL allocates through the system heap (spills to PSRAM); the 64 KB built-in
+# pool ran out with both pages populated and crashed in lv_draw_add_task.
+CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y

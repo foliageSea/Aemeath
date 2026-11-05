@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "metrics.h"
 #include "net.h"
+#include "quota_page.h"
 
 #define C_BG        0x0B0F14
 #define C_CARD      0x151B23
@@ -38,6 +39,7 @@ static lv_obj_t *s_net_up, *s_net_down, *s_disk_rd, *s_disk_wr, *s_disk_bar, *s_
 static lv_obj_t *s_overlay, *s_ov_title, *s_ov_body, *s_ov_qr;
 static uint32_t s_last_seq;
 static net_state_t s_last_overlay_state = (net_state_t)-1;
+static lv_obj_t *s_tiles, *s_dots[2];
 
 static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -200,7 +202,7 @@ static void build_io(lv_obj_t *scr)
     lv_obj_set_style_bg_color(s_disk_bar, lv_color_hex(C_MEM), LV_PART_INDICATOR);
 
     s_footer = label(scr, &lv_font_montserrat_12, C_DIM, "");
-    lv_obj_align(s_footer, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_align(s_footer, LV_ALIGN_BOTTOM_MID, 0, -9);
     lv_label_set_long_mode(s_footer, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_width(s_footer, 460);
     lv_obj_set_style_text_align(s_footer, LV_TEXT_ALIGN_CENTER, 0);
@@ -385,8 +387,27 @@ static void update_overlay(const net_status_t *ns)
     lv_obj_remove_flag(s_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void update_dots(void)
+{
+    lv_obj_t *active = lv_tileview_get_tile_active(s_tiles);
+    int page = active ? lv_obj_get_index(active) : 0;
+    for (int i = 0; i < 2; i++) {
+        lv_obj_set_style_bg_color(s_dots[i], lv_color_hex(i == page ? C_TEXT : C_BORDER), 0);
+    }
+}
+
+static lv_obj_t *page_tile(int col, lv_dir_t dir)
+{
+    lv_obj_t *t = lv_tileview_add_tile(s_tiles, col, 0, dir);
+    lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
+    return t;
+}
+
 static void tick_cb(lv_timer_t *t)
 {
+    update_dots();
+    quota_page_tick();
+
     net_status_t ns;
     net_get_status(&ns);
     update_overlay(&ns);
@@ -439,12 +460,29 @@ void dashboard_create(void)
     lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    build_header(scr);
-    gauge_create(&s_cpu, scr, 8, "CPU", C_CPU);
-    gauge_create(&s_mem, scr, 166, "MEMORY", C_MEM);
-    gauge_create(&s_gpu, scr, 324, "GPU", C_GPU);
-    build_charts(scr);
-    build_io(scr);
+    // Swipe left/right between the PC monitor and the quota page.
+    s_tiles = lv_tileview_create(scr);
+    lv_obj_set_style_bg_opa(s_tiles, LV_OPA_TRANSP, 0);
+    lv_obj_set_scrollbar_mode(s_tiles, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_t *pc = page_tile(0, LV_DIR_RIGHT);
+    lv_obj_t *quota = page_tile(1, LV_DIR_LEFT);
+
+    build_header(pc);
+    gauge_create(&s_cpu, pc, 8, "CPU", C_CPU);
+    gauge_create(&s_mem, pc, 166, "MEMORY", C_MEM);
+    gauge_create(&s_gpu, pc, 324, "GPU", C_GPU);
+    build_charts(pc);
+    build_io(pc);
+    quota_page_create(quota);
+
+    for (int i = 0; i < 2; i++) {
+        s_dots[i] = lv_obj_create(scr);
+        lv_obj_remove_style_all(s_dots[i]);
+        lv_obj_set_size(s_dots[i], 6, 6);
+        lv_obj_set_style_radius(s_dots[i], 3, 0);
+        lv_obj_set_style_bg_opa(s_dots[i], LV_OPA_COVER, 0);
+        lv_obj_align(s_dots[i], LV_ALIGN_BOTTOM_MID, i ? 6 : -6, -2);
+    }
     build_overlay(scr);
     set_pill(C_DIM, "starting");
 

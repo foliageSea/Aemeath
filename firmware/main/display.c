@@ -146,7 +146,7 @@ esp_err_t display_start(void)
     ESP_RETURN_ON_ERROR(panel_init(&panel), TAG, "panel");
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_stack = 8192;
+    port_cfg.task_stack = 16384;  // nested tileview/list/card layouts recurse deeply when rendering
     port_cfg.task_affinity = 1;
     ESP_RETURN_ON_ERROR(lvgl_port_init(&port_cfg), TAG, "lvgl port");
 

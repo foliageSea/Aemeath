@@ -43,7 +43,17 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags -H=windowsgui -o aemea
   未运行时温度字段省略，屏幕显示 `--`。
 - 开机自启：macOS 用 `~/Library/LaunchAgents` plist；Windows 把 exe 快捷方式放进 `shell:startup`。
 
+## Magpie 订阅额度页
+
+屏幕左右滑动切换到第二页「AI QUOTA」，显示本机 [Magpie](http://127.0.0.1:3425) 网关聚合的各订阅账户额度：
+每个窗口一条进度条（≥75% 黄、≥90% 红）、用量 / 计数、重置倒计时，顶部是今日与 30 天花费和调用次数。
+
+- agent 每 30 秒读取 `GET /v1/magpie/quotas` 与 `/v1/magpie/usage` 并转发（不会转发账户邮箱）。
+- `-magpie http://host:port` 指定网关地址，`-magpie ""` 关闭；网关不可用时只记日志，不影响性能数据。
+- 超过 3 分钟未收到额度数据，页面右上角显示红色 `stale`。
+
 ## 协议
 
 每秒一帧 JSON 文本（字段见 `agent/internal/proto/proto.go`，固件解析见 `firmware/main/metrics.c`），
 缺失字段直接省略。设备用 `ts` + `tz` 同步时钟。
+额度数据是另一种帧（`"type":"quota"`，见 `proto.QuotaFrame` 与 `firmware/main/quota.c`）；没有 `type` 的帧按性能数据处理。
