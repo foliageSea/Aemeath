@@ -1,0 +1,11 @@
+# ESP-IDF
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# Go
+agent/aemeath-agent
+agent/*.exe
+
+.DS_Store
