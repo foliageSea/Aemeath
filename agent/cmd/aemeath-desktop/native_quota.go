@@ -134,7 +134,12 @@ func (a *nativeUI) quotaCard(c *ui.Context, sub desktop.Subscription, q *proto.Q
 			if sub.Hidden {
 				label, icon = "恢复显示", quotaEyeIcon
 			}
-			ui.Button(c.Key("visibility"), "").Label(label+" "+sub.Name).Tooltip(label).Size(34, 34).Children(func() {
+			visibility := ui.ButtonBase(c.Key("visibility")).Label(label+" "+sub.Name).Tooltip(label).
+				Size(34, 34).Radius(10).Border(1, t.Border).Background(t.Surface)
+			if visibility.Hovered() {
+				visibility.Background(t.SurfaceHover)
+			}
+			visibility.Children(func() {
 				ui.Icon(c, icon).FontSize(17).TextColor(t.TextMuted)
 			}).OnClick(func() { a.toggleSubscription(sub.Name) })
 		})
