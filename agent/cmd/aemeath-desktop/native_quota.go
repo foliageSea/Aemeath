@@ -130,9 +130,9 @@ func (a *nativeUI) quotaCard(c *ui.Context, sub desktop.Subscription, q *proto.Q
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.ButtonBase(c.Key("drag-handle")).Label("拖动 "+sub.Name).Cursor(ui.CursorGrab).Size(24, 30).Children(func() { ui.Text(c, "⠿").FontSize(21).TextColor(t.TextMuted) })
 			ui.Text(c, sub.Name).Bold().FontSize(17).Grow(1).MinWidth(0).Wrap()
-			label, icon := "隐藏", quotaEyeOffIcon
+			label, icon := "隐藏", quotaEyeIcon
 			if sub.Hidden {
-				label, icon = "恢复显示", quotaEyeIcon
+				label, icon = "恢复显示", quotaEyeOffIcon
 			}
 			visibility := ui.ButtonBase(c.Key("visibility")).Label(label+" "+sub.Name).Tooltip(label).
 				Size(34, 34).Radius(10).Border(1, t.Border).Background(t.Surface)
