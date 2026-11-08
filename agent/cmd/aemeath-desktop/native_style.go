@@ -44,6 +44,8 @@ func (a *nativeUI) recordMetrics() {
 		a.history = append([]nativeSample(nil), a.history[len(a.history)-60:]...)
 	}
 }
+var nativePageNames = []string{"metrics", "quota"}
+
 func (a *nativeUI) header(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -60,18 +62,14 @@ func (a *nativeUI) header(c *ui.Context) {
 			state, color = "已连接", t.Success
 		}
 		ui.Text(c, "● "+state).FontSize(11).TextColor(color).Background(color.Alpha(0.1)).Padding(5, 9).Radius(12)
-		for _, page := range []string{"metrics", "quota"} {
-			label := "性能屏"
-			if page == "quota" {
-				label = "额度屏"
-			}
-			button := ui.Button(c.Key("page-"+page), label).FontSize(12).Padding(7, 10).Disabled(!a.snapshot.Connected || a.busy["page"])
-			if a.snapshot.Page == page && a.snapshot.Connected {
-				button.Background(t.Accent.Alpha(0.15)).TextColor(t.Accent)
-			}
-			button.OnClick(func() {
-				a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify("切页指令已发送") })
-			})
+		pageIndex := 0
+		if a.snapshot.Page == "quota" {
+			pageIndex = 1
+		}
+		seg := ui.Segmented(c, &pageIndex, "性能屏", "额度屏").FontSize(12).Disabled(!a.snapshot.Connected || a.busy["page"])
+		if seg.Changed() {
+			page := nativePageNames[pageIndex]
+			a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify("切页指令已发送") })
 		}
 		screenLabel := "息屏"
 		if !a.snapshot.ScreenOn {
