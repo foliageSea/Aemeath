@@ -86,6 +86,8 @@ func (a *nativeUI) sidebar(c *ui.Context) {
 			count = fmt.Sprint(n)
 		}
 		a.sidebarItem(c, "nav-subscriptions", "订阅", sidebarSubscriptions, count)
+		ui.Text(c, "系统").FontSize(11).TextColor(t.TextMuted).Padding(15, 7, 5)
+		a.sidebarItem(c, "nav-settings", "设置", sidebarSettings, "")
 		ui.Text(c, "硬件").FontSize(11).TextColor(t.TextMuted).Padding(15, 7, 5)
 		values := a.sidebarValues()
 		icons := []*ui.SVG{sidebarCPU, sidebarMemory, sidebarGPU, sidebarDisk, sidebarNetwork}
@@ -96,8 +98,6 @@ func (a *nativeUI) sidebar(c *ui.Context) {
 				ui.Text(c, values[i]).FontSize(12).TextColor(t.TextMuted).SingleLine()
 			})
 		}
-		ui.Text(c, "系统").FontSize(11).TextColor(t.TextMuted).Padding(15, 7, 5)
-		a.sidebarItem(c, "nav-settings", "设置", sidebarSettings, "")
 		ui.Box(c).Grow(1)
 		host, detail := "本机", ""
 		if m := a.snapshot.Metrics; m != nil {
