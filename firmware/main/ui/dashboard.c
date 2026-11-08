@@ -123,10 +123,10 @@ static void build_header(lv_obj_t *scr)
 static void build_charts(lv_obj_t *scr)
 {
     lv_obj_t *c = card(scr, 8, 228, 300, 124);
-    lv_obj_t *t = label(c, &lv_font_montserrat_12, C_DIM, "LOAD 60s   ");
+    lv_obj_t *t = label(c, &lv_font_montserrat_12, C_DIM, "LOAD 60s");
     lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, -4);
     lv_obj_t *lc = label(c, &lv_font_montserrat_12, C_CPU, LV_SYMBOL_STOP " CPU");
-    lv_obj_align_to(lc, t, LV_ALIGN_OUT_RIGHT_MID, 0, 0);
+    lv_obj_align_to(lc, t, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
     lv_obj_t *lg = label(c, &lv_font_montserrat_12, C_GPU, LV_SYMBOL_STOP " GPU");
     lv_obj_align_to(lg, lc, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
