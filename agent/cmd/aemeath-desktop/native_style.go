@@ -200,16 +200,27 @@ func (a *nativeUI) sparkline(c *ui.Context, index int, color ui.Color) {
 		point := func(s nativeSample) (float32, float32) {
 			return r.X + 4 + (r.W-8)*float32(s.ts-first)/float32(max(int64(1), last-first)), r.Y + r.H - 4 - (r.H-8)*float32(math.Max(0, math.Min(1, s.values[index]/ceiling)))
 		}
+		segment := make([][2]float32, 0, len(samples))
+		flush := func() {
+			if len(segment) == 1 {
+				pt := segment[0]
+				p.Fill(ui.Rect{X: pt[0] - 0.9, Y: pt[1] - 0.9, W: 1.8, H: 1.8}, color, 0.9)
+			} else if len(segment) > 1 {
+				p.StrokePolyline(segment, 1.8, color)
+			}
+			segment = segment[:0]
+		}
 		for i, s := range samples {
+			if i > 0 && s.ts-samples[i-1].ts > 2 {
+				flush()
+			}
 			if math.IsNaN(s.values[index]) || math.IsInf(s.values[index], 0) {
+				flush()
 				continue
 			}
 			x, y := point(s)
-			p.Line(x, y, x, y+1.5, 2.5, color)
-			if i > 0 && s.ts-samples[i-1].ts <= 2 && !math.IsNaN(samples[i-1].values[index]) && !math.IsInf(samples[i-1].values[index], 0) {
-				px, py := point(samples[i-1])
-				p.Line(px, py, x, y, 1.8, color)
-			}
+			segment = append(segment, [2]float32{x, y})
 		}
+		flush()
 	})
 }
