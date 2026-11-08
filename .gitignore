@@ -7,5 +7,7 @@ firmware/sdkconfig.old
 # Go
 agent/aemeath-agent
 agent/*.exe
+agent/build/
+agent/.mygo/
 
 .DS_Store

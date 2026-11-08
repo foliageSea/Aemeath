@@ -4,6 +4,7 @@
 #include <sys/time.h>
 
 #include "cJSON.h"
+#include "dashboard.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -51,11 +52,23 @@ bool metrics_ingest(const char *json, size_t len)
     }
     const cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
     if (cJSON_IsString(type)) {
+        bool accepted = true;
         if (strcmp(type->valuestring, "quota") == 0) {
             quota_ingest(root);
+        } else if (strcmp(type->valuestring, "display") == 0) {
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(root, "v");
+            const cJSON *page = cJSON_GetObjectItemCaseSensitive(root, "page");
+            accepted = false;
+            if (cJSON_IsNumber(v) && v->valuedouble == 1 && cJSON_IsString(page)) {
+                if (strcmp(page->valuestring, "metrics") == 0) {
+                    accepted = dashboard_show_page(DASHBOARD_PAGE_METRICS);
+                } else if (strcmp(page->valuestring, "quota") == 0) {
+                    accepted = dashboard_show_page(DASHBOARD_PAGE_QUOTA);
+                }
+            }
         }
         cJSON_Delete(root);
-        return true;
+        return accepted;
     }
     metrics_t m;
     memset(&m, 0, sizeof(m));

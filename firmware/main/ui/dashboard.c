@@ -403,6 +403,24 @@ static void update_dots(void)
     }
 }
 
+bool dashboard_show_page(dashboard_page_t page)
+{
+    if (page != DASHBOARD_PAGE_METRICS && page != DASHBOARD_PAGE_QUOTA) {
+        return false;
+    }
+    if (!lvgl_port_lock(0)) {
+        return false;
+    }
+    bool ready = s_tiles != NULL;
+    if (ready) {
+        // Use the same tileview as touch gestures; do not rebuild either page.
+        lv_tileview_set_tile_by_index(s_tiles, (uint32_t)page, 0, LV_ANIM_OFF);
+        update_dots();
+    }
+    lvgl_port_unlock();
+    return ready;
+}
+
 static lv_obj_t *page_tile(int col, lv_dir_t dir)
 {
     lv_obj_t *t = lv_tileview_add_tile(s_tiles, col, 0, dir);

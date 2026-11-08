@@ -73,30 +73,34 @@ func (c *Client) get(ctx context.Context, path string, v any) error {
 
 // Frame fetches quotas (required) and usage totals (best effort).
 func (c *Client) Frame(ctx context.Context) (*proto.QuotaFrame, error) {
+	f, err := c.FrameAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return ForDevice(f), nil
+}
+
+// FrameAll preserves account identities and returns every account for desktop management.
+// Apply preferences before ForDevice to choose which accounts occupy the device slots.
+func (c *Client) FrameAll(ctx context.Context) (*proto.QuotaFrame, error) {
 	var q quotasResp
 	if err := c.get(ctx, "/v1/magpie/quotas", &q); err != nil {
 		return nil, err
 	}
 	f := &proto.QuotaFrame{V: 1, Type: "quota", TS: time.Now().Unix(), Accounts: []proto.QuotaAccount{}}
 	for _, a := range q.Data {
-		if len(f.Accounts) == maxAccounts {
-			break
-		}
 		acc := proto.QuotaAccount{
-			Name:    ascii(a.Name, maxName),
-			Plan:    ascii(a.Plan, maxName),
+			Name:    a.Name,
+			Plan:    a.Plan,
 			Kind:    a.Kind,
-			Balance: ascii(a.Balance, maxBalance),
+			Balance: a.Balance,
 			Windows: []proto.QuotaWindow{},
 		}
 		for _, w := range a.Windows {
 			if w.Unlimited {
 				continue
 			}
-			if len(acc.Windows) == maxWindows {
-				break
-			}
-			win := proto.QuotaWindow{Name: ascii(w.Name, maxName), Used: w.Used, Display: ascii(w.Display, maxDisplay)}
+			win := proto.QuotaWindow{Name: w.Name, Used: w.Used, Display: w.Display}
 			if t, err := time.Parse(time.RFC3339, w.ResetsAt); err == nil {
 				win.Reset = t.Unix()
 			}
@@ -113,6 +117,32 @@ func (c *Client) Frame(ctx context.Context) (*proto.QuotaFrame, error) {
 		}
 	}
 	return f, nil
+}
+
+// ForDevice returns a copy fitted to firmware buffers, without changing the source.
+func ForDevice(f *proto.QuotaFrame) *proto.QuotaFrame {
+	if f == nil {
+		return nil
+	}
+	out := *f
+	out.Accounts = make([]proto.QuotaAccount, 0, min(len(f.Accounts), maxAccounts))
+	for _, a := range f.Accounts {
+		if len(out.Accounts) == maxAccounts {
+			break
+		}
+		a.Name, a.Plan, a.Balance = ascii(a.Name, maxName), ascii(a.Plan, maxName), ascii(a.Balance, maxBalance)
+		windows := make([]proto.QuotaWindow, 0, min(len(a.Windows), maxWindows))
+		for _, w := range a.Windows {
+			if len(windows) == maxWindows {
+				break
+			}
+			w.Name, w.Display = ascii(w.Name, maxName), ascii(w.Display, maxDisplay)
+			windows = append(windows, w)
+		}
+		a.Windows = windows
+		out.Accounts = append(out.Accounts, a)
+	}
+	return &out
 }
 
 // ascii folds text to what the device font can render.

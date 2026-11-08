@@ -189,18 +189,23 @@ static void rebuild(const quota_t *q)
 {
     lv_obj_clean(s_list);
     s_nrows = 0;
-    // Keep balances above subscriptions, matching the Magpie quota page.
-    for (int pass = 0; pass < 2; pass++) {
-        for (int i = 0; i < q->n; i++) {
-            if (q->accounts[i].is_balance != (pass == 0)) continue;
-            add_account(&q->accounts[i], s_accents[i % (sizeof(s_accents) / sizeof(s_accents[0]))]);
-        }
+    // Preserve the agent-provided account order, including balances.
+    for (int i = 0; i < q->n; i++) {
+        add_account(&q->accounts[i], s_accents[i % (sizeof(s_accents) / sizeof(s_accents[0]))]);
     }
     if (q->has_usage) {
         lv_label_set_text_fmt(s_usage, "Today $%.2f  %lld calls   |   30d $%.0f  %lld calls",
                               q->cost_today, (long long)q->calls_today, q->cost_30d, (long long)q->calls_30d);
+    } else {
+        lv_label_set_text(s_usage, "Today --   |   30d --");
     }
-    lv_obj_add_flag(s_empty, LV_OBJ_FLAG_HIDDEN);
+    if (q->n == 0) {
+        lv_label_set_text(s_empty, "No quota accounts reported by the agent");
+        lv_obj_center(s_empty);
+        lv_obj_remove_flag(s_empty, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_empty, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 #define NVS_NS      "aemeath_ui"
