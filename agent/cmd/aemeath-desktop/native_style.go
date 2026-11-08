@@ -70,7 +70,7 @@ func (a *nativeUI) header(c *ui.Context) {
 				button.Background(t.Accent.Alpha(0.15)).TextColor(t.Accent)
 			}
 			button.OnClick(func() {
-				a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notice = "切页指令已发送" })
+				a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify("切页指令已发送") })
 			})
 		}
 	})

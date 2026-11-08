@@ -20,20 +20,21 @@ type nativeService interface {
 }
 
 type nativeUI struct {
-	service    nativeService
-	snapshot   desktop.State
-	draft      desktop.Settings
-	page       string
-	notice     string
-	dirty      bool
-	revision   int
-	busy       map[string]bool
-	update     func(func()) // Host must assign win.Update before displaying the view.
-	login      bool
-	loginRead  func() bool
-	loginWrite func(bool) error
-	history    []nativeSample
-	details    bool
+	service       nativeService
+	snapshot      desktop.State
+	draft         desktop.Settings
+	page          string
+	notice        string
+	noticePending bool
+	dirty         bool
+	revision      int
+	busy          map[string]bool
+	update        func(func()) // Host must assign win.Update before displaying the view.
+	login         bool
+	loginRead     func() bool
+	loginWrite    func(bool) error
+	history       []nativeSample
+	details       bool
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
@@ -54,13 +55,18 @@ func (a *nativeUI) refresh() {
 		a.login = a.loginRead()
 	}
 }
+func (a *nativeUI) notify(message string) {
+	a.notice = message
+	a.noticePending = true
+}
+
 func (a *nativeUI) run(key string, work func() error, done func()) {
 	if a.busy[key] {
 		return
 	}
 	dispatch := a.update
 	if dispatch == nil {
-		a.notice = "窗口尚未就绪，请稍后重试。"
+		a.notify("窗口尚未就绪，请稍后重试。")
 		return
 	}
 	a.busy[key] = true
@@ -69,9 +75,9 @@ func (a *nativeUI) run(key string, work func() error, done func()) {
 		dispatch(func() {
 			a.busy[key] = false
 			if err != nil {
-				a.notice = "操作失败，修改已保留：" + err.Error()
+				a.notify("操作失败，修改已保留：" + err.Error())
 			} else {
-				a.notice = "操作已完成。"
+				a.notify("操作已完成。")
 				if done != nil {
 					done()
 				}
@@ -87,7 +93,7 @@ func (a *nativeUI) save() {
 		if a.revision == revision {
 			a.dirty = false
 		}
-		a.notice = "设置已保存。"
+		a.notify("设置已保存。")
 	})
 }
 func (a *nativeUI) subscriptions() []desktop.Subscription {
@@ -126,20 +132,21 @@ func (a *nativeUI) changeSubscription(name string, move int, toggle bool) {
 			// Ordering must not implicitly persist unfinished address/gateway edits.
 			settings := copySettings(a.snapshot.Settings)
 			settings.Subscriptions = append([]desktop.Subscription{}, list...)
-			a.run("save", func() error { return a.service.SaveSettings(settings) }, func() { a.notice = "订阅顺序与显示状态已保存。" })
+			a.run("save", func() error { return a.service.SaveSettings(settings) }, func() { a.notify("订阅顺序与显示状态已保存。") })
 			return
 		}
 	}
 }
 func (a *nativeUI) view(c *ui.Context) {
 	t := c.Theme()
+	if a.noticePending {
+		c.Toast(a.notice)
+		a.noticePending = false
+	}
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Background(t.Background).Children(func() {
 		a.sidebar(c)
 		ui.Column(c.Key("main")).Grow(1).MinWidth(0).Padding(20).Gap(14).Children(func() {
 			a.header(c)
-			if a.notice != "" {
-				ui.Text(c, a.notice).FontSize(12).TextColor(t.TextMuted).Wrap()
-			}
 			if a.snapshot.Error != "" {
 				ui.Button(c.Key("connection-details"), "连接异常 · 查看详情").TextColor(t.Warning).OnClick(func() { a.details = !a.details })
 				if a.details {
