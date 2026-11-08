@@ -20,14 +20,13 @@ func main() {
 			if math.Hypot(cx, cy) > 170 {
 				continue
 			}
-			shade := uint8(19 + 11*(1-fy/size))
-			col := color.NRGBA{R: shade - 6, G: shade + 9, B: shade + 8, A: 255}
+			col := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 			for i := 1; i < len(pulse); i++ {
 				a, b := pulse[i-1], pulse[i]
 				dx, dy := b[0]-a[0], b[1]-a[1]
 				t := math.Max(0, math.Min(1, ((fx-a[0])*dx+(fy-a[1])*dy)/(dx*dx+dy*dy)))
 				if math.Hypot(fx-a[0]-t*dx, fy-a[1]-t*dy) < 27 {
-					col = color.NRGBA{R: 109, G: 231, B: 197, A: 255}
+					col = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
 					break
 				}
 			}
