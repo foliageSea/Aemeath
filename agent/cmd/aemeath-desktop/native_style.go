@@ -46,6 +46,11 @@ func (a *nativeUI) recordMetrics() {
 }
 var nativePageNames = []string{"metrics", "quota"}
 
+var (
+	screenMonitorIcon    = sidebarSVG("<rect x='2' y='3' width='20' height='14' rx='2'/><path d='M8 21h8M12 17v4'/>")
+	screenMonitorOffIcon = sidebarSVG("<path d='M10.5 3H20a2 2 0 0 1 2 2v8.5'/><path d='M4.7 3.3A2 2 0 0 0 2 5v10a2 2 0 0 0 2 2h13'/><path d='M8 21h8M12 17v4'/><path d='M2 2l20 20'/>")
+)
+
 func (a *nativeUI) header(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -71,11 +76,22 @@ func (a *nativeUI) header(c *ui.Context) {
 			page := nativePageNames[pageIndex]
 			a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify("切页指令已发送") })
 		}
-		screenLabel := "息屏"
+		screenLabel, screenIcon := "息屏", screenMonitorIcon
 		if !a.snapshot.ScreenOn {
-			screenLabel = "亮屏"
+			screenLabel, screenIcon = "亮屏", screenMonitorOffIcon
 		}
-		ui.Button(c.Key("screen-toggle"), screenLabel).FontSize(12).Padding(7, 10).Disabled(!a.snapshot.Connected || !a.snapshot.ScreenKnown || a.busy["screen"]).OnClick(func() {
+		disabled := !a.snapshot.Connected || !a.snapshot.ScreenKnown || a.busy["screen"]
+		toggle := ui.ButtonBase(c.Key("screen-toggle")).Label(screenLabel).Tooltip(screenLabel).Size(34, 34).Radius(10).Border(1, t.Border).Background(t.Surface).Disabled(disabled)
+		if !disabled && toggle.Hovered() {
+			toggle.Background(t.SurfaceHover)
+		}
+		iconColor := t.TextMuted
+		if disabled {
+			iconColor = t.TextMuted.Alpha(0.5)
+		}
+		toggle.Children(func() {
+			ui.Icon(c, screenIcon).FontSize(17).TextColor(iconColor)
+		}).OnClick(func() {
 			on, brightness := !a.snapshot.ScreenOn, a.snapshot.Brightness
 			a.run("screen", func() error { return a.service.SetScreen(on, brightness) }, func() { a.notify("屏幕指令已发送") })
 		})
