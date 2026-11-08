@@ -26,6 +26,11 @@
 #define C_HOT       0xF85149
 
 #define HIST_POINTS     60
+#define CARD_OPA        LV_OPA_70  // lets the background show through
+
+// tools/make_bg.sh output, embedded via EMBED_FILES
+extern const uint8_t bg_480_start[] asm("_binary_bg_480_rgb565_start");
+extern const uint8_t bg_480_end[] asm("_binary_bg_480_rgb565_end");
 #define AGENT_STALE_US  (3 * 1000 * 1000)
 
 typedef struct {
@@ -49,7 +54,7 @@ static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h)
     lv_obj_set_pos(c, x, y);
     lv_obj_set_size(c, w, h);
     lv_obj_set_style_bg_color(c, lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(c, CARD_OPA, 0);
     lv_obj_set_style_radius(c, 14, 0);
     lv_obj_set_style_border_color(c, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(c, 1, 0);
@@ -461,6 +466,21 @@ void dashboard_create(void)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    static lv_image_dsc_t bg = {
+        .header = {
+            .magic = LV_IMAGE_HEADER_MAGIC,
+            .cf = LV_COLOR_FORMAT_RGB565,
+            .w = 480,
+            .h = 480,
+            .stride = 480 * 2,
+        },
+    };
+    bg.data = bg_480_start;
+    bg.data_size = bg_480_end - bg_480_start;
+    lv_obj_t *bg_img = lv_image_create(scr);
+    lv_image_set_src(bg_img, &bg);
+    lv_obj_center(bg_img);
 
     // Swipe left/right between the PC monitor and the quota page.
     s_tiles = lv_tileview_create(scr);

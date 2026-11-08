@@ -141,7 +141,7 @@ static void add_account(const quota_account_t *a, uint32_t accent)
     lv_obj_remove_style_all(card);
     lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_70, 0);
     lv_obj_set_style_radius(card, 14, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(card, 1, 0);
