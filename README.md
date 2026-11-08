@@ -47,6 +47,8 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags -H=windowsgui -o aemea
 
 屏幕左右滑动切换到第二页「AI QUOTA」，显示本机 [Magpie](http://127.0.0.1:3425) 网关聚合的各订阅账户额度：
 每个窗口一条进度条（≥75% 黄、≥90% 红）、用量 / 计数、重置倒计时，顶部是今日与 30 天花费和调用次数。
+余额账户（如 jinpai）置于订阅账户前，单独显示名称和带币种的余额（如 `$109.12`）；余额未知时显示 `--`。
+余额不参与 USED / LEFT 百分比切换，也不显示进度条或重置倒计时。
 
 - agent 每 30 秒读取 `GET /v1/magpie/quotas` 与 `/v1/magpie/usage` 并转发（不会转发账户邮箱）。
 - `-magpie http://host:port` 指定网关地址，`-magpie ""` 关闭；网关不可用时只记日志，不影响性能数据。

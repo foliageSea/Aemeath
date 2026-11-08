@@ -55,7 +55,7 @@ type GPU struct {
 func F(v float64) *float64 { return &v }
 func U(v uint64) *uint64   { return &v }
 
-// QuotaFrame carries subscription quotas read from the Magpie gateway.
+// QuotaFrame carries quotas and balances read from the Magpie gateway.
 type QuotaFrame struct {
 	V        int            `json:"v"`
 	Type     string         `json:"type"` // "quota"
@@ -67,6 +67,8 @@ type QuotaFrame struct {
 type QuotaAccount struct {
 	Name    string        `json:"name"`
 	Plan    string        `json:"plan,omitempty"`
+	Kind    string        `json:"kind,omitempty"`
+	Balance string        `json:"balance,omitempty"`
 	Windows []QuotaWindow `json:"windows"`
 }
 

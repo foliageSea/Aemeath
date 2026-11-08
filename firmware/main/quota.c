@@ -44,6 +44,10 @@ void quota_ingest(const cJSON *root)
         quota_account_t *a = &q.accounts[q.n++];
         copy_str(acc, "name", a->name, sizeof(a->name));
         copy_str(acc, "plan", a->plan, sizeof(a->plan));
+        char kind[16];
+        copy_str(acc, "kind", kind, sizeof(kind));
+        a->is_balance = strcmp(kind, "balance") == 0;
+        copy_str(acc, "balance", a->balance, sizeof(a->balance));
         const cJSON *w;
         cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(acc, "windows")) {
             if (a->n == QUOTA_MAX_WINDOWS) break;

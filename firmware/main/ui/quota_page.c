@@ -162,9 +162,20 @@ static void add_account(const quota_account_t *a, uint32_t accent)
     lv_obj_align(dot, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_t *name = label(head, &lv_font_montserrat_20, C_TEXT, a->name);
     lv_obj_align(name, LV_ALIGN_LEFT_MID, 18, 0);
-    if (a->plan[0]) {
-        lv_obj_t *plan = label(head, &lv_font_montserrat_12, C_DIM, a->plan);
+    if (a->is_balance) {
+        lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_width(name, 340);
+    }
+    if (a->is_balance || a->plan[0]) {
+        lv_obj_t *plan = label(head, &lv_font_montserrat_12, C_DIM, a->is_balance ? "BALANCE" : a->plan);
         lv_obj_align(plan, LV_ALIGN_RIGHT_MID, 0, 0);
+    }
+    if (a->is_balance) {
+        lv_obj_t *amount = label(card, &lv_font_montserrat_28, C_TEXT,
+                                 a->balance[0] ? a->balance : "--");
+        lv_obj_set_width(amount, LV_PCT(100));
+        lv_label_set_long_mode(amount, LV_LABEL_LONG_MODE_WRAP);
+        return;
     }
     for (int i = 0; i < a->n; i++) {
         add_window(card, &a->windows[i], accent);
@@ -178,8 +189,12 @@ static void rebuild(const quota_t *q)
 {
     lv_obj_clean(s_list);
     s_nrows = 0;
-    for (int i = 0; i < q->n; i++) {
-        add_account(&q->accounts[i], s_accents[i % (sizeof(s_accents) / sizeof(s_accents[0]))]);
+    // Keep balances above subscriptions, matching the Magpie quota page.
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < q->n; i++) {
+            if (q->accounts[i].is_balance != (pass == 0)) continue;
+            add_account(&q->accounts[i], s_accents[i % (sizeof(s_accents) / sizeof(s_accents[0]))]);
+        }
     }
     if (q->has_usage) {
         lv_label_set_text_fmt(s_usage, "Today $%.2f  %lld calls   |   30d $%.0f  %lld calls",

@@ -1,4 +1,4 @@
-// Package magpie reads subscription quotas from the local Magpie gateway.
+// Package magpie reads quotas and balances from the local Magpie gateway.
 package magpie
 
 import (
@@ -18,6 +18,7 @@ const (
 	maxWindows  = 8
 	maxName     = 31
 	maxDisplay  = 15
+	maxBalance  = 63 // firmware balance buffer includes a trailing NUL
 )
 
 type Client struct {
@@ -33,6 +34,8 @@ type quotasResp struct {
 	Data []struct {
 		Name    string `json:"name"`
 		Plan    string `json:"plan"`
+		Kind    string `json:"kind"`
+		Balance string `json:"balance"`
 		Windows []struct {
 			Name      string  `json:"name"`
 			Used      float64 `json:"used"`
@@ -79,7 +82,13 @@ func (c *Client) Frame(ctx context.Context) (*proto.QuotaFrame, error) {
 		if len(f.Accounts) == maxAccounts {
 			break
 		}
-		acc := proto.QuotaAccount{Name: ascii(a.Name, maxName), Plan: ascii(a.Plan, maxName), Windows: []proto.QuotaWindow{}}
+		acc := proto.QuotaAccount{
+			Name:    ascii(a.Name, maxName),
+			Plan:    ascii(a.Plan, maxName),
+			Kind:    a.Kind,
+			Balance: ascii(a.Balance, maxBalance),
+			Windows: []proto.QuotaWindow{},
+		}
 		for _, w := range a.Windows {
 			if w.Unlimited {
 				continue

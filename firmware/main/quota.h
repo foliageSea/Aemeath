@@ -19,6 +19,8 @@ typedef struct {
 typedef struct {
     char name[32];
     char plan[32];
+    bool is_balance;
+    char balance[64];  // formatted amount from Magpie, including currency
     int n;
     quota_window_t windows[QUOTA_MAX_WINDOWS];
 } quota_account_t;
