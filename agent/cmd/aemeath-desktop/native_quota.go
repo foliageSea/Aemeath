@@ -81,6 +81,12 @@ func moveSubscriptions(list []desktop.Subscription, rows []int, to int) []deskto
 	}
 	return out
 }
+
+var (
+	quotaEyeIcon    = sidebarSVG("<path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z'/><circle cx='12' cy='12' r='3'/>")
+	quotaEyeOffIcon = sidebarSVG("<path d='M3 3l18 18'/><path d='M10.58 10.58a2 2 0 0 0 2.83 2.83'/><path d='M9.88 4.24A9.12 9.12 0 0 1 12 4c7 0 10 7 10 7a13.3 13.3 0 0 1-3.17 4.1M6.61 6.61A13.5 13.5 0 0 0 2 11s3 7 10 7a9.26 9.26 0 0 0 4-.925'/>")
+)
+
 func quotaUsageText(u *proto.QuotaUsage) string {
 	return fmt.Sprintf("今日 %d 次 / %.4f USD · 近30天 %d 次 / %.4f USD", u.CallsToday, u.CostToday, u.Calls30d, u.Cost30d)
 }
@@ -124,11 +130,13 @@ func (a *nativeUI) quotaCard(c *ui.Context, sub desktop.Subscription, q *proto.Q
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.ButtonBase(c.Key("drag-handle")).Label("拖动 "+sub.Name).Cursor(ui.CursorGrab).Size(24, 30).Children(func() { ui.Text(c, "⠿").FontSize(21).TextColor(t.TextMuted) })
 			ui.Text(c, sub.Name).Bold().FontSize(17).Grow(1).MinWidth(0).Wrap()
-			label := "隐藏"
+			label, icon := "隐藏", quotaEyeOffIcon
 			if sub.Hidden {
-				label = "恢复显示"
+				label, icon = "恢复显示", quotaEyeIcon
 			}
-			ui.Button(c.Key("visibility"), label).Label(label + " " + sub.Name).OnClick(func() { a.toggleSubscription(sub.Name) })
+			ui.Button(c.Key("visibility"), "").Label(label+" "+sub.Name).Tooltip(label).Size(34, 34).Children(func() {
+				ui.Icon(c, icon).FontSize(17).TextColor(t.TextMuted)
+			}).OnClick(func() { a.toggleSubscription(sub.Name) })
 		})
 		if sub.Hidden {
 			ui.Text(c, "已隐藏").FontSize(12).TextColor(t.TextMuted)
