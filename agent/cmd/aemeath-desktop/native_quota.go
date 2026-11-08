@@ -133,7 +133,9 @@ func (a *nativeUI) quotaListView(c *ui.Context) {
 	a.quotaList.Reorder = a.reorderSubscriptions
 	// Rows supplies the current scoped context even when virtual rows are built
 	// later during layout; do not retain the outer build context in a row callback.
-	ui.List(c.Key("subscription-list"), &a.quotaList, len(list)).Grow(1).MinHeight(0).Gap(12).Label("订阅列表").Rows(func(row ui.ListRow) {
+	// Right padding keeps the overlay scrollbar clear of the visibility
+	// button at each card's trailing edge instead of covering it.
+	ui.List(c.Key("subscription-list"), &a.quotaList, len(list)).Grow(1).MinHeight(0).Padding(0, 14, 0, 0).Gap(12).Label("订阅列表").Rows(func(row ui.ListRow) {
 		a.quotaCard(row.Context, list[row.Index], a.snapshot.Quota)
 	})
 }
