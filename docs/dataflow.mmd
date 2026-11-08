@@ -1,0 +1,64 @@
+flowchart LR
+    subgraph PC["PC (macOS / Windows)"]
+        direction TB
+        subgraph SRC["Data sources"]
+            PS["gopsutil<br/>CPU · RAM · disk · net · uptime"]
+            MAC["macOS cgo IOKit<br/>IOHID PMU tdie* temps<br/>IOAccelerator GPU load"]
+            WIN["Windows<br/>LibreHardwareMonitor WMI<br/>NVML (NVIDIA)"]
+            MP[("Magpie gateway<br/>127.0.0.1:3425<br/>/v1/magpie/quotas<br/>/v1/magpie/usage")]
+        end
+        subgraph AG["aemeath-agent (Go)"]
+            COL["collect.Sample()<br/>every 1 s<br/>rates = Δcounters / Δt"]
+            MAG["magpie.Frame()<br/>every 30 s<br/>drop emails & unlimited<br/>ASCII-fold names"]
+            DISC["discover.Find()<br/>mDNS _aemeath._tcp<br/>→ aemeath.local fallback"]
+            LINK["link.Conn<br/>WebSocket client<br/>backoff 1→30 s"]
+        end
+        PS --> COL
+        MAC --> COL
+        WIN --> COL
+        MP -- HTTP GET --> MAG
+        COL -- "metrics frame (JSON)" --> LINK
+        MAG -- "quota frame (type=quota)" --> LINK
+        DISC -- "host:port" --> LINK
+    end
+
+    LINK == "Wi-Fi · ws://ip/ws<br/>JSON text frames" ==> WS
+
+    subgraph DEV["ESP32-S3-Touch-LCD-4B (ESP-IDF 6)"]
+        direction TB
+        subgraph NET["Network"]
+            WIFI["Wi-Fi STA<br/>creds in NVS"]
+            PORTAL["SoftAP Aemeath-XXXX<br/>captive DNS + setup page"]
+            MDNS["mDNS responder<br/>aemeath.local"]
+            WS["esp_http_server /ws"]
+        end
+        ING{"metrics_ingest()<br/>cJSON parse<br/>has type?"}
+        MST[("metrics_t<br/>mutex")]
+        QST[("quota_t<br/>mutex")]
+        CLK["settimeofday(ts)<br/>+ tz offset"]
+        subgraph UI["LVGL task (250 ms tick)"]
+            P1["Page 1 · PC monitor<br/>arcs · history chart · cores<br/>net / disk · clock"]
+            P2["Page 2 · AI QUOTA<br/>per-account bars<br/>USED/LEFT · reset countdown"]
+            OV["Wi-Fi setup overlay<br/>QR code"]
+        end
+        LCD["ST7701 480×480 RGB<br/>PSRAM double FB + bounce buffer"]
+        TOUCH["GT911 touch<br/>swipe · USED/LEFT tap"]
+        NVS[("NVS<br/>Wi-Fi creds · display mode")]
+
+        WS --> ING
+        ING -- "no type" --> MST
+        ING -- "type=quota" --> QST
+        ING --> CLK
+        MST -- snapshot --> P1
+        QST -- snapshot --> P2
+        CLK --> P1
+        WIFI -. state .-> OV
+        PORTAL -. state .-> OV
+        PORTAL -- save --> NVS
+        NVS -- boot --> WIFI
+        P2 <-- "toggle" --> NVS
+        UI --> LCD
+        TOUCH --> UI
+    end
+
+    MDNS -. "advertises _aemeath._tcp" .-> DISC
