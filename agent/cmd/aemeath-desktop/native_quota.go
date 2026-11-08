@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"aemeath/agent/internal/desktop"
@@ -90,6 +91,18 @@ var (
 func quotaUsageText(u *proto.QuotaUsage) string {
 	return fmt.Sprintf("今日 %d 次 / %.4f USD · 近30天 %d 次 / %.4f USD", u.CallsToday, u.CostToday, u.Calls30d, u.Cost30d)
 }
+
+// joinNonEmpty joins the non-empty parts with sep, dropping a trailing
+// separator when a part (such as an omitted balance or display string) is empty.
+func joinNonEmpty(sep string, parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, sep)
+}
 func (a *nativeUI) quotaListView(c *ui.Context) {
 	ui.Row(c).Gap(10).Children(func() {
 		ui.Button(c.Key("refresh-quota"), "刷新额度").Disabled(a.busy["quota"]).OnClick(func() { a.run("quota", a.service.RefreshQuotas, nil) })
@@ -155,9 +168,9 @@ func (a *nativeUI) quotaCard(c *ui.Context, sub desktop.Subscription, q *proto.Q
 				}
 				found = true
 				// Balance is already formatted in its own currency by the gateway.
-				ui.Text(c, account.Plan+" · "+account.Kind+" · "+account.Balance).Wrap()
+				ui.Text(c, joinNonEmpty(" · ", account.Plan, account.Kind, account.Balance)).Wrap()
 				for _, window := range account.Windows {
-					ui.Text(c, fmt.Sprintf("%s · %.1f%% · %s", window.Name, window.Used, window.Display)).Wrap()
+					ui.Text(c, joinNonEmpty(" · ", window.Name, fmt.Sprintf("%.1f%%", window.Used), window.Display)).Wrap()
 					nativeProgress(c, window.Used)
 					if window.Reset > 0 {
 						ui.Text(c, "重置于 "+nativeTime(window.Reset)).FontSize(12).TextColor(t.TextMuted)
