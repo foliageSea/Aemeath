@@ -19,6 +19,7 @@ type nativeFake struct {
 	state     desktop.State
 	saves     []desktop.Settings
 	pages     []string
+	screens   [][2]int // [on (0/1), brightness]
 	saveError error
 	gate      <-chan struct{}
 }
@@ -62,10 +63,21 @@ func (f *nativeFake) SetPage(page string) error {
 	f.state.Page = page
 	return nil
 }
+func (f *nativeFake) SetScreen(on bool, brightness int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	onInt := 0
+	if on {
+		onInt = 1
+	}
+	f.screens = append(f.screens, [2]int{onInt, brightness})
+	f.state.ScreenOn, f.state.Brightness = on, brightness
+	return nil
+}
 func (f *nativeFake) RefreshQuotas() error { return nil }
 func nativeTest(t *testing.T) (*nativeUI, *nativeFake, chan func(), *ui.Tester) {
 	t.Helper()
-	f := &nativeFake{state: desktop.State{Settings: desktop.Settings{Address: "saved.local", MagpieURL: "http://localhost:3425", Subscriptions: []desktop.Subscription{{Name: "A"}, {Name: "B"}, {Name: "C"}}}, Page: "metrics", Status: "stopped", Quota: &proto.QuotaFrame{TS: time.Now().Unix(), Accounts: []proto.QuotaAccount{{Name: "A"}, {Name: "B"}, {Name: "C"}}}}}
+	f := &nativeFake{state: desktop.State{Settings: desktop.Settings{Address: "saved.local", MagpieURL: "http://localhost:3425", Subscriptions: []desktop.Subscription{{Name: "A"}, {Name: "B"}, {Name: "C"}}}, Page: "metrics", ScreenOn: true, Brightness: 80, Status: "stopped", Quota: &proto.QuotaFrame{TS: time.Now().Unix(), Accounts: []proto.QuotaAccount{{Name: "A"}, {Name: "B"}, {Name: "C"}}}}}
 	a := nativeState(f)
 	a.loginRead = func() bool { return false }
 	a.loginWrite = func(bool) error { return nil }
@@ -195,6 +207,55 @@ func TestNativeOfflineControlsServiceAndPage(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.pages) != 1 || f.pages[0] != "quota" {
 		t.Fatal("page control sent incorrect command", f.pages)
+	}
+}
+
+func TestNativeScreenControl(t *testing.T) {
+	a, f, updates, tt := nativeTest(t)
+	nativeClick(t, tt, "息屏")
+	if len(f.screens) != 0 {
+		t.Fatal("offline screen control sent command")
+	}
+	f.mu.Lock()
+	f.state.Connected = true
+	f.mu.Unlock()
+	a.refresh()
+	tt.Frame()
+	nativeClick(t, tt, "息屏")
+	if len(f.screens) != 0 {
+		t.Fatal("screen control acted before the device reported its state")
+	}
+	f.mu.Lock()
+	f.state.ScreenKnown = true
+	f.mu.Unlock()
+	a.refresh()
+	tt.Frame()
+	// Header quick toggle: on -> off, label flips to the opposite action.
+	nativeClick(t, tt, "息屏")
+	nativeComplete(t, updates, tt)
+	f.mu.Lock()
+	if len(f.screens) != 1 || f.screens[0] != [2]int{0, 80} {
+		f.mu.Unlock()
+		t.Fatalf("header toggle sent incorrect command: %+v", f.screens)
+	}
+	f.mu.Unlock()
+	if a.snapshot.ScreenOn || !tt.HasText("亮屏") {
+		t.Fatal("header toggle did not turn the screen off")
+	}
+	// Flip back on so the header label ("息屏") no longer collides with the
+	// settings switch's static "亮屏" label once the settings page is open.
+	nativeClick(t, tt, "亮屏")
+	nativeComplete(t, updates, tt)
+	if !a.snapshot.ScreenOn {
+		t.Fatal("header toggle did not turn the screen back on")
+	}
+	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "亮屏") // the screen-on switch, labeled statically like the login switch
+	nativeComplete(t, updates, tt)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.screens) != 3 || f.screens[2] != [2]int{0, 80} {
+		t.Fatalf("settings switch sent incorrect command: %+v", f.screens)
 	}
 }
 

@@ -14,7 +14,12 @@ type State struct {
 	Quota      *proto.QuotaFrame `json:"quota"`
 	Settings   Settings          `json:"settings"`
 	Page       string            `json:"page"`
-	LastSent   int64             `json:"lastSent"`
+	// Screen state as last reported by the device; ScreenKnown is false until the
+	// connected device reports (ScreenOn/Brightness are then only placeholders).
+	ScreenOn    bool  `json:"screenOn"`
+	Brightness  int   `json:"brightness"`
+	ScreenKnown bool  `json:"screenKnown"`
+	LastSent    int64 `json:"lastSent"`
 }
 
 func copyPtr[T any](p *T) *T {

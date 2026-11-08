@@ -27,6 +27,7 @@ type fakeConn struct {
 	messages [][]byte
 	closed   atomic.Int32
 	fail     atomic.Bool
+	incoming chan []byte // nil: device never reports
 }
 
 func (c *fakeConn) Send(ctx context.Context, v any) error {
@@ -42,7 +43,20 @@ func (c *fakeConn) Send(ctx context.Context, v any) error {
 	c.mu.Unlock()
 	return err
 }
-func (c *fakeConn) Close() { c.closed.Add(1) }
+func (c *fakeConn) Close()                  { c.closed.Add(1) }
+func (c *fakeConn) Incoming() <-chan []byte { return c.incoming }
+func (c *fakeConn) hasAnyScreenCommand() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, b := range c.messages {
+		var v map[string]any
+		_ = json.Unmarshal(b, &v)
+		if v["type"] == "screen" {
+			return true
+		}
+	}
+	return false
+}
 func (c *fakeConn) hasCommand(page string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -50,6 +64,18 @@ func (c *fakeConn) hasCommand(page string) bool {
 		var v map[string]any
 		_ = json.Unmarshal(b, &v)
 		if v["type"] == "display" && v["page"] == page && v["v"] == float64(1) {
+			return true
+		}
+	}
+	return false
+}
+func (c *fakeConn) hasScreenCommand(on bool, brightness int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, b := range c.messages {
+		var v map[string]any
+		_ = json.Unmarshal(b, &v)
+		if v["type"] == "screen" && v["on"] == on && v["brightness"] == float64(brightness) && v["v"] == float64(1) {
 			return true
 		}
 	}
@@ -159,6 +185,9 @@ func TestOfflineSamplingRefreshAndSnapshotOwnership(t *testing.T) {
 	if err := s.SetPage("quota"); !errors.Is(err, ErrOffline) {
 		t.Fatalf("offline error = %v", err)
 	}
+	if err := s.SetScreen(false, 30); !errors.Is(err, ErrOffline) {
+		t.Fatalf("offline screen error = %v", err)
+	}
 	if err := s.RefreshQuotas(); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +217,7 @@ func TestLifecyclePageReconnectAndStop(t *testing.T) {
 	deps.close = func() { closeCount.Add(1) }
 	deps.dial = func(context.Context, string) (connection, error) {
 		dials.Add(1)
-		c := &fakeConn{}
+		c := &fakeConn{incoming: make(chan []byte, 4)}
 		connections <- c
 		return c, nil
 	}
@@ -201,6 +230,21 @@ func TestLifecyclePageReconnectAndStop(t *testing.T) {
 	}
 	first := <-connections
 	eventually(t, func() bool { return s.Snapshot().Connected })
+	if s.Snapshot().ScreenKnown {
+		t.Fatal("screen state known before the device reported")
+	}
+	// The device owns screen state: its report is adopted, nothing is pushed.
+	first.incoming <- []byte(`{"v":1,"type":"screen_state","on":false,"brightness":42}`)
+	eventually(t, func() bool {
+		st := s.Snapshot()
+		return st.ScreenKnown && !st.ScreenOn && st.Brightness == 42
+	})
+	first.incoming <- []byte(`{"v":1,"type":"screen_state","on":true}`) // malformed: ignored
+	first.incoming <- []byte(`{"v":1,"type":"screen_state","on":true,"brightness":250}`)
+	eventually(t, func() bool { st := s.Snapshot(); return st.ScreenOn && st.Brightness == 100 })
+	if first.hasAnyScreenCommand() {
+		t.Fatal("connect pushed screen state over the device's own")
+	}
 	if err := s.SetPage("quota"); err != nil {
 		t.Fatal(err)
 	}
@@ -210,10 +254,27 @@ func TestLifecyclePageReconnectAndStop(t *testing.T) {
 	if err := s.SetPage("invalid"); err == nil {
 		t.Fatal("invalid page accepted")
 	}
+	if err := s.SetScreen(false, 30); err != nil {
+		t.Fatal(err)
+	}
+	if !first.hasScreenCommand(false, 30) || s.Snapshot().ScreenOn || s.Snapshot().Brightness != 30 {
+		t.Fatal("screen command not sent")
+	}
+	if err := s.SetScreen(true, 101); err == nil {
+		t.Fatal("invalid brightness accepted")
+	}
 	first.fail.Store(true)
 	eventually(t, func() bool { return dials.Load() >= 2 && s.Snapshot().Connected })
 	second := <-connections
 	eventually(t, func() bool { return second.hasCommand("quota") })
+	if s.Snapshot().ScreenKnown || second.hasAnyScreenCommand() {
+		t.Fatal("reconnect kept stale screen state or overrode the device")
+	}
+	// A closed incoming stream means the device went away: reconnect.
+	close(second.incoming)
+	eventually(t, func() bool { return dials.Load() >= 3 && s.Snapshot().Connected })
+	third := <-connections
+	eventually(t, func() bool { return third.hasCommand("quota") })
 	if err := s.Stop(); err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -24,6 +25,9 @@ var (
 
 type connection interface {
 	Send(context.Context, any) error
+	// Incoming yields device frames and closes when the connection ends.
+	// A nil channel means the device never reports.
+	Incoming() <-chan []byte
 	Close()
 }
 type dependencies struct {
@@ -100,7 +104,7 @@ func New(configPath string) (*Service, error) {
 
 func newService(path string, settings Settings, deps dependencies) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics"}, updates: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1)}
+	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1)}
 	s.wg.Add(2)
 	go s.sampleLoop()
 	go s.quotaLoop()
@@ -162,6 +166,7 @@ func (s *Service) stop() {
 	s.runCancel, s.runDone = nil, nil
 	s.state.Running, s.state.Connected, s.state.Status = false, false, "stopped"
 	s.state.Target, s.state.Error = "", ""
+	s.state.ScreenKnown = false
 	s.mu.Unlock()
 }
 
@@ -231,6 +236,46 @@ func (s *Service) SetPage(page string) error {
 	s.mu.Lock()
 	if s.conn == conn {
 		s.state.Page, s.state.LastSent = page, time.Now().Unix()
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+type screenFrame struct {
+	V          int    `json:"v"`
+	Type       string `json:"type"`
+	On         bool   `json:"on"`
+	Brightness int    `json:"brightness"`
+}
+
+// SetScreen sends a backlight command (screen on/off and brightness 0..100);
+// it changes ScreenOn/Brightness only after a successful send.
+func (s *Service) SetScreen(on bool, brightness int) error {
+	if brightness < 0 || brightness > 100 {
+		return fmt.Errorf("invalid brightness %d: expected 0..100", brightness)
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrClosed
+	}
+	conn, ctx := s.conn, s.connCtx
+	if conn == nil || !s.state.Connected {
+		s.mu.Unlock()
+		return ErrOffline
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	defer s.wg.Done()
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	if err := conn.Send(ctx, screenFrame{1, "screen", on, brightness}); err != nil {
+		s.failConnection(conn, err)
+		return fmt.Errorf("set screen: %w", err)
+	}
+	s.mu.Lock()
+	if s.conn == conn {
+		s.state.ScreenOn, s.state.Brightness, s.state.LastSent = on, brightness, time.Now().Unix()
 	}
 	s.mu.Unlock()
 	return nil
@@ -386,7 +431,7 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 		cancel()
 		s.mu.Lock()
 		s.conn, s.connCtx, s.attemptCancel = nil, nil, nil
-		s.state.Connected = false
+		s.state.Connected, s.state.ScreenKnown = false, false
 		if err != nil && ctx.Err() == nil {
 			s.state.Error, s.state.Status = err.Error(), "reconnecting"
 		}
@@ -412,12 +457,14 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 
 func (s *Service) forward(ctx context.Context, conn connection) error {
 	s.sendMu.Lock()
-	page := s.Snapshot().Page
-	err := conn.Send(ctx, displayFrame{1, "display", page})
+	// Screen state is owned by the device (persisted there and reported on
+	// connect), so only the page is pushed here.
+	err := conn.Send(ctx, displayFrame{1, "display", s.Snapshot().Page})
 	s.sendMu.Unlock()
 	if err != nil {
 		return err
 	}
+	incoming := conn.Incoming()
 	var lastQuota *proto.QuotaFrame
 	for {
 		state := s.Snapshot()
@@ -448,10 +495,48 @@ func (s *Service) forward(ctx context.Context, conn connection) error {
 			}
 			s.mu.Unlock()
 		}
+		if err := s.waitForUpdate(ctx, conn, incoming); err != nil {
+			return err
+		}
+	}
+}
+
+// waitForUpdate blocks until there is something new to push, applying device
+// reports as they arrive (they do not require sending anything back).
+func (s *Service) waitForUpdate(ctx context.Context, conn connection, incoming <-chan []byte) error {
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-s.updates:
+			return nil
+		case msg, ok := <-incoming:
+			if !ok {
+				return errors.New("device closed the connection")
+			}
+			s.handleDeviceFrame(conn, msg)
 		}
 	}
+}
+
+type deviceFrame struct {
+	V          int    `json:"v"`
+	Type       string `json:"type"`
+	On         *bool  `json:"on"`
+	Brightness *int   `json:"brightness"`
+}
+
+// handleDeviceFrame applies reports from the device, which is the source of truth
+// for screen power and brightness.
+func (s *Service) handleDeviceFrame(conn connection, msg []byte) {
+	var f deviceFrame
+	if json.Unmarshal(msg, &f) != nil || f.V != 1 || f.Type != "screen_state" || f.On == nil || f.Brightness == nil {
+		return
+	}
+	brightness := min(max(*f.Brightness, 0), 100)
+	s.mu.Lock()
+	if s.conn == conn {
+		s.state.ScreenOn, s.state.Brightness, s.state.ScreenKnown = *f.On, brightness, true
+	}
+	s.mu.Unlock()
 }

@@ -15,6 +15,11 @@ static esp_io_expander_handle_t s_exp;
 #define BL_LEDC_TIMER   LEDC_TIMER_0
 #define BL_LEDC_CH      LEDC_CHANNEL_1
 #define BL_LEDC_RES     LEDC_TIMER_10_BIT
+// LEDC duty accepts [0, 2**duty_resolution] (inclusive): the top value is a
+// documented special case that outputs a full period with no gap, unlike
+// (2**duty_resolution)-1 which still leaves a ~0.1% glitch each cycle. Using
+// it here is what makes "fully off" and "fully on" glitch-free below.
+#define BL_LEDC_MAX_DUTY (1u << BL_LEDC_RES)
 
 static esp_err_t backlight_init(void)
 {
@@ -26,21 +31,26 @@ static esp_err_t backlight_init(void)
         .clk_cfg = LEDC_AUTO_CLK,
     };
     ESP_RETURN_ON_ERROR(ledc_timer_config(&tcfg), TAG, "ledc timer");
+    // Idle (pre-board_backlight_set) duty keeps the active-low backlight off
+    // so the panel doesn't flash full-bright with garbage data before init.
     const ledc_channel_config_t ccfg = {
         .gpio_num = BOARD_LCD_BL,
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .channel = BL_LEDC_CH,
         .timer_sel = BL_LEDC_TIMER,
-        .duty = 0,
+        .duty = BL_LEDC_MAX_DUTY,
     };
     return ledc_channel_config(&ccfg);
 }
 
+// The backlight driver on this board is active-low: more time HIGH on
+// BOARD_LCD_BL turns the backlight more OFF, more time LOW turns it more ON.
+// Invert the duty so the API stays intuitive: 100 is brightest, 0 is off.
 void board_backlight_set(int percent)
 {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
-    uint32_t duty = ((1 << 10) - 1) * percent / 100;
+    uint32_t duty = BL_LEDC_MAX_DUTY - BL_LEDC_MAX_DUTY * (uint32_t)percent / 100;
     ledc_set_duty(LEDC_LOW_SPEED_MODE, BL_LEDC_CH, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, BL_LEDC_CH);
 }

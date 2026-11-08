@@ -5,6 +5,8 @@
 
 #include "cJSON.h"
 #include "dashboard.h"
+#include "display.h"
+#include "net.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -65,6 +67,22 @@ bool metrics_ingest(const char *json, size_t len)
                 } else if (strcmp(page->valuestring, "quota") == 0) {
                     accepted = dashboard_show_page(DASHBOARD_PAGE_QUOTA);
                 }
+            }
+        } else if (strcmp(type->valuestring, "screen") == 0) {
+            // Agent-driven backlight control: {"v":1,"type":"screen","on":bool,"brightness":0..100}.
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(root, "v");
+            const cJSON *on = cJSON_GetObjectItemCaseSensitive(root, "on");
+            const cJSON *brightness = cJSON_GetObjectItemCaseSensitive(root, "brightness");
+            accepted = false;
+            if (cJSON_IsNumber(v) && v->valuedouble == 1 && cJSON_IsBool(on)) {
+                bool cur_on;
+                int percent;
+                display_get_screen(&cur_on, &percent);
+                if (cJSON_IsNumber(brightness)) {
+                    percent = (int)brightness->valuedouble;
+                }
+                accepted = display_set_screen(cJSON_IsTrue(on), percent) == ESP_OK;
+                server_broadcast_screen();  // report the applied state (also on failure)
             }
         }
         cJSON_Delete(root);

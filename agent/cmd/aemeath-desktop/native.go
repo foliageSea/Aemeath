@@ -16,6 +16,7 @@ type nativeService interface {
 	Stop() error
 	SaveSettings(desktop.Settings) error
 	SetPage(string) error
+	SetScreen(bool, int) error
 	RefreshQuotas() error
 }
 
@@ -201,5 +202,24 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 				a.run("login", func() error { return a.loginWrite(enabled) }, func() { a.login = enabled })
 			}
 		})
+	})
+	ui.Column(c.Key("screen-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
+		ui.Text(c, "设备屏幕").Bold().FontSize(17)
+		// Controls wait for the device's own report: it is the source of truth.
+		screenDisabled := !a.snapshot.Connected || !a.snapshot.ScreenKnown || a.busy["screen"]
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "屏幕状态")
+			screenOn := a.snapshot.ScreenOn
+			if ui.Switch(c.Key("screen-on"), &screenOn).Label("亮屏").Disabled(screenDisabled).Changed() {
+				brightness := a.snapshot.Brightness
+				a.run("screen", func() error { return a.service.SetScreen(screenOn, brightness) }, func() { a.notify("屏幕指令已发送") })
+			}
+		})
+		ui.Text(c, "亮度")
+		brightness := float64(a.snapshot.Brightness)
+		if ui.Slider(c.Key("screen-brightness"), &brightness, 0, 100).Label("亮度").Disabled(screenDisabled || !a.snapshot.ScreenOn).FillWidth().Changed() {
+			on, level := a.snapshot.ScreenOn, int(brightness)
+			a.run("screen", func() error { return a.service.SetScreen(on, level) }, func() { a.notify("亮度指令已发送") })
+		}
 	})
 }

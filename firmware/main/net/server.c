@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "display.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -12,6 +13,9 @@
 static const char *TAG = "server";
 
 #define WS_MAX_FRAME 8192
+#define WS_ALL_CLIENTS -1
+
+static httpd_handle_t s_srv;
 
 static const char PAGE[] =
     "<!doctype html><html><head><meta charset=utf-8>"
@@ -130,10 +134,54 @@ static esp_err_t save_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Runs on the httpd task (via httpd_queue_work). fd < 0 means every WS client.
+static void screen_state_send(void *arg)
+{
+    int target = (int)(intptr_t)arg;
+    bool on;
+    int brightness;
+    display_get_screen(&on, &brightness);
+    char msg[80];
+    int len = snprintf(msg, sizeof(msg), "{\"v\":1,\"type\":\"screen_state\",\"on\":%s,\"brightness\":%d}",
+                       on ? "true" : "false", brightness);
+    httpd_ws_frame_t frame = {.type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t *)msg, .len = len, .final = true};
+
+    int fds[CONFIG_LWIP_MAX_SOCKETS];
+    size_t n = sizeof(fds) / sizeof(fds[0]);
+    if (target >= 0) {
+        fds[0] = target;
+        n = 1;
+    } else if (httpd_get_client_list(s_srv, &n, fds) != ESP_OK) {
+        return;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (httpd_ws_get_fd_info(s_srv, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+            httpd_ws_send_frame_async(s_srv, fds[i], &frame);
+        }
+    }
+}
+
+void server_broadcast_screen(void)
+{
+    if (s_srv) {
+        httpd_queue_work(s_srv, screen_state_send, (void *)(intptr_t)WS_ALL_CLIENTS);
+    }
+}
+
+// IDF v6 no longer calls the WS handler for the handshake GET; this runs right
+// after the handshake response instead.
+static esp_err_t ws_post_handshake(httpd_req_t *req)
+{
+    int fd = httpd_req_to_sockfd(req);
+    ESP_LOGI(TAG, "agent connected (fd %d)", fd);
+    // The device owns screen state: tell the new agent what it is.
+    httpd_queue_work(req->handle, screen_state_send, (void *)(intptr_t)fd);
+    return ESP_OK;
+}
+
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
-        ESP_LOGI(TAG, "agent connected (fd %d)", httpd_req_to_sockfd(req));
         return ESP_OK;
     }
     httpd_ws_frame_t frame = {0};
@@ -176,12 +224,14 @@ void server_start(void)
     cfg.lru_purge_enable = true;
     httpd_handle_t srv;
     ESP_ERROR_CHECK(httpd_start(&srv, &cfg));
+    s_srv = srv;
 
     const httpd_uri_t uris[] = {
         {.uri = "/", .method = HTTP_GET, .handler = root_get},
         {.uri = "/scan", .method = HTTP_GET, .handler = scan_get},
         {.uri = "/save", .method = HTTP_POST, .handler = save_post},
-        {.uri = "/ws", .method = HTTP_GET, .handler = ws_handler, .is_websocket = true},
+        {.uri = "/ws", .method = HTTP_GET, .handler = ws_handler, .is_websocket = true,
+         .ws_post_handshake_cb = ws_post_handshake},
     };
     for (int i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(srv, &uris[i]);

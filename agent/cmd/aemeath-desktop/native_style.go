@@ -73,6 +73,14 @@ func (a *nativeUI) header(c *ui.Context) {
 				a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify("切页指令已发送") })
 			})
 		}
+		screenLabel := "息屏"
+		if !a.snapshot.ScreenOn {
+			screenLabel = "亮屏"
+		}
+		ui.Button(c.Key("screen-toggle"), screenLabel).FontSize(12).Padding(7, 10).Disabled(!a.snapshot.Connected || !a.snapshot.ScreenKnown || a.busy["screen"]).OnClick(func() {
+			on, brightness := !a.snapshot.ScreenOn, a.snapshot.Brightness
+			a.run("screen", func() error { return a.service.SetScreen(on, brightness) }, func() { a.notify("屏幕指令已发送") })
+		})
 	})
 }
 func metricColor(index int) ui.Color {

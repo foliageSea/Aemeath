@@ -31,6 +31,8 @@ void net_forget_credentials(void);
 
 // server.c
 void server_start(void);
+// Pushes {"v":1,"type":"screen_state",...} to every connected agent.
+void server_broadcast_screen(void);
 // dns.c: answers every A query with the SoftAP address.
 void dns_hijack_start(void);
 void dns_hijack_stop(void);

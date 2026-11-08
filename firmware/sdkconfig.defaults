@@ -31,6 +31,8 @@ CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
 
 # HTTP server + websocket
 CONFIG_HTTPD_WS_SUPPORT=y
+# Lets the device report its screen state as soon as an agent connects.
+CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT=y
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 

@@ -9,6 +9,10 @@
 #include "esp_lcd_touch_gt911.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "nvs.h"
 
 static const char *TAG = "display";
 
@@ -56,6 +60,23 @@ static const st7701_lcd_init_cmd_t s_init_cmds[] = {
 };
 
 static lv_display_t *s_disp;
+static esp_lcd_panel_handle_t s_panel;
+static SemaphoreHandle_t s_screen_lock;
+static bool s_screen_on = true;  // logical state == panel DISPON/DISPOFF state
+
+#define SCREEN_NVS_NS             "screen"
+#define SCREEN_NVS_ON             "on"
+#define SCREEN_NVS_BRI            "bri"
+#define SCREEN_DEFAULT_BRIGHTNESS 80
+#define SCREEN_SAVE_DELAY_US      (1000 * 1000)
+
+static int s_brightness_pct = SCREEN_DEFAULT_BRIGHTNESS;
+static esp_timer_handle_t s_save_timer;
+static bool s_save_timer_ready;
+
+static void screen_load(void);
+static void screen_save(void *arg);
+static esp_err_t screen_apply(bool on, int percent);
 
 static esp_err_t panel_init(esp_lcd_panel_handle_t *ret_panel)
 {
@@ -103,7 +124,9 @@ static esp_err_t panel_init(esp_lcd_panel_handle_t *ret_panel)
         .init_cmds = s_init_cmds,
         .init_cmds_size = sizeof(s_init_cmds) / sizeof(s_init_cmds[0]),
         .rgb_config = &rgb_cfg,
-        .flags.auto_del_panel_io = 1,  // SPI lines are only needed during init
+        // SPI lines live on the TCA9554 expander (not shared with RGB pins), so keep
+        // the panel IO: display_set_screen() needs it for DISPOFF/DISPON.
+        .flags.auto_del_panel_io = 0,
     };
     const esp_lcd_panel_dev_config_t dev_cfg = {
         .reset_gpio_num = GPIO_NUM_NC,
@@ -142,8 +165,13 @@ static esp_err_t touch_init(esp_lcd_touch_handle_t *ret_tp)
 
 esp_err_t display_start(void)
 {
+    s_screen_lock = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_screen_lock, ESP_ERR_NO_MEM, TAG, "screen lock");
+    const esp_timer_create_args_t save_args = {.callback = screen_save, .name = "screen_save"};
+    ESP_RETURN_ON_ERROR(esp_timer_create(&save_args, &s_save_timer), TAG, "screen timer");
     esp_lcd_panel_handle_t panel;
     ESP_RETURN_ON_ERROR(panel_init(&panel), TAG, "panel");
+    s_panel = panel;
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_stack = 16384;  // nested tileview/list/card layouts recurse deeply when rendering
@@ -179,6 +207,111 @@ esp_err_t display_start(void)
         ESP_LOGW(TAG, "touch init failed, continuing without touch");
     }
 
-    board_backlight_set(80);
+    screen_load();
+    if (s_brightness_pct == 0 && s_screen_on) {
+        s_brightness_pct = SCREEN_DEFAULT_BRIGHTNESS;
+    }
+    bool on = s_screen_on;
+    s_screen_on = true;  // the panel init sequence ends with DISPON
+    s_save_timer_ready = true;
+    screen_apply(on, s_brightness_pct);
+    ESP_LOGI(TAG, "screen restored: %s, %d%%", on ? "on" : "off", s_brightness_pct);
     return ESP_OK;
+}
+
+static void screen_load(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(SCREEN_NVS_NS, NVS_READONLY, &h) != ESP_OK) {
+        return;  // nothing saved yet: keep defaults
+    }
+    uint8_t on = 1, bri = SCREEN_DEFAULT_BRIGHTNESS;
+    if (nvs_get_u8(h, SCREEN_NVS_ON, &on) == ESP_OK) {
+        s_screen_on = on != 0;
+    }
+    if (nvs_get_u8(h, SCREEN_NVS_BRI, &bri) == ESP_OK && bri <= 100) {
+        s_brightness_pct = bri;
+    }
+    nvs_close(h);
+}
+
+static void screen_save(void *arg)
+{
+    bool on;
+    int bri;
+    display_get_screen(&on, &bri);
+    nvs_handle_t h;
+    if (nvs_open(SCREEN_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGW(TAG, "screen save: nvs open failed");
+        return;
+    }
+    nvs_set_u8(h, SCREEN_NVS_ON, on ? 1 : 0);
+    nvs_set_u8(h, SCREEN_NVS_BRI, (uint8_t)bri);
+    esp_err_t err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "screen save failed: %s", esp_err_to_name(err));
+    }
+}
+
+// The AP3032 backlight driver's CTRL pin is hard-wired on (R26 to 3V3) and BL only
+// biases its FB node through an RC filter, so BL alone cannot fully extinguish the
+// LEDs. Screen-off therefore also blanks the ST7701 (DISPOFF) and drops the backlight.
+// Caller holds s_screen_lock (or is display_start before anyone else can call in).
+static esp_err_t screen_apply(bool on, int percent)
+{
+    esp_err_t err = ESP_OK;
+    if (on) {
+        if (!s_screen_on) {
+            err = esp_lcd_panel_disp_on_off(s_panel, true);
+            if (err == ESP_OK) {
+                s_screen_on = true;
+            }
+        }
+        board_backlight_set(percent);
+    } else {
+        board_backlight_set(0);
+        if (s_screen_on) {
+            err = esp_lcd_panel_disp_on_off(s_panel, false);
+            if (err == ESP_OK) {
+                s_screen_on = false;
+            }
+        }
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "screen %s failed: %s", on ? "on" : "off", esp_err_to_name(err));
+    }
+    return err;
+}
+
+esp_err_t display_set_screen(bool on, int percent)
+{
+    if (!s_panel || !s_screen_lock) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    xSemaphoreTake(s_screen_lock, portMAX_DELAY);
+    // Brightness is remembered while off so turning back on restores it.
+    s_brightness_pct = percent;
+    esp_err_t err = screen_apply(on, percent);
+    xSemaphoreGive(s_screen_lock);
+    // Debounce flash writes: slider drags send many frames, persist once they settle.
+    if (s_save_timer_ready) {
+        esp_timer_stop(s_save_timer);
+        esp_timer_start_once(s_save_timer, SCREEN_SAVE_DELAY_US);
+    }
+    return err;
+}
+
+void display_get_screen(bool *on, int *percent)
+{
+    if (s_screen_lock) {
+        xSemaphoreTake(s_screen_lock, portMAX_DELAY);
+    }
+    *on = s_screen_on;
+    *percent = s_brightness_pct;
+    if (s_screen_lock) {
+        xSemaphoreGive(s_screen_lock);
+    }
 }

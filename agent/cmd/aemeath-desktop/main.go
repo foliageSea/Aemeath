@@ -98,6 +98,13 @@ func main() {
 			{ID: "metrics", Label: "监控台 · 性能", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) { report(func() error { return service.SetPage("metrics") }) }},
 			{ID: "quota", Label: "监控台 · 订阅额度", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) { report(func() error { return service.SetPage("quota") }) }},
 			mygo.Separator(),
+			{ID: "screen-on", Label: "点亮屏幕", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) {
+				report(func() error { return service.SetScreen(true, service.Snapshot().Brightness) })
+			}},
+			{ID: "screen-off", Label: "熄灭屏幕", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) {
+				report(func() error { return service.SetScreen(false, service.Snapshot().Brightness) })
+			}},
+			mygo.Separator(),
 			{Label: "退出 Aemeath", Role: mygo.RoleQuit},
 		})
 		tray, err := mygo.NewTray(mygo.TrayOptions{ID: "aemeath-agent", Icon: trayPNG(), IconIsTemplate: true, ToolTip: "Aemeath", Menu: menu})
@@ -133,6 +140,8 @@ func main() {
 				menu.ItemByID("stop").SetEnabled(s.Running)
 				menu.ItemByID("metrics").SetEnabled(s.Connected)
 				menu.ItemByID("quota").SetEnabled(s.Connected)
+				menu.ItemByID("screen-on").SetEnabled(s.Connected && s.ScreenKnown && !s.ScreenOn)
+				menu.ItemByID("screen-off").SetEnabled(s.Connected && s.ScreenKnown && s.ScreenOn)
 			}
 		}()
 	})
