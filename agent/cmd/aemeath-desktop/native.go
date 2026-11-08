@@ -35,6 +35,8 @@ type nativeUI struct {
 	loginWrite    func(bool) error
 	history       []nativeSample
 	details       bool
+	quotaList     ui.ListState
+	quotaUnsaved  bool
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
@@ -93,6 +95,7 @@ func (a *nativeUI) save() {
 		if a.revision == revision {
 			a.dirty = false
 		}
+		a.quotaUnsaved = false
 		a.notify("设置已保存。")
 	})
 }
@@ -112,31 +115,6 @@ func (a *nativeUI) subscriptions() []desktop.Subscription {
 	}
 	return list
 }
-func (a *nativeUI) changeSubscription(name string, move int, toggle bool) {
-	if a.busy["save"] {
-		return
-	}
-	list := a.subscriptions()
-	for i := range list {
-		if list[i].Name == name {
-			if toggle {
-				list[i].Hidden = !list[i].Hidden
-			} else {
-				j := i + move
-				if j < 0 || j >= len(list) {
-					return
-				}
-				list[i], list[j] = list[j], list[i]
-			}
-			a.draft.Subscriptions = list
-			// Ordering must not implicitly persist unfinished address/gateway edits.
-			settings := copySettings(a.snapshot.Settings)
-			settings.Subscriptions = append([]desktop.Subscription{}, list...)
-			a.run("save", func() error { return a.service.SaveSettings(settings) }, func() { a.notify("订阅顺序与显示状态已保存。") })
-			return
-		}
-	}
-}
 func (a *nativeUI) view(c *ui.Context) {
 	t := c.Theme()
 	if a.noticePending {
@@ -153,11 +131,13 @@ func (a *nativeUI) view(c *ui.Context) {
 					ui.Text(c, "设备连接："+a.snapshot.Error).FontSize(12).TextColor(t.TextMuted).Wrap()
 				}
 			}
+			if a.page == "订阅" {
+				a.quotaListView(c)
+				return
+			}
 			ui.Scroll(c.Key(a.page)).Grow(1).Children(func() {
 				ui.Column(c).FillWidth().Gap(16).Children(func() {
 					switch a.page {
-					case "订阅":
-						a.quotaView(c)
 					case "设置":
 						a.settingsView(c)
 					default:
@@ -196,64 +176,6 @@ func nativeProgress(c *ui.Context, v float64) {
 	ui.Progress(c, math.Max(0, math.Min(1, v/100))).FillWidth()
 }
 func (a *nativeUI) overview(c *ui.Context) { a.metricGrid(c) }
-func (a *nativeUI) quotaView(c *ui.Context) {
-	ui.Button(c, "刷新额度").Disabled(a.busy["quota"]).OnClick(func() { a.run("quota", a.service.RefreshQuotas, nil) })
-	q := a.snapshot.Quota
-	if a.snapshot.QuotaError != "" {
-		ui.Text(c, "额度获取失败："+a.snapshot.QuotaError).Wrap()
-	}
-	if q == nil {
-		ui.Text(c, "暂无额度")
-	} else {
-		label := "最近更新："
-		if time.Now().Unix()-q.TS > 180 {
-			label = "历史额度（已过期）："
-		}
-		ui.Text(c, label+nativeTime(q.TS))
-		if q.Usage != nil {
-			ui.Text(c, fmt.Sprintf("今日 %d 次 / %.4f · 近30天 %d 次 / %.4f", q.Usage.CallsToday, q.Usage.CostToday, q.Usage.Calls30d, q.Usage.Cost30d)).Wrap()
-		}
-	}
-	list := a.subscriptions()
-	for i, sub := range list {
-		ui.Column(c.Key(sub.Name)).FillWidth().Padding(18).Gap(10).Radius(18).Background(c.Theme().Surface).Children(func() {
-			ui.Text(c, sub.Name).Bold().FontSize(17).Wrap()
-			ui.Row(c).Gap(8).Children(func() {
-				ui.Button(c, "上移").Label("上移 " + sub.Name).Disabled(i == 0 || a.busy["save"]).OnClick(func() { a.changeSubscription(sub.Name, -1, false) })
-				ui.Button(c, "下移").Label("下移 " + sub.Name).Disabled(i == len(list)-1 || a.busy["save"]).OnClick(func() { a.changeSubscription(sub.Name, 1, false) })
-				label := "隐藏"
-				if sub.Hidden {
-					label = "恢复显示"
-				}
-				ui.Button(c, label).Label(label + " " + sub.Name).Disabled(a.busy["save"]).OnClick(func() { a.changeSubscription(sub.Name, 0, true) })
-			})
-			if sub.Hidden {
-				ui.Text(c, "已隐藏").FontSize(12)
-				return
-			}
-			found := false
-			if q != nil {
-				for _, account := range q.Accounts {
-					if account.Name != sub.Name {
-						continue
-					}
-					found = true
-					ui.Text(c, account.Plan+" · "+account.Kind+" · "+account.Balance).Wrap()
-					for _, window := range account.Windows {
-						ui.Text(c, fmt.Sprintf("%s · %.1f%% · %s", window.Name, window.Used, window.Display)).Wrap()
-						nativeProgress(c, window.Used)
-						if window.Reset > 0 {
-							ui.Text(c, "重置于 "+nativeTime(window.Reset)).FontSize(12)
-						}
-					}
-				}
-			}
-			if !found {
-				ui.Text(c, "暂无额度").Wrap()
-			}
-		})
-	}
-}
 func (a *nativeUI) settingsView(c *ui.Context) {
 	ui.Column(c.Key("connection-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
 		ui.Text(c, "连接配置").Bold().FontSize(17)

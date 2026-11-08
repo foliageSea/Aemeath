@@ -137,15 +137,15 @@ func TestNativeSubscriptionPersistenceAndStableFocus(t *testing.T) {
 	a.draft.Address = "unfinished.local"
 	a.edited()
 	nativeClick(t, tt, "订阅")
-	nativeClick(t, tt, "上移 C")
+	quotaPointerDrag(t, tt, "C", "B", true)
 	nativeComplete(t, updates, tt)
-	if !tt.Focused("上移 C") {
+	if !tt.Focused("拖动 C") {
 		t.Fatal("reorder moved focus away from subscription identity")
 	}
 	if got := a.subscriptions(); got[1].Name != "C" {
 		t.Fatal(got)
 	}
-	nativeClick(t, tt, "上移 C")
+	quotaPointerDrag(t, tt, "C", "A", true)
 	nativeComplete(t, updates, tt)
 	if a.subscriptions()[0].Name != "C" {
 		t.Fatal("second move did not act on same subscription")
