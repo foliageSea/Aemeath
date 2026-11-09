@@ -38,13 +38,14 @@ const (
 )
 
 type Engine struct {
-	model      *openai.ChatModel
-	agent      *react.Agent
-	persona    string
-	gate       chan struct{}
-	mu         sync.Mutex
-	generation uint64
-	history    []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
+	model        *openai.ChatModel
+	agent        *react.Agent
+	persona      string
+	gate         chan struct{}
+	mu           sync.Mutex
+	generation   uint64
+	streamCancel context.CancelFunc
+	history      []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
@@ -83,7 +84,7 @@ func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
 		if host == nil {
 			return nil, errors.New("brain: device tools require a host")
 		}
-		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: cm, ToolsConfig: compose.ToolsNodeConfig{Tools: deviceTools(host), ExecuteSequentially: true}, MaxStep: maxSteps})
+		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: cm, decision: cm}, ToolsConfig: compose.ToolsNodeConfig{Tools: deviceTools(host), ExecuteSequentially: true}, MaxStep: maxSteps})
 		if err != nil {
 			return nil, errors.New("brain: cannot initialize Eino ReAct tools")
 		}
@@ -94,6 +95,18 @@ func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
 // Reply serializes conversation updates, and respects cancellation while queued and in flight.
 // Failed/canceled turns never enter history. Clear invalidates in-flight history commits.
 func (e *Engine) Reply(ctx context.Context, text string) (string, error) {
+	return e.reply(ctx, text, nil, false)
+}
+
+// ReplyStream calls onDelta synchronously with final assistant text only. A nil
+// callback collects the reply. Callback errors stop generation and are returned
+// unchanged. Already delivered deltas cannot be recalled if the stream later fails.
+// Clear cancels an active stream; failed/canceled turns never enter history.
+func (e *Engine) ReplyStream(ctx context.Context, text string, onDelta func(string) error) (string, error) {
+	return e.reply(ctx, text, onDelta, true)
+}
+
+func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) error, streaming bool) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -106,6 +119,18 @@ func (e *Engine) Reply(ctx context.Context, text string) (string, error) {
 		defer func() { <-e.gate }()
 	case <-ctx.Done():
 		return "", ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if streaming {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		e.mu.Lock()
+		e.streamCancel = cancel
+		e.mu.Unlock()
+		defer func() { e.mu.Lock(); e.streamCancel = nil; e.mu.Unlock() }()
 	}
 	e.mu.Lock()
 	generation := e.generation
@@ -121,7 +146,9 @@ func (e *Engine) Reply(ctx context.Context, text string) (string, error) {
 	input = append(input, schema.UserMessage(text))
 	var out *schema.Message
 	var err error
-	if e.agent != nil {
+	if streaming {
+		out, err = e.streamReply(ctx, input, onDelta)
+	} else if e.agent != nil {
 		out, err = e.agent.Generate(ctx, input)
 	} else {
 		out, err = e.model.Generate(ctx, input)
@@ -131,6 +158,10 @@ func (e *Engine) Reply(ctx context.Context, text string) (string, error) {
 	}
 	// SDK errors may contain raw provider bodies or credential-bearing URLs. Never forward them.
 	if err != nil {
+		var callbackErr *deltaError
+		if errors.As(err, &callbackErr) {
+			return "", callbackErr.err
+		}
 		return "", errors.New("brain: model or tool request failed (check connection, model and tool step limit)")
 	}
 	if out == nil || len(out.ToolCalls) > 0 || strings.TrimSpace(out.Content) == "" {
@@ -141,6 +172,10 @@ func (e *Engine) Reply(ctx context.Context, text string) (string, error) {
 		return "", errors.New("brain: model reply exceeds 16384 bytes")
 	}
 	e.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		e.mu.Unlock()
+		return "", err
+	}
 	if e.generation == generation {
 		e.history = append(e.history, schema.UserMessage(text), schema.AssistantMessage(reply, nil))
 		if len(e.history) > 2*maxTurns {
@@ -151,9 +186,17 @@ func (e *Engine) Reply(ctx context.Context, text string) (string, error) {
 	return reply, nil
 }
 
-func (e *Engine) Clear() { e.mu.Lock(); e.history = nil; e.generation++; e.mu.Unlock() }
+func (e *Engine) Clear() {
+	e.mu.Lock()
+	e.history = nil
+	e.generation++
+	if e.streamCancel != nil {
+		e.streamCancel()
+	}
+	e.mu.Unlock()
+}
 
-// Read the SDK response before decoding to cap both success and provider error bodies.
+// Cap JSON responses before decoding; cap SSE incrementally without delaying deltas.
 // Transport failures are intentionally not retried: a tool-bearing generation may have run.
 type boundedTransport struct{}
 
@@ -163,6 +206,11 @@ func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, errors.New("model transport failed")
 	}
 	const limit = 1 << 20
+	if res.StatusCode >= 200 && res.StatusCode < 300 && strings.HasPrefix(strings.ToLower(res.Header.Get("Content-Type")), "text/event-stream") {
+		// Never pre-read SSE: the first sentence must reach TTS before EOF.
+		res.Body = &boundedStreamBody{ReadCloser: res.Body, remaining: limit}
+		return res, nil
+	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
 	res.Body.Close()
 	if err != nil || len(data) > limit {

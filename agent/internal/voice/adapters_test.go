@@ -33,7 +33,7 @@ func TestWorkerDeferredBrainAndHistoryClear(t *testing.T) {
 				if r.err != nil {
 					t.Fatal(r.err)
 				}
-				if r.phase == "audio" {
+				if r.phase == "audio" || r.phase == "generation_done" {
 					return
 				}
 			case <-time.After(time.Second):

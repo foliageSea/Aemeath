@@ -105,7 +105,14 @@ func (a *nativeUI) voiceStatusView(c *ui.Context) {
 		}
 		ui.Text(c, "你说："+transcript).Wrap().Selectable()
 		ui.Text(c, "爱弥斯："+response).Wrap().Selectable()
-		ui.Text(c, fmt.Sprintf("第 %d 轮 · 识别 %d ms · 思考 %d ms · 语音 %d ms", state.Turn, state.ASRMillis, state.AgentMillis, state.TTSMillis)).FontSize(11).TextColor(t.TextMuted).Wrap()
+		ui.Text(c, fmt.Sprintf("第 %d 轮 · 识别 %d ms · 思考 %d ms · 合成累计 %d ms", state.Turn, state.ASRMillis, state.AgentMillis, state.TTSMillis)).FontSize(11).TextColor(t.TextMuted).Wrap()
+		if state.GeneratedSegments > 0 || state.Phase == "synthesizing" || state.Phase == "speaking" {
+			first := "首段待播放"
+			if state.FirstAudioMillis > 0 {
+				first = fmt.Sprintf("首段播放 %d ms", state.FirstAudioMillis)
+			}
+			ui.Text(c, fmt.Sprintf("%s · 已合成 %d 段 · 播放完成 %d 段", first, state.GeneratedSegments, state.PlayedSegments)).FontSize(11).TextColor(t.TextMuted).Wrap()
+		}
 	})
 }
 

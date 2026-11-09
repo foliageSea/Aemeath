@@ -9,6 +9,7 @@ This document fixes the interfaces used by parallel implementation. Existing `/w
 - Host responds `{v:1,type:"config",epoch:42,enabled:true,volume:70}`. Device captures ONLY after config enabled.
 - Binary frame header is 20 bytes: ASCII `AEAU` [0:4], version uint8=1 [4], kind uint8 [5] (1 microphone,2 playback), flags uint16 LE=0 [6:8], epoch uint32 LE [8:12], turn uint32 LE [12:16], seq uint32 LE [16:20], then PCM16LE mono. Mic always has turn=0 and continuously increasing seq per connection; playback seq restarts at0 each turn. 320 samples/640 bytes per normal frame; final playback frame may be shorter, must be even and <=640 bytes.
 - Host state `{v:1,type:"state",epoch,turn,state:"idle|wake|listening|recognizing|thinking|synthesizing|speaking|error",text?:"..."}`; `wake` causes immediate avatar entry/wave. Host sends `transcript` and `response` text messages with epoch/turn/text.
+- Wire `turn` identifies a capture/playback exchange and advances monotonically per connection. Segmented speech allocates a fresh wire turn for every clip (or an inter-clip wait) while desktop `State.Turn` counts logical user requests. Never reuse a device-closed wire turn. Credits/playing/played match only the current wire turn; a device cancel for any wire turn in the active logical request cancels the whole request. The next logical request starts beyond all prior wire turns.
 - Host playback_start `{v:1,type:"playback_start",epoch,turn,samples:N,volume:70}`. Device discards old playback, sets expected seq0, and responds `{v:1,type:"credit",epoch,turn,frames:32}`. Each consumed queued PCM frame replenishes one credit; host must never send without credits.
 - Device sends `{v:1,type:"playing",epoch,turn}` when first audio is actually rendered, and `{v:1,type:"played",epoch,turn}` only after end marker and all queued audio rendered.
 - Host playback_end `{v:1,type:"playback_end",epoch,turn}`; device compares total declared samples to received/played count.
@@ -40,12 +41,16 @@ type State struct {
  WakeReady bool `json:"wakeReady"`
  Phase string `json:"phase"`
  Error string `json:"error"`
+ Notice string `json:"notice,omitempty"`
  Transcript string `json:"transcript"`
  Response string `json:"response"`
  Turn uint32 `json:"turn"`
  ASRMillis int64 `json:"asrMillis"`
  AgentMillis int64 `json:"agentMillis"`
  TTSMillis int64 `json:"ttsMillis"`
+ FirstAudioMillis int64 `json:"firstAudioMillis"`
+ GeneratedSegments int `json:"generatedSegments"`
+ PlayedSegments int `json:"playedSegments"`
 }
 type Command struct { Kind string; Text string } // wake,cancel,clear,preview,reference
 type Host interface {
@@ -59,6 +64,8 @@ func Run(ctx context.Context, address string, cfg Config, host Host, commands <-
 ```
 
 Run owns ONE connection; caller retries with bounded backoff and cancels/restarts on config/device changes. Emits snapshots containing no keys. Commands are nonblocking from desktop service; preview synthesizes Text (default short greeting), reference plays configured sample without cloud, clear drops history, wake manually starts a round. Empty/missing wake model gives explicit error; manual wake/reference/preview should remain available to diagnose, but never pretend offline wake is ready.
+
+Snapshots expose `FirstAudioMillis` (submit-to-first actual playing ACK), `GeneratedSegments`, and `PlayedSegments`; the first-audio timer is written once per logical request, and segment counters distinguish generated PCM from drained playback.
 
 Snapshots may carry `Notice` (`json:"notice,omitempty"`) for ordinary listening guidance, separate from `Error`. A wake-only ASR result can rearm capture once within the same turn; silence or another wake-only result then returns to idle without Agent/TTS calls. State messages carry the same guidance in `text`.
 

@@ -141,9 +141,11 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	f.state.Voice.Response = "我来帮你看看。"
 	f.state.Voice.Turn = 3
 	f.state.Voice.ASRMillis, f.state.Voice.AgentMillis, f.state.Voice.TTSMillis = 12, 34, 56
+	f.state.Voice.FirstAudioMillis = 789
+	f.state.Voice.GeneratedSegments, f.state.Voice.PlayedSegments = 3, 1
 	a.refresh()
 	tt.Frame()
-	for _, text := range []string{"离线唤醒：已就绪 · 请说「你好小爱」", "语音通道：已连接 · 正在说话", "你说：现在电脑忙吗？", "爱弥斯：我来帮你看看。", "第 3 轮 · 识别 12 ms · 思考 34 ms · 语音 56 ms"} {
+	for _, text := range []string{"离线唤醒：已就绪 · 请说「你好小爱」", "语音通道：已连接 · 正在说话", "你说：现在电脑忙吗？", "爱弥斯：我来帮你看看。", "第 3 轮 · 识别 12 ms · 思考 34 ms · 合成累计 56 ms", "首段播放 789 ms · 已合成 3 段 · 播放完成 1 段"} {
 		if !tt.HasText(text) {
 			t.Fatalf("updated voice state not displayed: %s", text)
 		}

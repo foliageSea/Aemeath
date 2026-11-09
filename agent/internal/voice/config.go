@@ -27,17 +27,20 @@ type Config struct {
 }
 
 type State struct {
-	Connected   bool   `json:"connected"`
-	WakeReady   bool   `json:"wakeReady"`
-	Phase       string `json:"phase"`
-	Error       string `json:"error"`
-	Notice      string `json:"notice,omitempty"`
-	Transcript  string `json:"transcript"`
-	Response    string `json:"response"`
-	Turn        uint32 `json:"turn"`
-	ASRMillis   int64  `json:"asrMillis"`
-	AgentMillis int64  `json:"agentMillis"`
-	TTSMillis   int64  `json:"ttsMillis"`
+	Connected         bool   `json:"connected"`
+	WakeReady         bool   `json:"wakeReady"`
+	Phase             string `json:"phase"`
+	Error             string `json:"error"`
+	Notice            string `json:"notice,omitempty"`
+	Transcript        string `json:"transcript"`
+	Response          string `json:"response"`
+	Turn              uint32 `json:"turn"`
+	ASRMillis         int64  `json:"asrMillis"`
+	AgentMillis       int64  `json:"agentMillis"`
+	TTSMillis         int64  `json:"ttsMillis"`
+	FirstAudioMillis  int64  `json:"firstAudioMillis"`
+	GeneratedSegments int    `json:"generatedSegments"`
+	PlayedSegments    int    `json:"playedSegments"`
 }
 
 type Command struct {

@@ -68,6 +68,7 @@ type result struct {
 	pcm         []int16
 	millis      int64
 	err         error
+	final       bool
 }
 
 // One worker serializes all history access, including canceled Reply and Clear.
@@ -181,20 +182,21 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 						return
 					}
 				}
-				text, err = engine.Reply(agentCtx, transcript)
 				stopAgent()
+				err = segmentedSpeech(w.ctx, engine, speech, transcript, cfg.ReferenceAudio, func(c context.Context, r result) bool {
+					chunkWork := w
+					chunkWork.ctx = c
+					return publish(chunkWork, r)
+				})
 				if err != nil {
-					fail("thinking", err)
-					return
+					var failure *pipelineFailure
+					if errors.As(err, &failure) {
+						publish(w, result{phase: failure.stage, err: failure.err, millis: failure.millis})
+					} else {
+						fail("thinking", err)
+					}
 				}
-				text = strings.TrimSpace(text)
-				if text == "" || len(text) > maxTextBytes/2 {
-					fail("thinking", errors.New("empty or oversized assistant response"))
-					return
-				}
-				if !publish(w, result{phase: "response", text: text, millis: time.Since(start).Milliseconds()}) {
-					return
-				}
+				return
 			}
 			if text == "" {
 				text = "你好，我是爱弥斯，很高兴见到你。"

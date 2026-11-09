@@ -29,30 +29,34 @@ type playback struct {
 	deadline       time.Time
 }
 type session struct {
-	ctx          context.Context
-	ws           *websocket.Conn
-	cfg          Config
-	state        State
-	emit         func(State)
-	epoch        uint32
-	detector     detector
-	vad          vad
-	diagnostic   string
-	ring         sampleRing
-	kwsSamples   int64
-	capture      *capture
-	manualFixed  bool
-	muted        bool
-	nextMic      uint32
-	jobs         chan work
-	results      chan result
-	cancelTurn   context.CancelFunc
-	generation   uint64
-	active       bool
-	play         *playback
-	deadline     time.Time
-	stageStarted time.Time
-	reprompted   bool
+	ctx                        context.Context
+	ws                         *websocket.Conn
+	cfg                        Config
+	state                      State
+	emit                       func(State)
+	epoch                      uint32
+	detector                   detector
+	vad                        vad
+	diagnostic                 string
+	ring                       sampleRing
+	kwsSamples                 int64
+	capture                    *capture
+	manualFixed                bool
+	muted                      bool
+	nextMic                    uint32
+	jobs                       chan work
+	results                    chan result
+	cancelTurn                 context.CancelFunc
+	generation                 uint64
+	active                     bool
+	play                       *playback
+	deadline                   time.Time
+	stageStarted               time.Time
+	reprompted                 bool
+	wireTurn, firstWireTurn    uint32
+	queuedAudio                []speechClip
+	generationDone             bool
+	cloudStarted, workDeadline time.Time
 }
 
 // Run connects once to /voice. It never retries and never downloads assets.
@@ -224,6 +228,11 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 				return errors.New("voice ping timeout")
 			}
 		case <-tick.C:
+			if s.active && !s.generationDone && !s.workDeadline.IsZero() && time.Now().After(s.workDeadline.Add(stageGrace)) {
+				if err = s.fail("timeout", errors.New("voice generation exceeded turn deadline")); err != nil {
+					return err
+				}
+			}
 			if s.active && !s.deadline.IsZero() && time.Now().After(s.deadline) {
 				if err = s.fail("timeout", errors.New("voice operation timed out")); err != nil {
 					return err
@@ -276,6 +285,9 @@ func (s *session) safe(text string) string {
 func (s *session) send(m message) error {
 	m.V = protocolVersion
 	m.Epoch = s.epoch
+	if m.Turn != 0 && m.Turn == s.state.Turn {
+		m.Turn = s.wireTurn
+	}
 	// Device captions are bounded independently of full desktop transcripts.
 	m.Text = deviceCaption(m.Text)
 	m.Message = deviceCaption(m.Message)
@@ -334,6 +346,9 @@ func (s *session) abort(notify bool) error {
 	wasActive := s.active
 	s.active = false
 	s.play = nil
+	s.queuedAudio = nil
+	s.generationDone = false
+	s.workDeadline = time.Time{}
 	s.deadline = time.Time{}
 	s.resetCapture()
 	if wasActive && notify {
@@ -349,7 +364,14 @@ func (s *session) begin() error {
 	if s.state.Turn == 0 {
 		s.state.Turn = 1
 	}
+	if err := s.advanceWireTurn(); err != nil {
+		return err
+	}
+	s.firstWireTurn = s.wireTurn
 	s.reprompted = false
+	s.state.FirstAudioMillis = 0
+	s.state.GeneratedSegments = 0
+	s.state.PlayedSegments = 0
 	s.state.Transcript = ""
 	s.state.Response = ""
 	s.state.ASRMillis = 0
@@ -363,6 +385,8 @@ func (s *session) begin() error {
 func (s *session) submit(kind, text string, pcm []int16) {
 	c, cancel := context.WithTimeout(s.ctx, cloudWorkBudget)
 	s.cancelTurn = cancel
+	s.cloudStarted = time.Now()
+	s.workDeadline, _ = c.Deadline()
 	w := work{ctx: c, turn: s.state.Turn, generation: s.generation, kind: kind, text: text, pcm: pcm}
 	select {
 	case <-s.jobs:
@@ -538,7 +562,7 @@ func (s *session) control(b []byte) error {
 		s.resetCapture()
 		return nil
 	case "cancel":
-		if s.active && m.Turn == s.state.Turn {
+		if s.active && m.Turn >= s.firstWireTurn && m.Turn <= s.wireTurn {
 			if err = s.abort(false); err != nil {
 				return err
 			}
@@ -546,7 +570,7 @@ func (s *session) control(b []byte) error {
 			return s.phase("idle")
 		}
 	case "credit":
-		if s.play == nil || m.Turn != s.state.Turn {
+		if s.play == nil || m.Turn != s.wireTurn {
 			return nil
 		}
 		if m.Frames <= 0 || m.Frames > maxCredits || s.play.credits+m.Frames > maxCredits {
@@ -555,23 +579,24 @@ func (s *session) control(b []byte) error {
 		s.play.credits += m.Frames
 		return s.pump()
 	case "playing":
-		if s.play != nil && m.Turn == s.state.Turn && s.play.offset > 0 && !s.play.playing {
+		if s.play != nil && m.Turn == s.wireTurn && s.play.offset > 0 && !s.play.playing {
 			s.play.playing = true
+			if s.state.FirstAudioMillis == 0 {
+				s.state.FirstAudioMillis = max(1, time.Since(s.cloudStarted).Milliseconds())
+			}
 			return s.phase("speaking")
 		}
 	case "played":
-		if s.play != nil && m.Turn == s.state.Turn {
+		if s.play != nil && m.Turn == s.wireTurn {
 			if !s.play.ended || !s.play.playing {
 				return s.fail("bad_played", errors.New("playback acknowledgement arrived before rendered audio"))
 			}
-			if err = s.abort(false); err != nil {
-				return err
-			}
-			s.state.Error = s.diagnostic
-			return s.phase("idle")
+			s.state.PlayedSegments++
+			s.play = nil
+			return s.nextSegment(true)
 		}
 	case "error":
-		if m.Turn == s.state.Turn || m.Turn == 0 {
+		if m.Turn == s.wireTurn || m.Turn == 0 {
 			return s.fail("device", fmt.Errorf("device voice error: %s", s.safe(m.Message)))
 		}
 	case "hello":
@@ -639,7 +664,19 @@ func (s *session) result(r result) error {
 		s.state.AgentMillis = r.millis
 		s.emit(s.state)
 		return s.send(message{Type: "response", Turn: r.turn, Text: r.text})
+	case "generation_done":
+		s.generationDone = true
+		return s.nextSegment(false)
+	case "audio_segment":
+		s.generationDone = r.final
+		s.state.TTSMillis = r.millis
+		s.state.GeneratedSegments++
+		s.queuedAudio = append(s.queuedAudio, speechClip{pcm: r.pcm, text: r.text})
+		s.emit(s.state)
+		return s.nextSegment(false)
 	case "audio":
+		s.generationDone = true
+		s.state.GeneratedSegments = 1
 		if len(r.pcm) == 0 || len(r.pcm) > maxPlaybackSamples {
 			return s.fail("audio_size", errors.New("empty or oversized playback audio"))
 		}
@@ -648,6 +685,9 @@ func (s *session) result(r result) error {
 		s.deadline = time.Now().Add(time.Duration(len(r.pcm))*time.Second/sampleRate + 15*time.Second)
 		return s.send(message{Type: "playback_start", Turn: r.turn, Samples: len(r.pcm), Volume: s.cfg.Volume})
 	default:
+		if s.play != nil && (r.phase == "thinking" || r.phase == "synthesizing") {
+			return nil
+		}
 		return s.phase(r.phase)
 	}
 }
@@ -655,7 +695,7 @@ func (s *session) pump() error {
 	p := s.play
 	for p.credits > 0 && p.offset < len(p.pcm) {
 		n := min(frameSamples, len(p.pcm)-p.offset)
-		b := encodeAudio(audioFrame{Kind: kindPlayback, Epoch: s.epoch, Turn: s.state.Turn, Seq: p.seq, PCM: p.pcm[p.offset : p.offset+n]})
+		b := encodeAudio(audioFrame{Kind: kindPlayback, Epoch: s.epoch, Turn: s.wireTurn, Seq: p.seq, PCM: p.pcm[p.offset : p.offset+n]})
 		c, cancel := context.WithTimeout(s.ctx, 3*time.Second)
 		err := s.ws.Write(c, websocket.MessageBinary, b)
 		cancel()
