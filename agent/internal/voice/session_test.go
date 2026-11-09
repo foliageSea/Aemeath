@@ -156,7 +156,7 @@ func sessionHarness(t *testing.T, cfg Config, dep dependencies, scenario func(te
 		}
 		defer ws.CloseNow()
 		d := testDevice{ws: ws, ctx: ctx, epoch: 42}
-		e = d.send(message{Type: "hello", SampleRate: 16000, Channels: 1, Encoding: "pcm_s16le", FrameSamples: 320, Capabilities: []string{"capture", "playback"}})
+		e = d.send(message{Type: "hello", SampleRate: 16000, Channels: 1, Encoding: "pcm_s16le", FrameSamples: 320, Capabilities: []string{"capture", "playback", "stream_playback"}})
 		if e == nil {
 			m, readErr := d.until("config")
 			e = readErr

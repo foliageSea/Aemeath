@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,12 +22,14 @@ type incoming struct {
 	err  error
 }
 type playback struct {
-	pcm            []int16
-	offset         int
-	seq            uint32
-	credits        int
-	ended, playing bool
-	deadline       time.Time
+	pcm                   []int16
+	offset                int
+	seq                   uint32
+	credits               int
+	ended, playing        bool
+	deadline              time.Time
+	streaming, inputEnded bool
+	received              int
 }
 type session struct {
 	ctx                        context.Context
@@ -134,6 +137,9 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	if err = hello.validateHello(); err != nil {
 		return err
 	}
+	if cfg.TTSProvider == "fish" && !slices.Contains(hello.Capabilities, "stream_playback") {
+		return errors.New("设备固件不支持 Fish 流式播放，请更新固件或选择 MiMo")
+	}
 	s.epoch = hello.Epoch
 	// Keep capture disabled while native models are loading.
 	s.detector, err = d.newDetector(cfg)
@@ -206,6 +212,10 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	pingErr := make(chan error, 1)
 	pingActive := false
 	for {
+		results := s.results
+		if s.streamQueueFull() {
+			results = nil
+		}
 		select {
 		case <-sessionCtx.Done():
 			return sessionCtx.Err()
@@ -246,7 +256,7 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 			if err = s.command(cmd); err != nil {
 				return err
 			}
-		case r := <-s.results:
+		case r := <-results:
 			if err = s.result(r); err != nil {
 				return err
 			}
@@ -272,7 +282,7 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 }
 
 func (s *session) safe(text string) string {
-	for _, secret := range []string{s.cfg.MiMoAPIKey, s.cfg.LLMAPIKey} {
+	for _, secret := range []string{s.cfg.MiMoAPIKey, s.cfg.LLMAPIKey, s.cfg.FishAPIKey} {
 		if secret != "" {
 			text = strings.ReplaceAll(text, secret, "[redacted]")
 		}
@@ -291,13 +301,23 @@ func (s *session) send(m message) error {
 	// Device captions are bounded independently of full desktop transcripts.
 	m.Text = deviceCaption(m.Text)
 	m.Message = deviceCaption(m.Message)
-	b, err := json.Marshal(m)
+	var payload any = m
+	if m.Type == "playback_start" && m.Streaming {
+		payload = struct {
+			message
+			Samples int `json:"samples"`
+		}{message: m, Samples: 0}
+	}
+	b, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	c, cancel := context.WithTimeout(s.ctx, 3*time.Second)
 	defer cancel()
 	if err = s.ws.Write(c, websocket.MessageText, b); err != nil {
+		if s.ctx.Err() != nil {
+			return s.ctx.Err()
+		}
 		return errors.New("voice send failed")
 	}
 	return nil
@@ -579,7 +599,7 @@ func (s *session) control(b []byte) error {
 		s.play.credits += m.Frames
 		return s.pump()
 	case "playing":
-		if s.play != nil && m.Turn == s.wireTurn && s.play.offset > 0 && !s.play.playing {
+		if s.play != nil && m.Turn == s.wireTurn && s.play.seq > 0 && !s.play.playing {
 			s.play.playing = true
 			if s.state.FirstAudioMillis == 0 {
 				s.state.FirstAudioMillis = max(1, time.Since(s.cloudStarted).Milliseconds())
@@ -664,6 +684,14 @@ func (s *session) result(r result) error {
 		s.state.AgentMillis = r.millis
 		s.emit(s.state)
 		return s.send(message{Type: "response", Turn: r.turn, Text: r.text})
+	case "audio_stream_start":
+		return s.startAudioStream()
+	case "audio_stream_chunk":
+		s.state.TTSMillis = r.millis
+		return s.appendAudioStream(r.pcm)
+	case "audio_stream_end":
+		s.state.TTSMillis = r.millis
+		return s.finishAudioStream(r.samples)
 	case "generation_done":
 		s.generationDone = true
 		return s.nextSegment(false)
@@ -695,20 +723,30 @@ func (s *session) pump() error {
 	p := s.play
 	for p.credits > 0 && p.offset < len(p.pcm) {
 		n := min(frameSamples, len(p.pcm)-p.offset)
+		if p.streaming && !p.inputEnded && n < frameSamples {
+			break
+		}
 		b := encodeAudio(audioFrame{Kind: kindPlayback, Epoch: s.epoch, Turn: s.wireTurn, Seq: p.seq, PCM: p.pcm[p.offset : p.offset+n]})
 		c, cancel := context.WithTimeout(s.ctx, 3*time.Second)
 		err := s.ws.Write(c, websocket.MessageBinary, b)
 		cancel()
 		if err != nil {
+			if s.ctx.Err() != nil {
+				return s.ctx.Err()
+			}
 			return errors.New("voice audio send failed")
 		}
 		p.offset += n
 		p.seq++
 		p.credits--
 	}
-	if p.offset == len(p.pcm) && !p.ended {
+	if p.offset == len(p.pcm) && !p.ended && (!p.streaming || p.inputEnded) {
 		p.ended = true
-		return s.send(message{Type: "playback_end", Turn: s.state.Turn})
+		end := message{Type: "playback_end", Turn: s.state.Turn}
+		if p.streaming {
+			end.Samples = p.received
+		}
+		return s.send(end)
 	}
 	return nil
 }

@@ -67,6 +67,14 @@
 - 显式硬件检查 `AEMEATH_HW_ADDRESS=192.168.31.207 go test -mod=readonly ./internal/voice -run "^TestHardwareSegmentedPlayback$" -count=1 -v` 通过，耗时 9.60 秒：同一逻辑轮次实际排空两段，每段 67,200 样本（4.20 秒）。第二段文字故意等待第一段排空后才释放，验证跨段等待。云端三环节均为本地假服务，设备返回真实 playing/played；182ms 首段渲染只代表本地假服务通路，不代表真实 LLM/MiMo 云端时延，未产生付费 API 调用。
 - 桌面以实际首次 playing 回执显示首段耗时，并展示已合成/播放完成段数；当前仍用短版参考和 MiMo voiceclone。每段需要独立 MiMo 请求，首段等待可减少，但总耗时/费用未必同比下降；没有进行真实云端速度或音色衔接对照。
 
+## Fish 双向流式与 reference_id（2026-11-09）
+
+- 新增可选 Fish TTS：默认 `s2.1-pro` / `balanced`，原 MiMo 仍为默认。桌面和 CLI 支持 Key、模型、`reference_id`、参考逐字文本和延迟设置。ID 非空时不读取本地音频，已用不存在的参考路径验证优先级；纯文字 Fish 试听不依赖 MiMo Key。密码输入/无明文可访问性、保存重载、草稿保持、旧配置默认和环境变量优先级已通过测试。沿用现有本地 JSON 存储机制，没有新增密钥迁移。
+- Fish MessagePack WebSocket 本地 TLS 模拟服务覆盖真实双向传输：首个音频早于文字 EOF/finish，start/text/flush/stop、auth/model、奇数字节 PCM 拼接、显式成功 finish、提前 EOF/错误拒绝、取消/回调失败的连接关闭与生产者退出，以及总样本/文字/消息/畸形长度限制。竞态重复 10 次通过；独立审查发现并修复 writer 完成通知晚于取消的错误根因竞态，1000 次文字超限请求保持精确根因、没有重放。
+- Go 与 ESP32 增加可协商的未知长度播放；首音到达才发 `samples:0,streaming:true`，末尾发精确总量，单一 wire turn。回归验证 320/320/1 帧、暂停不结束、实际 playing/played、缓冲压缩后 seq>0 的首音识别、有界 2s PCM+16 条消息背压，以及取消/静音/清空/新轮次仍能及时处理和清除旧音频。缺失固件能力在云请求前拒绝。
+- 固件协议 Clang ASan/UBSan、完整 ESP-IDF 构建、Go 全套测试/vet 和语音/桌面/CLI 竞态检查通过。新固件 5,757,984 字节已烧录并校验，保留 NVS。实板本地假 Fish 通过正常排空与中途取消：正常一条流播放总计 67,200 样本，故意在第一秒音频后等待 1.5 秒以制造欠载，未提前完成；取消时实际已开始播放且没有错误报告已播完。原固定长度 MiMo 分段两段播放仍通过。实板日志为 `agent/build/fish-hardware.log`。
+- 首轮实板测试完成后主动取消上下文时，发送错误被泛化为网络失败；现已保留父上下文取消原因，重新验证正常流 5.57s、取消 1.04s、旧分段 9.60s 均通过。假云端的首渲染 178/179ms 不代表真实 Fish 云端延迟。没有实际 Fish API Key/reference_id，因此未声称真实音色合成成功、音色相似度或线上延迟已验证；没有产生付费云调用。
+
 ## 视觉结果
 
 [角色状态总览](../firmware/build-avatar-host/avatar-lvgl-preview.png) 来自主机实际 LVGL 快照（每个状态原生 480×480），不是物理 LCD 拍摄。生成方法见 [主机验证说明](../firmware/tools/avatar_tests/README.md)。

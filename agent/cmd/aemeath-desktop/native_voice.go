@@ -155,9 +155,43 @@ func (a *nativeUI) voiceSettingsView(c *ui.Context) {
 				a.edited()
 			}
 		})
-		ui.Text(c, "语音服务 · MiMo").Bold()
+		ui.Text(c, "语音识别 · MiMo").Bold()
+		ui.Text(c, "语音对话使用 MiMo 识别；Fish 试听只需 Fish 设置。").FontSize(12).TextColor(t.TextMuted).Wrap()
 		a.voiceField(c, "voice-mimo-url", "MiMo 服务地址", "填写 MiMo 服务地址", &cfg.MiMoBaseURL, false)
 		a.voiceField(c, "voice-mimo-key", "MiMo API 密钥", "输入 API 密钥", &cfg.MiMoAPIKey, true)
+		ui.Text(c, "语音合成").Bold()
+		provider := 0
+		if cfg.TTSProvider == "fish" {
+			provider = 1
+		}
+		if ui.Segmented(c.Key("voice-tts-provider"), &provider, "MiMo", "Fish").Label("语音合成提供方").Changed() {
+			cfg.TTSProvider = []string{"mimo", "fish"}[provider]
+			a.edited()
+		}
+		if cfg.TTSProvider == "fish" {
+			a.voiceField(c, "voice-fish-url", "Fish 服务地址", "https://api.fish.audio", &cfg.FishBaseURL, false)
+			a.voiceField(c, "voice-fish-key", "Fish API 密钥", "输入 Fish API 密钥", &cfg.FishAPIKey, true)
+			a.voiceField(c, "voice-fish-model", "Fish 模型", "s2.1-pro", &cfg.FishModel, false)
+			a.voiceField(c, "voice-fish-reference-id", "Fish reference_id", "优先填写已创建的音色 ID", &cfg.FishReferenceID, false)
+			ui.Text(c, "音色 ID 优先：填写 reference_id 后，无需参考音频或转写文本。留空时，请提供下方 WAV 和与音频逐字一致的转写文本。").FontSize(12).TextColor(t.TextMuted).Wrap()
+			ui.Field(c.Key("voice-fish-reference-text"), "Fish 参考音频转写", func() {
+				if ui.TextArea(c, &cfg.FishReferenceText).Label("Fish 参考音频转写").Placeholder("与参考音频逐字一致；使用 reference_id 时可留空").FillWidth().Height(80).Changed() {
+					a.edited()
+				}
+			}).FillWidth()
+			latency := 0
+			if cfg.FishLatency == "normal" {
+				latency = 1
+			}
+			if cfg.FishLatency == "low" {
+				latency = 2
+			}
+			ui.Text(c, "Fish 延迟偏好").FontSize(12).TextColor(t.TextMuted)
+			if ui.Segmented(c.Key("voice-fish-latency"), &latency, "均衡", "标准", "低延迟").Label("Fish 延迟偏好").Changed() {
+				cfg.FishLatency = []string{"balanced", "normal", "low"}[latency]
+				a.edited()
+			}
+		}
 		a.voiceField(c, "voice-reference-path", "参考音频路径", "参考声音的 WAV 文件完整路径", &cfg.ReferenceAudio, false)
 		ui.Text(c, "离线唤醒与声音").Bold()
 		a.voiceField(c, "voice-wake-dir", "唤醒模型目录", "包含唤醒模型的完整目录路径", &cfg.WakeModelDir, false)

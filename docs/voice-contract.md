@@ -10,7 +10,8 @@ This document fixes the interfaces used by parallel implementation. Existing `/w
 - Binary frame header is 20 bytes: ASCII `AEAU` [0:4], version uint8=1 [4], kind uint8 [5] (1 microphone,2 playback), flags uint16 LE=0 [6:8], epoch uint32 LE [8:12], turn uint32 LE [12:16], seq uint32 LE [16:20], then PCM16LE mono. Mic always has turn=0 and continuously increasing seq per connection; playback seq restarts at0 each turn. 320 samples/640 bytes per normal frame; final playback frame may be shorter, must be even and <=640 bytes.
 - Host state `{v:1,type:"state",epoch,turn,state:"idle|wake|listening|recognizing|thinking|synthesizing|speaking|error",text?:"..."}`; `wake` causes immediate avatar entry/wave. Host sends `transcript` and `response` text messages with epoch/turn/text.
 - Wire `turn` identifies a capture/playback exchange and advances monotonically per connection. Segmented speech allocates a fresh wire turn for every clip (or an inter-clip wait) while desktop `State.Turn` counts logical user requests. Never reuse a device-closed wire turn. Credits/playing/played match only the current wire turn; a device cancel for any wire turn in the active logical request cancels the whole request. The next logical request starts beyond all prior wire turns.
-- Host playback_start `{v:1,type:"playback_start",epoch,turn,samples:N,volume:70}`. Device discards old playback, sets expected seq0, and responds `{v:1,type:"credit",epoch,turn,frames:32}`. Each consumed queued PCM frame replenishes one credit; host must never send without credits.
+- Host playback_start `{v:1,type:"playback_start",epoch,turn,samples:N,volume:70}`.
+- Optional device capability `stream_playback` enables unknown totals: start includes explicit `samples:0,streaming:true`; all binary PCM retains the same wire turn and increasing sequence. A streaming end MUST include actual `samples:N` in 1..1920000 equal to received samples. Temporary underflow does not end the stream; only explicit end plus actual DMA drain produces played. Full frames remain 320 samples; the short final frame seals input. Streaming idle timeout is 30s versus fixed playback 5s. Fish selection requires this capability before any cloud work. Host PCM queue is at most 2s plus bounded result messages; credits/commands stay serviced while upstream audio waits. Device discards old playback, sets expected seq0, and responds `{v:1,type:"credit",epoch,turn,frames:32}`. Each consumed queued PCM frame replenishes one credit; host must never send without credits.
 - Device sends `{v:1,type:"playing",epoch,turn}` when first audio is actually rendered, and `{v:1,type:"played",epoch,turn}` only after end marker and all queued audio rendered.
 - Host playback_end `{v:1,type:"playback_end",epoch,turn}`; device compares total declared samples to received/played count.
 - Cancel in either direction `{v:1,type:"cancel",epoch,turn}` aborts current round and releases audio resources. Touch wake `{v:1,type:"wake",epoch}`; touch clear `{v:1,type:"clear",epoch}`; touch mute `{v:1,type:"mute",epoch,muted:true}`.
@@ -30,6 +31,13 @@ type Config struct {
  LLMTools bool `json:"llmTools"`
  MiMoBaseURL string `json:"mimoBaseURL"`
  MiMoAPIKey string `json:"mimoAPIKey"`
+ TTSProvider string `json:"ttsProvider"` // mimo (default) | fish
+ FishBaseURL string `json:"fishBaseURL"`
+ FishAPIKey string `json:"fishAPIKey"`
+ FishModel string `json:"fishModel"`
+ FishReferenceID string `json:"fishReferenceID"`
+ FishReferenceText string `json:"fishReferenceText"`
+ FishLatency string `json:"fishLatency"`
  ReferenceAudio string `json:"referenceAudio"`
  WakeModelDir string `json:"wakeModelDir"`
  WakeThreshold float64 `json:"wakeThreshold"`

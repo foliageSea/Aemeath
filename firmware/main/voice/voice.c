@@ -32,6 +32,10 @@ static void capture_snapshot(bool enabled, uint32_t epoch)
 {
     portENTER_CRITICAL(&s_lock); s_capture_enabled=enabled; s_capture_epoch=epoch; portEXIT_CRITICAL(&s_lock);
 }
+static void playback_activity(void)
+{
+    s_play_deadline=esp_timer_get_time()+(int64_t)voice_playback_idle_ms(&s_play)*1000;
+}
 static void ui(const char *phase, const char *text)
 {
     strlcpy(s_phase,phase,sizeof(s_phase));
@@ -68,7 +72,7 @@ static void reset_connection(uint32_t epoch)
     s_epoch=epoch; s_turn=s_closed_turn=0;
     portENTER_CRITICAL(&s_lock); s_muted=false; portEXIT_CRITICAL(&s_lock);
     voice_page_set_muted(false);
-    if (epoch) send_json("hello",0,",\"sample_rate\":16000,\"channels\":1,\"encoding\":\"pcm_s16le\",\"frame_samples\":320,\"capabilities\":[\"capture\",\"playback\",\"avatar\"]");
+    if (epoch) send_json("hello",0,",\"sample_rate\":16000,\"channels\":1,\"encoding\":\"pcm_s16le\",\"frame_samples\":320,\"capabilities\":[\"capture\",\"playback\",\"avatar\",\"stream_playback\"]");
 }
 static bool number(const cJSON *j, const char *key, uint32_t *out)
 {
@@ -143,15 +147,22 @@ static void text_message(const uint8_t *data, size_t len)
         else ui(state,text);
     } else if (!strcmp(type,"playback_start")) {
         uint32_t samples, volume;
-        if (!turn || !s_audio_ready || !number(j,"samples",&samples) || !number(j,"volume",&volume) || volume>100 || !samples || samples>VOICE_MAX_SAMPLES) { fail_round("bad_playback","Invalid playback declaration"); goto done; }
+        const cJSON *streaming_field=cJSON_GetObjectItemCaseSensitive(j,"streaming");
+        bool streaming=cJSON_IsTrue(streaming_field);
+        if (!turn || !s_audio_ready || (streaming_field && !cJSON_IsBool(streaming_field)) || !number(j,"samples",&samples) || !number(j,"volume",&volume) || volume>100 || (streaming?samples!=0:(!samples || samples>VOICE_MAX_SAMPLES))) { fail_round("bad_playback","Invalid playback declaration"); goto done; }
         // Duplicate starts must not reset sequence/credits on a live turn.
         if (s_play.active && turn==s_turn) { fail_round("duplicate_start","Playback already started"); goto done; }
         if (turn>s_turn) { abort_round(false); s_turn=turn; }
-        if (!voice_playback_start(&s_play,s_epoch,turn,samples) || audio_play_start(s_epoch,turn)!=ESP_OK) { fail_round("audio_start","Playback could not start"); goto done; }
-        s_volume=volume; s_play_deadline=esp_timer_get_time()+5000000;
+        bool started=streaming?voice_playback_stream_start(&s_play,s_epoch,turn):voice_playback_start(&s_play,s_epoch,turn,samples);
+        if (!started || audio_play_start(s_epoch,turn)!=ESP_OK) { fail_round("audio_start","Playback could not start"); goto done; }
+        s_volume=volume; playback_activity();
         send_json("credit",s_turn,",\"frames\":32");
     } else if (!strcmp(type,"playback_end")) {
-        if (turn!=s_turn || !voice_playback_end(&s_play,s_epoch,turn)) fail_round("sample_count","Playback end sample count mismatch");
+        uint32_t samples=0;
+        bool ended=turn==s_turn && (s_play.streaming
+            ? (number(j,"samples",&samples) && voice_playback_stream_end(&s_play,s_epoch,turn,samples))
+            : voice_playback_end(&s_play,s_epoch,turn));
+        if (!ended) fail_round("sample_count","Playback end sample count mismatch");
     } else if (!strcmp(type,"cancel")) {
         if (turn==s_turn) abort_round(true);
     } else if (!strcmp(type,"transcript") || !strcmp(type,"response")) {
@@ -169,7 +180,7 @@ static void binary_message(const uint8_t *data, size_t len)
     if (!voice_packet_decode(data,len,&packet)) { fail_round("bad_binary","Invalid audio frame"); return; }
     if (packet.epoch!=s_epoch || packet.turn<s_turn || packet.turn<=s_closed_turn) return;
     if (!voice_playback_receive(&s_play,&packet) || !audio_play_queue(&packet,s_volume)) { fail_round("audio_sequence","Audio sequence or credit violation"); return; }
-    s_play_deadline=esp_timer_get_time()+5000000;
+    playback_activity();
 }
 static void rendered(void)
 {
@@ -182,7 +193,7 @@ static void rendered(void)
         if (first) { send_json("playing",s_turn,NULL); dashboard_voice_begin(); ui("speaking",NULL); }
         voice_page_level(render.level);
         send_json("credit",s_turn,",\"frames\":1");
-        s_play_deadline=esp_timer_get_time()+5000000;
+        playback_activity();
     }
     if (voice_playback_done(&s_play)) {
         send_json("played",s_turn,NULL);

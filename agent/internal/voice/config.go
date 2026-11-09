@@ -12,18 +12,25 @@ import (
 )
 
 type Config struct {
-	Enabled        bool    `json:"enabled"`
-	LLMBaseURL     string  `json:"llmBaseURL"`
-	LLMAPIKey      string  `json:"llmAPIKey"`
-	LLMModel       string  `json:"llmModel"`
-	LLMTools       bool    `json:"llmTools"`
-	MiMoBaseURL    string  `json:"mimoBaseURL"`
-	MiMoAPIKey     string  `json:"mimoAPIKey"`
-	ReferenceAudio string  `json:"referenceAudio"`
-	WakeModelDir   string  `json:"wakeModelDir"`
-	WakeThreshold  float64 `json:"wakeThreshold"`
-	Volume         int     `json:"volume"`
-	Persona        string  `json:"persona"`
+	Enabled           bool    `json:"enabled"`
+	LLMBaseURL        string  `json:"llmBaseURL"`
+	LLMAPIKey         string  `json:"llmAPIKey"`
+	LLMModel          string  `json:"llmModel"`
+	LLMTools          bool    `json:"llmTools"`
+	MiMoBaseURL       string  `json:"mimoBaseURL"`
+	MiMoAPIKey        string  `json:"mimoAPIKey"`
+	TTSProvider       string  `json:"ttsProvider"`
+	FishBaseURL       string  `json:"fishBaseURL"`
+	FishAPIKey        string  `json:"fishAPIKey"`
+	FishModel         string  `json:"fishModel"`
+	FishReferenceID   string  `json:"fishReferenceID"`
+	FishReferenceText string  `json:"fishReferenceText"`
+	FishLatency       string  `json:"fishLatency"`
+	ReferenceAudio    string  `json:"referenceAudio"`
+	WakeModelDir      string  `json:"wakeModelDir"`
+	WakeThreshold     float64 `json:"wakeThreshold"`
+	Volume            int     `json:"volume"`
+	Persona           string  `json:"persona"`
 }
 
 type State struct {
@@ -62,6 +69,42 @@ func NormalizeConfig(c Config) (Config, error) {
 	c.LLMAPIKey = strings.TrimSpace(c.LLMAPIKey)
 	c.MiMoAPIKey = strings.TrimSpace(c.MiMoAPIKey)
 	c.LLMModel = strings.TrimSpace(c.LLMModel)
+	c.TTSProvider = strings.ToLower(strings.TrimSpace(c.TTSProvider))
+	c.FishBaseURL = strings.TrimRight(strings.TrimSpace(c.FishBaseURL), "/")
+	c.FishAPIKey = strings.TrimSpace(c.FishAPIKey)
+	c.FishModel = strings.TrimSpace(c.FishModel)
+	c.FishReferenceID = strings.TrimSpace(c.FishReferenceID)
+	c.FishReferenceText = strings.TrimSpace(c.FishReferenceText)
+	c.FishLatency = strings.ToLower(strings.TrimSpace(c.FishLatency))
+	if c.TTSProvider == "" {
+		c.TTSProvider = "mimo"
+	}
+	if c.FishBaseURL == "" {
+		c.FishBaseURL = "https://api.fish.audio"
+	}
+	if c.FishModel == "" {
+		c.FishModel = "s2.1-pro"
+	}
+	if c.FishLatency == "" {
+		c.FishLatency = "balanced"
+	}
+	if c.TTSProvider != "mimo" && c.TTSProvider != "fish" {
+		return c, fmt.Errorf("tts provider must be mimo or fish")
+	}
+	if c.FishLatency != "normal" && c.FishLatency != "balanced" && c.FishLatency != "low" {
+		return c, fmt.Errorf("Fish latency must be low, normal or balanced")
+	}
+	for _, field := range []struct {
+		name, value string
+		limit       int
+	}{
+		{"Fish model", c.FishModel, 128}, {"Fish reference_id", c.FishReferenceID, 256},
+		{"Fish reference text", c.FishReferenceText, 16384}, {"Fish API key", c.FishAPIKey, 4096},
+	} {
+		if len(field.value) > field.limit || strings.ContainsAny(field.value, "\r\n") && field.name != "Fish reference text" {
+			return c, fmt.Errorf("invalid %s", field.name)
+		}
+	}
 	if c.LLMBaseURL == "" {
 		c.LLMBaseURL = "https://api.openai.com/v1"
 	}
@@ -89,7 +132,7 @@ func NormalizeConfig(c Config) (Config, error) {
 	if !c.Enabled {
 		return c, nil
 	}
-	for _, entry := range []struct{ name, value string }{{"LLM", c.LLMBaseURL}, {"MiMo", c.MiMoBaseURL}} {
+	for _, entry := range []struct{ name, value string }{{"LLM", c.LLMBaseURL}, {"MiMo", c.MiMoBaseURL}, {"Fish", c.FishBaseURL}} {
 		u, e := url.Parse(entry.value)
 		if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return c, fmt.Errorf("invalid %s base URL", entry.name)

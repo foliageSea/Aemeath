@@ -17,19 +17,43 @@ bool voice_playback_start(voice_playback_t *p, uint32_t epoch, uint32_t turn, ui
     if (!epoch || !turn || !samples || samples>VOICE_MAX_SAMPLES) return false;
     *p=(voice_playback_t){.epoch=epoch,.turn=turn,.declared=samples,.active=true}; return true;
 }
+bool voice_playback_stream_start(voice_playback_t *p, uint32_t epoch, uint32_t turn)
+{
+    if (!epoch || !turn) return false;
+    *p=(voice_playback_t){.epoch=epoch,.turn=turn,.active=true,.streaming=true};
+    return true;
+}
 bool voice_playback_receive(voice_playback_t *p, const voice_packet_t *f)
 {
-    if (!p->active || p->ended || f->kind!=2 || f->epoch!=p->epoch || f->turn!=p->turn || f->seq!=p->seq || !f->samples || f->samples>320 || p->outstanding>=32 || f->samples>p->declared-p->received || (f->samples<320 && p->received+f->samples!=p->declared)) return false;
-    p->seq++; p->received+=(uint32_t)f->samples; p->outstanding++; return true;
+    uint32_t limit=p->streaming?VOICE_MAX_SAMPLES:p->declared;
+    if (!p->active || p->ended || p->final_short || f->kind!=2 || f->epoch!=p->epoch || f->turn!=p->turn || f->seq!=p->seq || !f->samples || f->samples>VOICE_FRAME_SAMPLES || p->outstanding>=VOICE_PLAYBACK_FRAMES || p->received>limit || f->samples>limit-p->received) return false;
+    // For an unknown total, a short frame seals the PCM input. The stream still
+    // needs an explicit end carrying its actual total before a played ACK.
+    bool short_frame=f->samples<VOICE_FRAME_SAMPLES;
+    if (!p->streaming && short_frame && p->received+f->samples!=p->declared) return false;
+    p->seq++; p->received+=(uint32_t)f->samples; p->outstanding++;
+    p->final_short=short_frame;
+    return true;
 }
 bool voice_playback_end(voice_playback_t *p, uint32_t epoch, uint32_t turn)
 {
-    if (!p->active || p->ended || p->epoch!=epoch || p->turn!=turn || p->received!=p->declared) return false;
+    if (!p->active || p->streaming || p->ended || p->epoch!=epoch || p->turn!=turn || p->received!=p->declared) return false;
     p->ended=true; return true;
+}
+bool voice_playback_stream_end(voice_playback_t *p, uint32_t epoch, uint32_t turn, uint32_t samples)
+{
+    if (!p->active || !p->streaming || p->ended || p->epoch!=epoch || p->turn!=turn || !samples || samples>VOICE_MAX_SAMPLES || samples!=p->received) return false;
+    p->declared=samples; p->ended=true; return true;
 }
 bool voice_playback_render(voice_playback_t *p, uint32_t epoch, uint32_t turn, uint32_t seq, size_t samples)
 {
-    if (!p->active || p->epoch!=epoch || p->turn!=turn || !p->outstanding || seq!=p->seq-p->outstanding || !samples || samples>p->received-p->rendered) return false;
+    if (!p->active || p->epoch!=epoch || p->turn!=turn || !p->outstanding || seq!=p->seq-p->outstanding || p->rendered>p->received) return false;
+    size_t expected=p->outstanding==1?p->received-p->rendered:VOICE_FRAME_SAMPLES;
+    if (!samples || samples>VOICE_FRAME_SAMPLES || samples!=expected) return false;
     p->rendered+=(uint32_t)samples; p->outstanding--; p->started=true; return true;
+}
+uint32_t voice_playback_idle_ms(const voice_playback_t *p)
+{
+    return p->streaming?VOICE_STREAM_IDLE_MS:VOICE_PLAYBACK_IDLE_MS;
 }
 bool voice_playback_done(const voice_playback_t *p) { return p->active && p->ended && !p->outstanding && p->rendered==p->declared; }

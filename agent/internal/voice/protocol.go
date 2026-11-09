@@ -76,6 +76,7 @@ type message struct {
 	State        string   `json:"state,omitempty"`
 	Text         string   `json:"text,omitempty"`
 	Samples      int      `json:"samples,omitempty"`
+	Streaming    bool     `json:"streaming,omitempty"`
 	Frames       int      `json:"frames,omitempty"`
 	Muted        bool     `json:"muted,omitempty"`
 	Code         string   `json:"code,omitempty"`

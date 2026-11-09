@@ -7,7 +7,7 @@ ESP32 双麦克风 → ES7210 → 16k PCM → /voice WebSocket → 电脑本地 
                                                         ↓ 唤醒后问题
                                     MiMo ASR → Eino / OpenAI兼容 LLM
                                                         ↓ 回复文字
-ESP32 扬声器 ← ES8311 ← 16k PCM ← 重采样 ← MiMo voiceclone WAV
+ESP32 扬声器 ← ES8311 ← 16k PCM ← MiMo 分句 WAV / Fish 双向音频流
       └── LVGL 爱弥斯 Q 版形象随会话状态变化
 ```
 
@@ -96,7 +96,7 @@ Agent 工具包括 `get_metrics`、`get_quota`、`set_page`、`set_screen`；不
 
 ## 6. MiMo 和参考音频
 
-ASR 为 `mimo-v2.5-asr`；TTS 固定为 `mimo-v2.5-tts-voiceclone`。两者使用 `/chat/completions`，不是 `/audio/speech` 或 `/audio/transcriptions`。克隆合成将目标文字放 assistant 消息，参考 WAV 转 Base64 data URL 放 `audio.voice`。不上传网页地址，不需要虚构“训练音色 ID”。
+ASR 保持为 `mimo-v2.5-asr`。TTS 可在桌面设置选择 MiMo 或 Fish；默认仍是 MiMo，模型为 `mimo-v2.5-tts-voiceclone`。两者使用 `/chat/completions`，不是 `/audio/speech` 或 `/audio/transcriptions`。克隆合成将目标文字放 assistant 消息，参考 WAV 转 Base64 data URL 放 `audio.voice`。不上传网页地址，不需要虚构“训练音色 ID”。
 
 **此 voiceclone 模型目前不是低延迟逐块生成。**每个句组仍使用 `stream:false` 接收完整 WAV，随后转换成 16 kHz PCM 发给设备；首段无需等待全文或后续句组生成完成。分段会增加合成请求数、重复发送参考音频的量和可能的计费开销，后续句组因此合并得更大，并限制最多 8 段。试听/重试已生成文字的入口仍为单段合成，不重新运行 LLM。等待时角色展示合成动画；不对首包延迟作实时承诺。若请求超时或响应中断，界面显示具体阶段、错误类别和实际耗时。已经获得文字回复时，可点“重试回复语音”只重新合成这条文字；不会重复运行 Agent 工具，也不会自动重发可能已经计费的请求。
 
@@ -104,7 +104,32 @@ ASR 为 `mimo-v2.5-asr`；TTS 固定为 `mimo-v2.5-tts-voiceclone`。两者使�
 
 官方接口说明：[MiMo ASR](https://mimo.mi.com/static/docs/quick-start/usage-guide/audio/Speech-Recognition.md)、[MiMo 语音合成](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5)、[Eino ReAct](https://www.cloudwego.cn/docs/eino/core_modules/flow_integration_components/react_agent_manual/)。
 
-## 7. 构建与诊断
+## 7. Fish 双向流式与 reference_id
+
+在桌面“语音助手”中将合成提供方切换为 **Fish**，填写 **Fish API Key** 和 **Fish reference_id**，保存后可用“试听语音”验证。默认根地址为 `https://api.fish.audio`、模型 `s2.1-pro`、延迟模式 `balanced`；可选 `normal`、`balanced`、`low`。API Key 使用密码输入框，保存方式与现有 MiMo/LLM 设置一致。
+
+`reference_id` 优先于本地参考路径和参考文字。填写 ID 后不会读取/上传本地参考音频；未填写时，必须提供参考 WAV 和逐字对应的转写文字，二者在同一开始消息中发送。不自动创建、上传持久音色模型，也不会在 Fish 失败后自动切换 MiMo 或重放文本。
+
+CLI 配置新增字段示例，其余 LLM/ASR 配置沿用原值：
+
+```json
+{
+  "ttsProvider": "fish",
+  "fishBaseURL": "https://api.fish.audio",
+  "fishAPIKey": "填入你的 Fish API Key",
+  "fishModel": "s2.1-pro",
+  "fishReferenceID": "填入你的 reference_id",
+  "fishLatency": "balanced"
+}
+```
+
+环境变量覆盖支持 `AEMEATH_TTS_PROVIDER`、`FISH_API_KEY`、`FISH_BASE_URL`、`FISH_MODEL`、`FISH_REFERENCE_ID`、`FISH_REFERENCE_TEXT`、`FISH_LATENCY`。语音问题识别仍使用 MiMo ASR；Fish 的纯文字试听不要求 MiMo 密钥。
+
+Fish 使用 `/v1/tts/live` WebSocket + MessagePack，同一会话逐段发送 LLM 文字并同步接收 16kHz/16bit/单声道 PCM。设备在首批 PCM 到达时开始未知长度播放；云端成功结束后才声明总采样数，实际 DMA 排空才确认播完。电脑缓冲为 2 秒 PCM 加有限消息队列，声卡信用不足会向 Fish 施加背压；取消同时终止 LLM、Fish 和待播音频。整轮总音频上限 120 秒，生成预算从首段文字开始为 180 秒，流式空闲等待上限 30 秒。需要广告 `stream_playback` 能力的新固件；旧固件会在云端请求前明确报错。
+
+官方协议：[Fish WebSocket TTS](https://docs.fish.audio/api-reference/endpoint/websocket/tts-live)、[Fish 能力说明](https://docs.fish.audio/overview/capabilities)。真实账号权限、音色存在性及首音速度须在填写自己的 Key/ID 后验证；本地测试不调用付费云端。
+
+## 8. 构建与诊断
 
 macOS 语音版使用 [build-dmg.sh](../agent/scripts/build-dmg.sh)，自动暂存对应架构的 sherpa/ONNX Runtime 动态库，在签名前设置相对查找路径；可用 [verify-macos-voice.sh](../agent/scripts/verify-macos-voice.sh) 校验发布包。
 

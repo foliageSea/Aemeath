@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"aemeath/agent/internal/brain"
-	"aemeath/agent/internal/voiceapi"
 	"aemeath/agent/internal/wake"
 )
 
@@ -47,7 +46,7 @@ func productionDependencies() dependencies {
 			return wake.New(wake.Config{ModelDir: c.WakeModelDir, Threshold: c.WakeThreshold})
 		},
 		newVAD:    func(c Config) (vad, error) { return wake.NewVAD(c.WakeModelDir) },
-		newSpeech: func(c Config) speechAPI { return managedSpeech{voiceapi.New(c.MiMoBaseURL, c.MiMoAPIKey)} },
+		newSpeech: configuredSpeech,
 		newBrain: func(ctx context.Context, c Config, h Host) (brainAPI, error) {
 			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools}, h)
 		},
@@ -69,6 +68,7 @@ type result struct {
 	millis      int64
 	err         error
 	final       bool
+	samples     int
 }
 
 // One worker serializes all history access, including canceled Reply and Clear.
@@ -124,7 +124,11 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 				publish(w, result{phase: "audio", pcm: pcm})
 				return
 			}
-			if cfg.MiMoAPIKey == "" {
+			if cfg.TTSProvider == "fish" && (cfg.FishAPIKey == "" || (cfg.FishReferenceID == "" && cfg.FishReferenceText == "")) {
+				fail("configuration", errors.New("请填写 Fish API Key 和 reference_id，或提供参考音频对应文字"))
+				return
+			}
+			if cfg.MiMoAPIKey == "" && (w.kind == "utterance" || cfg.TTSProvider != "fish") {
 				fail("configuration", errors.New("MiMo API key is missing"))
 				return
 			}
@@ -203,6 +207,21 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 			}
 			if len(text) > maxTextBytes/2 {
 				fail("synthesizing", fmt.Errorf("preview text too long"))
+				return
+			}
+			if stream, ok := speech.(streamingSpeech); ok {
+				parts := make(chan string, 1)
+				parts <- text
+				close(parts)
+				err := streamSpeech(w.ctx, stream, parts, func(c context.Context, r result) bool { cw := w; cw.ctx = c; return publish(cw, r) })
+				if err != nil {
+					var failure *pipelineFailure
+					if errors.As(err, &failure) {
+						publish(w, result{phase: failure.stage, err: failure.err, millis: failure.millis})
+					} else {
+						fail("synthesizing", err)
+					}
+				}
 				return
 			}
 			if !publish(w, result{phase: "synthesizing"}) {

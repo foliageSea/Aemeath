@@ -58,6 +58,16 @@ func loadVoiceConfig(path string, enabled bool) (voice.Config, error) {
 	if value := os.Getenv("MIMO_BASE_URL"); value != "" {
 		cfg.MiMoBaseURL = value
 	}
+	for name, target := range map[string]*string{
+		"AEMEATH_TTS_PROVIDER": &cfg.TTSProvider, "FISH_API_KEY": &cfg.FishAPIKey,
+		"FISH_BASE_URL": &cfg.FishBaseURL, "FISH_MODEL": &cfg.FishModel,
+		"FISH_REFERENCE_ID": &cfg.FishReferenceID, "FISH_REFERENCE_TEXT": &cfg.FishReferenceText,
+		"FISH_LATENCY": &cfg.FishLatency,
+	} {
+		if value := os.Getenv(name); value != "" {
+			*target = value
+		}
+	}
 	return voice.NormalizeConfig(cfg)
 }
 

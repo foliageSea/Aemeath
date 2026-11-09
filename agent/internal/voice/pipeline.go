@@ -98,6 +98,13 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 		}
 	}()
 	defer func() { cancel(nil); <-done }()
+	if stream, ok := speech.(streamingSpeech); ok {
+		err := streamSpeech(ctx, stream, parts, emit)
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+		return err
+	}
 	var ttsCtx context.Context
 	var totalSamples int
 	var totalMillis int64

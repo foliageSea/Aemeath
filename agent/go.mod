@@ -10,6 +10,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/k2-fsa/sherpa-onnx-go/v2 v2.0.1
 	github.com/shirou/gopsutil/v4 v4.26.10
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/yusufpapurcu/wmi v1.2.4
 )
 
@@ -50,6 +51,7 @@ require (
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
 	golang.org/x/arch v0.11.0 // indirect
