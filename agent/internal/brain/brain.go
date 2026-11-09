@@ -1,0 +1,191 @@
+// Package brain supplies a real Eino ReAct agent and a plain OpenAI-compatible chat mode.
+package brain
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/flow/agent/react"
+	"github.com/cloudwego/eino/schema"
+)
+
+type Config struct {
+	BaseURL, APIKey, Model, Persona string
+	Tools                           bool
+}
+type Host interface {
+	Metrics() string
+	Quota() string
+	SetPage(context.Context, string) error
+	SetScreen(context.Context, bool, int) error
+}
+
+const (
+	maxTurns       = 10
+	maxTextBytes   = 16 << 10
+	maxSteps       = 8
+	defaultPersona = "你是爱弥斯，一位温暖、机敏的桌面语音助手。用简洁自然的中文回答，适合直接朗读。只有在用户请求或回答确实需要时才调用设备工具；不要声称执行了没有成功执行的操作。"
+)
+
+type Engine struct {
+	model      *openai.ChatModel
+	agent      *react.Agent
+	persona    string
+	gate       chan struct{}
+	mu         sync.Mutex
+	generation uint64
+	history    []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
+}
+
+func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	cfg.Model = strings.TrimSpace(cfg.Model)
+	if cfg.Model == "" || len(cfg.Model) > 256 {
+		return nil, errors.New("brain: configure an OpenAI-compatible model")
+	}
+	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = "https://api.openai.com/v1"
+	}
+	u, err := url.Parse(cfg.BaseURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("brain: invalid model base URL")
+	}
+	// Accept the conventional base URL and an accidentally pasted full completion URL.
+	u.Path = strings.TrimSuffix(u.Path, "/chat/completions")
+	cfg.BaseURL = u.String()
+	persona := strings.TrimSpace(cfg.Persona)
+	if persona == "" {
+		persona = defaultPersona
+	}
+	if len(persona) > maxTextBytes {
+		return nil, errors.New("brain: persona exceeds 16384 bytes")
+	}
+	maxTokens := 1024
+	cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{BaseURL: cfg.BaseURL, APIKey: strings.TrimSpace(cfg.APIKey), Model: cfg.Model, MaxTokens: &maxTokens, HTTPClient: &http.Client{Timeout: 45 * time.Second, Transport: boundedTransport{}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}})
+	if err != nil {
+		return nil, errors.New("brain: cannot initialize OpenAI model")
+	}
+	e := &Engine{model: cm, persona: persona, gate: make(chan struct{}, 1)}
+	if cfg.Tools {
+		if host == nil {
+			return nil, errors.New("brain: device tools require a host")
+		}
+		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: cm, ToolsConfig: compose.ToolsNodeConfig{Tools: deviceTools(host), ExecuteSequentially: true}, MaxStep: maxSteps})
+		if err != nil {
+			return nil, errors.New("brain: cannot initialize Eino ReAct tools")
+		}
+	}
+	return e, nil
+}
+
+// Reply serializes conversation updates, and respects cancellation while queued and in flight.
+// Failed/canceled turns never enter history. Clear invalidates in-flight history commits.
+func (e *Engine) Reply(ctx context.Context, text string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || len(text) > maxTextBytes {
+		return "", errors.New("brain: input must contain 1 to 16384 bytes")
+	}
+	select {
+	case e.gate <- struct{}{}:
+		defer func() { <-e.gate }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	e.mu.Lock()
+	generation := e.generation
+	hist := append([]*schema.Message(nil), e.history...)
+	e.mu.Unlock()
+	// At most ten turns are sent, including the current request.
+	if len(hist) > 2*(maxTurns-1) {
+		hist = hist[len(hist)-2*(maxTurns-1):]
+	}
+	input := make([]*schema.Message, 0, len(hist)+2)
+	input = append(input, schema.SystemMessage(e.persona))
+	input = append(input, hist...)
+	input = append(input, schema.UserMessage(text))
+	var out *schema.Message
+	var err error
+	if e.agent != nil {
+		out, err = e.agent.Generate(ctx, input)
+	} else {
+		out, err = e.model.Generate(ctx, input)
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	// SDK errors may contain raw provider bodies or credential-bearing URLs. Never forward them.
+	if err != nil {
+		return "", errors.New("brain: model or tool request failed (check connection, model and tool step limit)")
+	}
+	if out == nil || len(out.ToolCalls) > 0 || strings.TrimSpace(out.Content) == "" {
+		return "", errors.New("brain: model did not return a final text reply")
+	}
+	reply := strings.TrimSpace(out.Content)
+	if len(reply) > maxTextBytes {
+		return "", errors.New("brain: model reply exceeds 16384 bytes")
+	}
+	e.mu.Lock()
+	if e.generation == generation {
+		e.history = append(e.history, schema.UserMessage(text), schema.AssistantMessage(reply, nil))
+		if len(e.history) > 2*maxTurns {
+			e.history = append([]*schema.Message(nil), e.history[len(e.history)-2*maxTurns:]...)
+		}
+	}
+	e.mu.Unlock()
+	return reply, nil
+}
+
+func (e *Engine) Clear() { e.mu.Lock(); e.history = nil; e.generation++; e.mu.Unlock() }
+
+// Read the SDK response before decoding to cap both success and provider error bodies.
+// Transport failures are intentionally not retried: a tool-bearing generation may have run.
+type boundedTransport struct{}
+
+func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	res, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil {
+		return nil, errors.New("model transport failed")
+	}
+	const limit = 1 << 20
+	data, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
+	res.Body.Close()
+	if err != nil || len(data) > limit {
+		return nil, errors.New("model response exceeds limit or cannot be read")
+	}
+	// Bound tool fan-out before Eino creates any tool execution tasks.
+	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		var envelope struct {
+			Choices []struct {
+				Message struct {
+					ToolCalls []json.RawMessage `json:"tool_calls"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if json.Unmarshal(data, &envelope) == nil {
+			for _, choice := range envelope.Choices {
+				if len(choice.Message.ToolCalls) > 8 {
+					return nil, errors.New("model returned too many tool calls")
+				}
+			}
+		}
+	}
+	res.Body = io.NopCloser(bytes.NewReader(data))
+	res.ContentLength = int64(len(data))
+	return res, nil
+}

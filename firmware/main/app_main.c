@@ -8,6 +8,7 @@
 #include "net.h"
 #include "nvs_flash.h"
 #include "quota.h"
+#include "voice/voice.h"
 
 static const char *TAG = "main";
 
@@ -31,6 +32,7 @@ void app_main(void)
     ESP_ERROR_CHECK(board_init());
     ESP_ERROR_CHECK(display_start());
     dashboard_create();
+    ESP_ERROR_CHECK(voice_init());
     net_start();
 
     // Holding BOOT for 3 s forgets Wi-Fi and reboots into the setup portal.

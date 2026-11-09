@@ -1,6 +1,9 @@
 package desktop
 
-import "aemeath/agent/internal/proto"
+import (
+	"aemeath/agent/internal/proto"
+	"aemeath/agent/internal/voice"
+)
 
 // State is an owned snapshot: callers may modify any nested value safely.
 type State struct {
@@ -14,6 +17,7 @@ type State struct {
 	Quota      *proto.QuotaFrame `json:"quota"`
 	Settings   Settings          `json:"settings"`
 	Page       string            `json:"page"`
+	Voice      voice.State       `json:"voice"`
 	// Screen state as last reported by the device; ScreenKnown is false until the
 	// connected device reports (ScreenOn/Brightness are then only placeholders).
 	ScreenOn    bool  `json:"screenOn"`

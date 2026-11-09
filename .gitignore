@@ -1,5 +1,6 @@
 # ESP-IDF
 firmware/build/
+firmware/build-avatar-host/
 firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old
@@ -9,5 +10,6 @@ agent/aemeath-agent
 agent/*.exe
 agent/build/
 agent/.mygo/
+agent/voice.local.json
 
 .DS_Store

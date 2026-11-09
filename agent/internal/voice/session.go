@@ -1,0 +1,614 @@
+package voice
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/coder/websocket"
+)
+
+const maxPlaybackSamples = sampleRate * 120
+
+type incoming struct {
+	kind websocket.MessageType
+	data []byte
+	err  error
+}
+type playback struct {
+	pcm            []int16
+	offset         int
+	seq            uint32
+	credits        int
+	ended, playing bool
+	deadline       time.Time
+}
+type session struct {
+	ctx         context.Context
+	ws          *websocket.Conn
+	cfg         Config
+	state       State
+	emit        func(State)
+	epoch       uint32
+	detector    detector
+	vad         vad
+	diagnostic  string
+	ring        sampleRing
+	kwsSamples  int64
+	capture     *capture
+	manualFixed bool
+	muted       bool
+	nextMic     uint32
+	jobs        chan work
+	results     chan result
+	cancelTurn  context.CancelFunc
+	generation  uint64
+	active      bool
+	play        *playback
+	deadline    time.Time
+}
+
+// Run connects once to /voice. It never retries and never downloads assets.
+func Run(ctx context.Context, address string, cfg Config, host Host, commands <-chan Command, emit func(State)) error {
+	return runWithDependencies(ctx, address, cfg, host, commands, emit, productionDependencies())
+}
+
+func voiceURL(address string) (string, error) {
+	address = strings.TrimSpace(address)
+	if !strings.Contains(address, "://") {
+		address = "ws://" + address
+	}
+	u, err := url.Parse(address)
+	if err != nil || u.Host == "" || (u.Scheme != "ws" && u.Scheme != "wss") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/" && u.Path != "/voice") {
+		return "", errors.New("invalid device voice address")
+	}
+	u.Path = "/voice"
+	return u.String(), nil
+}
+
+func runWithDependencies(ctx context.Context, address string, cfg Config, host Host, commands <-chan Command, emit func(State), d dependencies) (retErr error) {
+	cfg, err := NormalizeConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if emit == nil {
+		emit = func(State) {}
+	}
+	s := &session{cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16)}
+	defer func() {
+		s.state.Connected = false
+		s.state.WakeReady = false
+		if retErr != nil && !errors.Is(retErr, context.Canceled) {
+			s.state.Error = s.safe(retErr.Error())
+			s.state.Phase = "error"
+		}
+		s.emit(s.state)
+	}()
+	if !cfg.Enabled {
+		s.state.Phase = "disabled"
+		return nil
+	}
+	endpoint, err := voiceURL(address)
+	if err != nil {
+		return err
+	}
+	sessionCtx, cancel := context.WithCancel(ctx)
+	s.ctx = sessionCtx
+	defer cancel()
+	dialCtx, dialCancel := context.WithTimeout(sessionCtx, 5*time.Second)
+	ws, _, err := websocket.Dial(dialCtx, endpoint, nil)
+	dialCancel()
+	if err != nil {
+		return errors.New("voice connection failed")
+	}
+	s.ws = ws
+	ws.SetReadLimit(maxTextBytes)
+	defer ws.CloseNow()
+	helloCtx, helloCancel := context.WithTimeout(sessionCtx, 5*time.Second)
+	typ, b, err := ws.Read(helloCtx)
+	helloCancel()
+	if err != nil {
+		return errors.New("voice hello failed")
+	}
+	if typ != websocket.MessageText {
+		return errors.New("expected voice hello")
+	}
+	hello, err := decodeMessage(b)
+	if err != nil {
+		return err
+	}
+	if hello.Type == "error" {
+		return fmt.Errorf("device refused voice session: %s", s.safe(hello.Code))
+	}
+	if err = hello.validateHello(); err != nil {
+		return err
+	}
+	s.epoch = hello.Epoch
+	// Keep capture disabled while native models are loading.
+	s.detector, err = d.newDetector(cfg)
+	if err != nil {
+		s.diagnostic = "Offline wake unavailable: " + s.safe(err.Error())
+	}
+	if s.detector != nil {
+		defer s.detector.Close()
+	}
+	s.vad, err = d.newVAD(cfg)
+	if err != nil {
+		if s.diagnostic != "" {
+			s.diagnostic += "; "
+		}
+		s.diagnostic += "VAD unavailable: " + s.safe(err.Error())
+	}
+	if s.vad != nil {
+		defer s.vad.Close()
+	}
+	if err = s.send(message{Type: "config", Enabled: true, Volume: cfg.Volume}); err != nil {
+		return err
+	}
+	s.state.Connected = true
+	s.state.WakeReady = s.detector != nil && s.vad != nil
+	s.state.Error = s.diagnostic
+	if err = s.phase("idle"); err != nil {
+		return err
+	}
+	// Reader owns all websocket reads, allowing ping/pong and close handling even
+	// while a cloud request or native detector is busy. Overflow closes the session.
+	rx := make(chan incoming, 64)
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			typ, b, err := ws.Read(sessionCtx)
+			item := incoming{kind: typ, data: b, err: err}
+			select {
+			case rx <- item:
+			case <-sessionCtx.Done():
+				return
+			default:
+				ws.CloseNow()
+				select {
+				case rx <- incoming{err: errors.New("voice receive queue overflow")}:
+				case <-sessionCtx.Done():
+				}
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); worker(sessionCtx, cfg, host, d, s.jobs, s.results) }()
+	defer func() {
+		if s.cancelTurn != nil {
+			s.cancelTurn()
+		}
+		cancel()
+		ws.CloseNow()
+		<-readerDone
+		<-workerDone
+	}()
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer tick.Stop()
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+	pingErr := make(chan error, 1)
+	pingActive := false
+	for {
+		select {
+		case <-sessionCtx.Done():
+			return sessionCtx.Err()
+		case <-ping.C:
+			if !pingActive {
+				pingActive = true
+				go func() {
+					c, done := context.WithTimeout(sessionCtx, 3*time.Second)
+					defer done()
+					e := ws.Ping(c)
+					select {
+					case pingErr <- e:
+					case <-sessionCtx.Done():
+					}
+				}()
+			}
+		case e := <-pingErr:
+			pingActive = false
+			if e != nil {
+				return errors.New("voice ping timeout")
+			}
+		case <-tick.C:
+			if s.active && !s.deadline.IsZero() && time.Now().After(s.deadline) {
+				if err = s.fail("timeout", errors.New("voice operation timed out")); err != nil {
+					return err
+				}
+			}
+		case cmd, ok := <-commands:
+			if !ok {
+				commands = nil
+				continue
+			}
+			if err = s.command(cmd); err != nil {
+				return err
+			}
+		case r := <-s.results:
+			if err = s.result(r); err != nil {
+				return err
+			}
+		case in := <-rx:
+			if in.err != nil {
+				if sessionCtx.Err() != nil {
+					return sessionCtx.Err()
+				}
+				return errors.New("voice connection closed")
+			}
+			if in.kind == websocket.MessageBinary {
+				err = s.microphone(in.data)
+			} else if in.kind == websocket.MessageText {
+				err = s.control(in.data)
+			} else {
+				err = errors.New("unsupported voice websocket message")
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (s *session) safe(text string) string {
+	for _, secret := range []string{s.cfg.MiMoAPIKey, s.cfg.LLMAPIKey} {
+		if secret != "" {
+			text = strings.ReplaceAll(text, secret, "[redacted]")
+		}
+	}
+	if len(text) > 2048 {
+		text = text[:2048]
+	}
+	return text
+}
+func (s *session) send(m message) error {
+	m.V = protocolVersion
+	m.Epoch = s.epoch
+	// Device captions are bounded independently of full desktop transcripts.
+	m.Text = deviceCaption(m.Text)
+	m.Message = deviceCaption(m.Message)
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	c, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+	defer cancel()
+	if err = s.ws.Write(c, websocket.MessageText, b); err != nil {
+		return errors.New("voice send failed")
+	}
+	return nil
+}
+func deviceCaption(text string) string {
+	const limit = 512 // even JSON-escaped ASCII control characters fit the 4096-byte device frame
+	if len(text) <= limit {
+		return text
+	}
+	text = text[:limit-3]
+	for !utf8.ValidString(text) {
+		text = text[:len(text)-1]
+	}
+	return text + "…"
+}
+
+func (s *session) phase(phase string) error {
+	s.state.Phase = phase
+	s.emit(s.state)
+	return s.send(message{Type: "state", Turn: s.state.Turn, State: phase})
+}
+func (s *session) resetCapture() {
+	s.capture = nil
+	s.ring.reset()
+	s.kwsSamples = 0
+	if s.detector != nil {
+		s.detector.Reset()
+	}
+	if s.vad != nil {
+		s.vad.Reset()
+	}
+}
+func (s *session) abort(notify bool) error {
+	if s.cancelTurn != nil {
+		s.cancelTurn()
+		s.cancelTurn = nil
+	}
+	wasActive := s.active
+	s.active = false
+	s.play = nil
+	s.deadline = time.Time{}
+	s.resetCapture()
+	if wasActive && notify {
+		return s.send(message{Type: "cancel", Turn: s.state.Turn})
+	}
+	return nil
+}
+func (s *session) begin() error {
+	if err := s.abort(true); err != nil {
+		return err
+	}
+	s.state.Turn++
+	if s.state.Turn == 0 {
+		s.state.Turn = 1
+	}
+	s.state.Transcript = ""
+	s.state.Response = ""
+	s.state.ASRMillis = 0
+	s.state.AgentMillis = 0
+	s.state.TTSMillis = 0
+	s.state.Error = s.diagnostic
+	s.active = true
+	s.deadline = time.Now().Add(120 * time.Second)
+	return nil
+}
+func (s *session) submit(kind, text string, pcm []int16) {
+	c, cancel := context.WithTimeout(s.ctx, 115*time.Second)
+	s.cancelTurn = cancel
+	w := work{ctx: c, turn: s.state.Turn, generation: s.generation, kind: kind, text: text, pcm: pcm}
+	select {
+	case <-s.jobs:
+	default:
+	}
+	s.jobs <- w
+}
+func (s *session) command(c Command) error {
+	switch c.Kind {
+	case "wake":
+		if s.muted {
+			return nil
+		}
+		if err := s.begin(); err != nil {
+			return err
+		}
+		if err := s.phase("wake"); err != nil {
+			return err
+		}
+		s.capture = &capture{}
+		s.manualFixed = s.vad == nil
+		if s.manualFixed {
+			s.state.Error = s.diagnostic + "; manual recording uses a fixed 6 second window"
+		}
+		s.deadline = time.Now().Add(40 * time.Second)
+		return s.phase("listening")
+	case "cancel":
+		if err := s.abort(true); err != nil {
+			return err
+		}
+		s.state.Error = s.diagnostic
+		return s.phase("idle")
+	case "clear":
+		if err := s.abort(true); err != nil {
+			return err
+		}
+		s.generation++
+		s.state.Transcript = ""
+		s.state.Response = ""
+		s.state.Error = s.diagnostic
+		s.submit("clear", "", nil)
+		return s.phase("idle")
+	case "preview", "reference":
+		if err := s.begin(); err != nil {
+			return err
+		}
+		s.submit(c.Kind, c.Text, nil)
+		return s.phase("synthesizing")
+	default:
+		return nil
+	}
+}
+func (s *session) fail(code string, err error) error {
+	if e := s.abort(true); e != nil {
+		return e
+	}
+	s.state.Error = s.safe(err.Error())
+	if e := s.send(message{Type: "error", Turn: s.state.Turn, Code: code, Message: s.state.Error}); e != nil {
+		return e
+	}
+	return s.phase("error")
+}
+func (s *session) microphone(b []byte) error {
+	f, err := decodeAudio(b)
+	if err != nil {
+		return s.fail("bad_audio", err)
+	}
+	if f.Kind != kindMicrophone {
+		return s.fail("bad_audio", errors.New("device sent non-microphone audio"))
+	}
+	if f.Epoch != s.epoch {
+		return nil
+	}
+	if f.Seq != s.nextMic {
+		s.nextMic = f.Seq + 1
+		if s.capture != nil {
+			return s.fail("mic_gap", errors.New("microphone sequence gap; recording canceled"))
+		}
+		s.resetCapture()
+		return nil
+	}
+	s.nextMic++
+	if s.muted {
+		return nil
+	}
+	if s.capture != nil {
+		var speech bool
+		if s.vad != nil {
+			speech, err = s.vad.Speech(f.PCM)
+			if err != nil {
+				return s.fail("vad", err)
+			}
+		}
+		done, empty := false, false
+		if s.manualFixed {
+			s.capture.pcm = append(s.capture.pcm, f.PCM...)
+			s.capture.elapsed += len(f.PCM)
+			done = s.capture.elapsed >= manualWindowSamples
+		} else {
+			done, empty = s.capture.feed(f.PCM, speech)
+		}
+		if done {
+			if empty {
+				return s.fail("no_speech", errors.New("no speech detected before timeout"))
+			}
+			pcm := s.capture.pcm
+			s.capture = nil
+			s.manualFixed = false
+			s.deadline = time.Now().Add(120 * time.Second)
+			s.submit("utterance", "", pcm)
+			return s.phase("recognizing")
+		}
+		return nil
+	}
+	if s.active || !s.state.WakeReady {
+		return nil
+	}
+	s.ring.add(f.PCM)
+	s.kwsSamples += int64(len(f.PCM))
+	hit, err := s.detector.Feed(f.PCM)
+	if err != nil {
+		s.state.WakeReady = false
+		s.diagnostic = "Offline wake unavailable: " + s.safe(err.Error())
+		return s.fail("wake", err)
+	}
+	if !hit {
+		return nil
+	}
+	end := s.detector.KeywordEndSamples()
+	// Never include keyword audio if a detector cannot supply a valid endpoint.
+	suffix := 0
+	if end > 0 && end <= s.kwsSamples {
+		suffix = int(s.kwsSamples - end)
+	}
+	p := s.ring.tail(suffix)
+	if err = s.command(Command{Kind: "wake"}); err != nil {
+		return err
+	}
+	for len(p) > 0 {
+		n := min(frameSamples, len(p))
+		speech, e := s.vad.Speech(p[:n])
+		if e != nil {
+			return s.fail("vad", e)
+		}
+		s.capture.feed(p[:n], speech)
+		p = p[n:]
+	}
+	return nil
+}
+func (s *session) control(b []byte) error {
+	m, err := decodeMessage(b)
+	if err != nil {
+		return s.fail("bad_control", err)
+	}
+	if m.Epoch != s.epoch {
+		return nil
+	}
+	switch m.Type {
+	case "wake", "clear":
+		return s.command(Command{Kind: m.Type})
+	case "mute":
+		s.muted = m.Muted
+		if s.muted {
+			return s.command(Command{Kind: "cancel"})
+		}
+		s.resetCapture()
+		return nil
+	case "cancel":
+		if s.active && m.Turn == s.state.Turn {
+			if err = s.abort(false); err != nil {
+				return err
+			}
+			s.state.Error = s.diagnostic
+			return s.phase("idle")
+		}
+	case "credit":
+		if s.play == nil || m.Turn != s.state.Turn {
+			return nil
+		}
+		if m.Frames <= 0 || m.Frames > maxCredits || s.play.credits+m.Frames > maxCredits {
+			return s.fail("bad_credit", errors.New("invalid playback credits"))
+		}
+		s.play.credits += m.Frames
+		return s.pump()
+	case "playing":
+		if s.play != nil && m.Turn == s.state.Turn && s.play.offset > 0 && !s.play.playing {
+			s.play.playing = true
+			return s.phase("speaking")
+		}
+	case "played":
+		if s.play != nil && m.Turn == s.state.Turn {
+			if !s.play.ended || !s.play.playing {
+				return s.fail("bad_played", errors.New("playback acknowledgement arrived before rendered audio"))
+			}
+			if err = s.abort(false); err != nil {
+				return err
+			}
+			s.state.Error = s.diagnostic
+			return s.phase("idle")
+		}
+	case "error":
+		if m.Turn == s.state.Turn || m.Turn == 0 {
+			return s.fail("device", fmt.Errorf("device voice error: %s", s.safe(m.Message)))
+		}
+	case "hello":
+		return errors.New("unexpected second voice hello")
+	}
+	return nil
+}
+func (s *session) result(r result) error {
+	if !s.active || r.turn != s.state.Turn {
+		return nil
+	}
+	if r.err != nil {
+		return s.fail(r.phase, r.err)
+	}
+	switch r.phase {
+	case "transcript":
+		s.state.Transcript = r.text
+		s.state.ASRMillis = r.millis
+		s.emit(s.state)
+		return s.send(message{Type: "transcript", Turn: r.turn, Text: r.text})
+	case "response":
+		s.state.Response = r.text
+		s.state.AgentMillis = r.millis
+		s.emit(s.state)
+		return s.send(message{Type: "response", Turn: r.turn, Text: r.text})
+	case "audio":
+		if len(r.pcm) == 0 || len(r.pcm) > maxPlaybackSamples {
+			return s.fail("audio_size", errors.New("empty or oversized playback audio"))
+		}
+		s.state.TTSMillis = r.millis
+		s.play = &playback{pcm: r.pcm}
+		s.deadline = time.Now().Add(time.Duration(len(r.pcm))*time.Second/sampleRate + 15*time.Second)
+		return s.send(message{Type: "playback_start", Turn: r.turn, Samples: len(r.pcm), Volume: s.cfg.Volume})
+	default:
+		return s.phase(r.phase)
+	}
+}
+func (s *session) pump() error {
+	p := s.play
+	for p.credits > 0 && p.offset < len(p.pcm) {
+		n := min(frameSamples, len(p.pcm)-p.offset)
+		b := encodeAudio(audioFrame{Kind: kindPlayback, Epoch: s.epoch, Turn: s.state.Turn, Seq: p.seq, PCM: p.pcm[p.offset : p.offset+n]})
+		c, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+		err := s.ws.Write(c, websocket.MessageBinary, b)
+		cancel()
+		if err != nil {
+			return errors.New("voice audio send failed")
+		}
+		p.offset += n
+		p.seq++
+		p.credits--
+	}
+	if p.offset == len(p.pcm) && !p.ended {
+		p.ended = true
+		return s.send(message{Type: "playback_end", Turn: s.state.Turn})
+	}
+	return nil
+}

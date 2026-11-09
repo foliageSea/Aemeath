@@ -16,6 +16,7 @@ import (
 	"aemeath/agent/internal/link"
 	"aemeath/agent/internal/magpie"
 	"aemeath/agent/internal/proto"
+	"aemeath/agent/internal/voice"
 )
 
 var (
@@ -36,6 +37,7 @@ type dependencies struct {
 	find                                func(context.Context) (string, error)
 	dial                                func(context.Context, string) (connection, error)
 	quota                               func(context.Context, string) (*proto.QuotaFrame, error)
+	voiceRun                            func(context.Context, string, voice.Config, voice.Host, <-chan voice.Command, func(voice.State)) error
 	sampleEvery, quotaEvery, retryEvery time.Duration
 }
 
@@ -60,6 +62,7 @@ type Service struct {
 	connCtx       context.Context
 	updates       chan struct{}
 	quotaWake     chan struct{}
+	voiceCommands chan voice.Command
 }
 
 // New loads preferences and starts local sampling (1s) and quota polling (30s).
@@ -98,6 +101,7 @@ func New(configPath string) (*Service, error) {
 		quota: func(ctx context.Context, base string) (*proto.QuotaFrame, error) {
 			return magpie.New(base).FrameAll(ctx)
 		},
+		voiceRun:    voice.Run,
 		sampleEvery: time.Second, quotaEvery: 30 * time.Second, retryEvery: 2 * time.Second,
 	}), nil
 }
@@ -167,6 +171,8 @@ func (s *Service) stop() {
 	s.state.Running, s.state.Connected, s.state.Status = false, false, "stopped"
 	s.state.Target, s.state.Error = "", ""
 	s.state.ScreenKnown = false
+	s.state.Voice.Connected, s.state.Voice.WakeReady = false, false
+	s.state.Voice.Phase = "stopped"
 	s.mu.Unlock()
 }
 
@@ -189,7 +195,7 @@ func (s *Service) SaveSettings(settings Settings) error {
 	s.mu.Lock()
 	old := s.state.Settings
 	s.state.Settings = normalized
-	if old.Address != normalized.Address && s.attemptCancel != nil {
+	if (old.Address != normalized.Address || old.Voice != normalized.Voice) && s.attemptCancel != nil {
 		s.attemptCancel()
 	}
 	if old.MagpieURL != normalized.MagpieURL {
@@ -211,15 +217,22 @@ type displayFrame struct {
 
 // SetPage sends a display command; it changes Page only after a successful send.
 func (s *Service) SetPage(page string) error {
-	if page != "metrics" && page != "quota" {
-		return fmt.Errorf("invalid page %q: expected metrics or quota", page)
+	return s.setPage(context.Background(), page)
+}
+
+func (s *Service) setPage(request context.Context, page string) error {
+	if err := request.Err(); err != nil {
+		return err
+	}
+	if page != "metrics" && page != "quota" && page != "voice" {
+		return fmt.Errorf("invalid page %q: expected metrics, quota or voice", page)
 	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return ErrClosed
 	}
-	conn, ctx := s.conn, s.connCtx
+	conn, connectionCtx := s.conn, s.connCtx
 	if conn == nil || !s.state.Connected {
 		s.mu.Unlock()
 		return ErrOffline
@@ -227,10 +240,18 @@ func (s *Service) SetPage(page string) error {
 	s.wg.Add(1)
 	s.mu.Unlock()
 	defer s.wg.Done()
+	ctx, cancel := context.WithCancel(request)
+	stop := context.AfterFunc(connectionCtx, cancel)
+	defer func() { stop(); cancel() }()
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := conn.Send(ctx, displayFrame{1, "display", page}); err != nil {
-		s.failConnection(conn, err)
+		if request.Err() == nil {
+			s.failConnection(conn, err)
+		}
 		return fmt.Errorf("set page: %w", err)
 	}
 	s.mu.Lock()
@@ -251,6 +272,13 @@ type screenFrame struct {
 // SetScreen sends a backlight command (screen on/off and brightness 0..100);
 // it changes ScreenOn/Brightness only after a successful send.
 func (s *Service) SetScreen(on bool, brightness int) error {
+	return s.setScreen(context.Background(), on, brightness)
+}
+
+func (s *Service) setScreen(request context.Context, on bool, brightness int) error {
+	if err := request.Err(); err != nil {
+		return err
+	}
 	if brightness < 0 || brightness > 100 {
 		return fmt.Errorf("invalid brightness %d: expected 0..100", brightness)
 	}
@@ -259,7 +287,7 @@ func (s *Service) SetScreen(on bool, brightness int) error {
 		s.mu.Unlock()
 		return ErrClosed
 	}
-	conn, ctx := s.conn, s.connCtx
+	conn, connectionCtx := s.conn, s.connCtx
 	if conn == nil || !s.state.Connected {
 		s.mu.Unlock()
 		return ErrOffline
@@ -267,10 +295,18 @@ func (s *Service) SetScreen(on bool, brightness int) error {
 	s.wg.Add(1)
 	s.mu.Unlock()
 	defer s.wg.Done()
+	ctx, cancel := context.WithCancel(request)
+	stop := context.AfterFunc(connectionCtx, cancel)
+	defer func() { stop(); cancel() }()
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := conn.Send(ctx, screenFrame{1, "screen", on, brightness}); err != nil {
-		s.failConnection(conn, err)
+		if request.Err() == nil {
+			s.failConnection(conn, err)
+		}
 		return fmt.Errorf("set screen: %w", err)
 	}
 	s.mu.Lock()
@@ -425,7 +461,13 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 			s.conn, s.connCtx = conn, attempt
 			s.state.Connected, s.state.Status, s.state.Error = true, "connected", ""
 			s.mu.Unlock()
+			voiceCtx, stopVoice := context.WithCancel(attempt)
+			voiceDone := s.startVoice(voiceCtx, conn, address)
 			err = s.forward(attempt, conn)
+			// Join audio without changing whether this attempt was externally
+			// canceled; ordinary socket failures must still observe retry backoff.
+			stopVoice()
+			<-voiceDone
 		}
 		changed := attempt.Err() != nil && ctx.Err() == nil
 		cancel()

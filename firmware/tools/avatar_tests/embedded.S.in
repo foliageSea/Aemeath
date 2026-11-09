@@ -1,0 +1,15 @@
+#ifdef __APPLE__
+.section __TEXT,__const
+#else
+.section .rodata
+#endif
+.balign 4
+.globl _binary_avatar_frames_bin_start
+_binary_avatar_frames_bin_start:
+.incbin "@FIRMWARE@/main/assets/avatar_frames.bin"
+.balign 4
+.globl _binary_bg_480_rgb565_start
+_binary_bg_480_rgb565_start:
+.incbin "@FIRMWARE@/main/assets/bg_480.rgb565"
+.globl _binary_bg_480_rgb565_end
+_binary_bg_480_rgb565_end:

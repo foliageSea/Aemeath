@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "llmBaseURL": "https://api.openai.com/v1",
+  "llmAPIKey": "",
+  "llmModel": "YOUR_TOOL_CALLING_MODEL",
+  "llmTools": true,
+  "mimoBaseURL": "https://api.xiaomimimo.com/v1",
+  "mimoAPIKey": "",
+  "referenceAudio": "",
+  "wakeModelDir": "",
+  "wakeThreshold": 0.25,
+  "volume": 70,
+  "persona": "你是爱弥斯，一位温柔、机敏的中文语音助手。回答简短自然、适合直接朗读，不使用 Markdown。只有在确有需要或用户要求时才操作监控台；不要把已发送指令说成已确认执行。"
+}

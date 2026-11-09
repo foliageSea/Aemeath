@@ -24,6 +24,13 @@
 
 #define BOARD_BOOT_BTN         GPIO_NUM_0
 
+// Shared duplex audio clocks, Waveshare ESP32-S3-Touch-LCD-4B BSP pin map.
+#define BOARD_I2S_MCLK         GPIO_NUM_5
+#define BOARD_I2S_BCLK         GPIO_NUM_16
+#define BOARD_I2S_WS           GPIO_NUM_7
+#define BOARD_I2S_DOUT         GPIO_NUM_6
+#define BOARD_I2S_DIN          GPIO_NUM_15
+
 // TCA9554 @0x20 pins
 #define EXIO_LCD_CS            IO_EXPANDER_PIN_NUM_0
 #define EXIO_LCD_SDA           IO_EXPANDER_PIN_NUM_1
@@ -43,3 +50,4 @@ void board_touch_reset(void);
 // 0..100
 void board_backlight_set(int percent);
 bool board_boot_pressed(void);
+esp_err_t board_audio_amp(bool enabled);

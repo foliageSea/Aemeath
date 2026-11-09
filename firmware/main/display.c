@@ -62,7 +62,10 @@ static const st7701_lcd_init_cmd_t s_init_cmds[] = {
 static lv_display_t *s_disp;
 static esp_lcd_panel_handle_t s_panel;
 static SemaphoreHandle_t s_screen_lock;
-static bool s_screen_on = true;  // logical state == panel DISPON/DISPOFF state
+static bool s_screen_on = true;  // actual panel DISPON/DISPOFF state
+static bool s_voice_override;
+static bool s_voice_saved_on;
+static int s_voice_saved_brightness;
 
 #define SCREEN_NVS_NS             "screen"
 #define SCREEN_NVS_ON             "on"
@@ -292,6 +295,8 @@ esp_err_t display_set_screen(bool on, int percent)
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
     xSemaphoreTake(s_screen_lock, portMAX_DELAY);
+    // An explicit screen command supersedes a temporary voice wake.
+    s_voice_override = false;
     // Brightness is remembered while off so turning back on restores it.
     s_brightness_pct = percent;
     esp_err_t err = screen_apply(on, percent);
@@ -304,13 +309,39 @@ esp_err_t display_set_screen(bool on, int percent)
     return err;
 }
 
+void display_voice_begin(void)
+{
+    if (!s_panel || !s_screen_lock) return;
+    xSemaphoreTake(s_screen_lock, portMAX_DELAY);
+    if (!s_voice_override) {
+        s_voice_saved_on = s_screen_on;
+        s_voice_saved_brightness = s_brightness_pct;
+        s_voice_override = true;
+        int brightness = s_brightness_pct > 0 ? s_brightness_pct : SCREEN_DEFAULT_BRIGHTNESS;
+        if (screen_apply(true, brightness) != ESP_OK) s_voice_override = false;
+    }
+    xSemaphoreGive(s_screen_lock);
+}
+
+void display_voice_finish(void)
+{
+    if (!s_panel || !s_screen_lock) return;
+    xSemaphoreTake(s_screen_lock, portMAX_DELAY);
+    if (s_voice_override) {
+        screen_apply(s_voice_saved_on, s_voice_saved_brightness);
+        s_voice_override = false;
+    }
+    xSemaphoreGive(s_screen_lock);
+}
+
 void display_get_screen(bool *on, int *percent)
 {
     if (s_screen_lock) {
         xSemaphoreTake(s_screen_lock, portMAX_DELAY);
     }
-    *on = s_screen_on;
-    *percent = s_brightness_pct;
+    // Report/persist the user preference, never the temporary voice override.
+    *on = s_voice_override ? s_voice_saved_on : s_screen_on;
+    *percent = s_voice_override ? s_voice_saved_brightness : s_brightness_pct;
     if (s_screen_lock) {
         xSemaphoreGive(s_screen_lock);
     }

@@ -66,6 +66,8 @@ bool metrics_ingest(const char *json, size_t len)
                     accepted = dashboard_show_page(DASHBOARD_PAGE_METRICS);
                 } else if (strcmp(page->valuestring, "quota") == 0) {
                     accepted = dashboard_show_page(DASHBOARD_PAGE_QUOTA);
+                } else if (strcmp(page->valuestring, "voice") == 0) {
+                    accepted = dashboard_show_page(DASHBOARD_PAGE_VOICE);
                 }
             }
         } else if (strcmp(type->valuestring, "screen") == 0) {

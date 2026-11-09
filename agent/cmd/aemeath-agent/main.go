@@ -25,7 +25,16 @@ func main() {
 	verbose := flag.Bool("v", false, "log every frame")
 	dryRun := flag.Bool("dry-run", false, "print frames to stdout instead of sending")
 	magpieURL := flag.String("magpie", magpie.DefaultBase, "Magpie gateway base URL for quota frames (empty disables)")
+	voiceEnabled := flag.Bool("voice", false, "enable the voice assistant using environment configuration")
+	voiceConfig := flag.String("voice-config", "", "voice configuration JSON file (enables voice)")
 	flag.Parse()
+	if *interval <= 0 {
+		log.Fatal("interval must be positive")
+	}
+	vcfg, err := loadVoiceConfig(*voiceConfig, *voiceEnabled)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -42,6 +51,11 @@ func main() {
 		return
 	}
 
+	control := &cliVoiceControl{}
+	if vcfg.Enabled {
+		log.Print("语音控制：wake / cancel / clear / preview [文字] / reference")
+		go control.console(ctx, os.Stdin)
+	}
 	backoff := time.Second
 	for ctx.Err() == nil {
 		target := *addr
@@ -62,7 +76,12 @@ func main() {
 		}
 		log.Printf("connected to %s", target)
 		backoff = time.Second
-		err = stream(ctx, c, mp, conn, *interval, *verbose)
+		attempt, cancel := context.WithCancel(ctx)
+		host := &cliVoiceHost{conn: conn}
+		voiceDone := control.start(attempt, target, vcfg, host)
+		err = stream(attempt, c, mp, conn, *interval, *verbose, host)
+		cancel()
+		<-voiceDone
 		conn.Close()
 		if ctx.Err() == nil {
 			log.Printf("connection lost: %v", err)
@@ -70,7 +89,7 @@ func main() {
 	}
 }
 
-func stream(ctx context.Context, c *collect.Collector, mp *magpie.Client, conn *link.Conn, interval time.Duration, verbose bool) error {
+func stream(ctx context.Context, c *collect.Collector, mp *magpie.Client, conn *link.Conn, interval time.Duration, verbose bool, host *cliVoiceHost) error {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	var lastQuota time.Time
@@ -80,13 +99,18 @@ func stream(ctx context.Context, c *collect.Collector, mp *magpie.Client, conn *
 			// Magpie being down must not drop the metrics link.
 			if qf, err := mp.Frame(ctx); err != nil {
 				log.Printf("magpie: %v", err)
-			} else if err := conn.Send(ctx, qf); err != nil {
-				return err
-			} else if verbose {
-				log.Printf("sent quota frame: %d accounts", len(qf.Accounts))
+			} else {
+				host.setQuota(qf)
+				if err := conn.Send(ctx, qf); err != nil {
+					return err
+				}
+				if verbose {
+					log.Printf("sent quota frame: %d accounts", len(qf.Accounts))
+				}
 			}
 		}
 		f := c.Sample(ctx)
+		host.setMetrics(f)
 		if err := conn.Send(ctx, f); err != nil {
 			return err
 		}

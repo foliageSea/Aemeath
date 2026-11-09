@@ -9,6 +9,7 @@
 #include "esp_wifi.h"
 #include "metrics.h"
 #include "net.h"
+#include "voice_ws.h"
 
 static const char *TAG = "server";
 
@@ -155,7 +156,7 @@ static void screen_state_send(void *arg)
         return;
     }
     for (size_t i = 0; i < n; i++) {
-        if (httpd_ws_get_fd_info(s_srv, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+        if (!voice_ws_is_client(fds[i]) && httpd_ws_get_fd_info(s_srv, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
             httpd_ws_send_frame_async(s_srv, fds[i], &frame);
         }
     }
@@ -222,9 +223,14 @@ void server_start(void)
     cfg.stack_size = 8192;
     cfg.max_open_sockets = 7;
     cfg.lru_purge_enable = true;
+    cfg.send_wait_timeout = 1;
+    cfg.recv_wait_timeout = 1;
     httpd_handle_t srv;
     ESP_ERROR_CHECK(httpd_start(&srv, &cfg));
     s_srv = srv;
+    // An optional voice allocation must never take down metrics or provisioning.
+    esp_err_t voice_err = voice_ws_register(srv);
+    if (voice_err != ESP_OK) ESP_LOGE(TAG, "voice service unavailable: %s", esp_err_to_name(voice_err));
 
     const httpd_uri_t uris[] = {
         {.uri = "/", .method = HTTP_GET, .handler = root_get},

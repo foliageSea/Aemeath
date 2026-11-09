@@ -1,0 +1,13 @@
+{
+  "upstream": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+  "upstream_sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+  "subset_sha256": "964d1e3e72cd93cb231a013c1cb6f7e6dd7fc3a845d279fdf826923bd8faca9d",
+  "fonttools": "4.61.1",
+  "weight": 400,
+  "glyphs": 7541,
+  "license": "SIL Open Font License 1.1 (OFL.txt)",
+  "converter": "lv_font_conv@1.5.3",
+  "size": 20,
+  "bpp": 4,
+  "kerning": false
+}

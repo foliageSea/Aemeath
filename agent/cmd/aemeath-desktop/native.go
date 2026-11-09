@@ -38,6 +38,7 @@ type nativeUI struct {
 	details       bool
 	quotaList     ui.ListState
 	quotaUnsaved  bool
+	voicePreview  string
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
@@ -141,6 +142,8 @@ func (a *nativeUI) view(c *ui.Context) {
 					switch a.page {
 					case "设置":
 						a.settingsView(c)
+					case "语音助手":
+						a.voiceView(c)
 					default:
 						a.overview(c)
 					}

@@ -11,3 +11,7 @@ esp_err_t display_start(void);
 // Persisted to NVS (debounced) and restored by display_start().
 esp_err_t display_set_screen(bool on, int percent);
 void display_get_screen(bool *on, int *percent);
+
+// Temporary voice wake. Never writes NVS; a later display_set_screen() wins.
+void display_voice_begin(void);
+void display_voice_finish(void);

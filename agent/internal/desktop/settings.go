@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"aemeath/agent/internal/magpie"
+	"aemeath/agent/internal/voice"
 )
 
 type Subscription struct {
@@ -24,9 +25,15 @@ type Settings struct {
 	Address       string         `json:"address"`
 	MagpieURL     string         `json:"magpieURL"`
 	Subscriptions []Subscription `json:"subscriptions"`
+	Voice         voice.Config   `json:"voice"`
 }
 
 func normalizeSettings(in Settings) (Settings, error) {
+	var err error
+	in.Voice, err = voice.NormalizeConfig(in.Voice)
+	if err != nil {
+		return Settings{}, fmt.Errorf("voice settings: %w", err)
+	}
 	in.Address = strings.TrimSpace(in.Address)
 	if err := validateAddress(in.Address); err != nil {
 		return Settings{}, err
@@ -98,12 +105,13 @@ func validateAddress(address string) error {
 func loadSettings(path string) (Settings, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return normalizeSettings(Settings{})
+		return normalizeSettings(Settings{Voice: voice.Config{Volume: 70}})
 	}
 	if err != nil {
 		return Settings{}, fmt.Errorf("read settings: %w", err)
 	}
-	var settings Settings
+	// Missing voice/volume fields migrate to an audible default; explicit zero stays muted.
+	settings := Settings{Voice: voice.Config{Volume: 70}}
 	if err := json.Unmarshal(b, &settings); err != nil {
 		return Settings{}, fmt.Errorf("decode settings: %w", err)
 	}

@@ -8,22 +8,27 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$project_dir"
+unset GOOS GOARCH
 platform="${1:-darwin/universal}"
 if [[ $# -gt 0 ]]; then shift; fi
 case "$platform" in
   darwin/arm64|darwin/amd64|darwin/universal) ;;
   *) echo "Usage: $0 [darwin/universal|darwin/arm64|darwin/amd64] [mygo build flags...]" >&2; exit 2 ;;
 esac
-for tool in go xcrun hdiutil codesign; do
+for tool in go xcrun hdiutil codesign otool; do
   command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 xcrun --find clang >/dev/null
 # Keep cgo enabled: Aemeath uses IOKit temperature and GPU sensors on macOS.
 export CGO_ENABLED=1
+export GOFLAGS="${GOFLAGS:-} -mod=readonly"
+# Strip sherpa's module-cache rpath at link time, before MyGO signs code/DMG.
+export CC="\"$project_dir/scripts/macos-cc.sh\""
 # Match the bundle minimum; otherwise clang targets the build machine's macOS.
 export MACOSX_DEPLOYMENT_TARGET=13.0
 export CGO_CFLAGS="${CGO_CFLAGS:--O2 -g} -mmacosx-version-min=13.0"
-export CGO_LDFLAGS="${CGO_LDFLAGS:-} -mmacosx-version-min=13.0"
+export CGO_LDFLAGS="${CGO_LDFLAGS:-} -mmacosx-version-min=13.0 -Wl,-rpath,@executable_path/../Resources"
+bash ./scripts/stage-voice-native.sh "$platform"
 go run ./scripts/icon
 args=(build -platform "$platform")
 if [[ -n "${AEMEATH_SIGN_IDENTITY:-}" ]]; then

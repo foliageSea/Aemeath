@@ -97,6 +97,7 @@ func main() {
 			mygo.Separator(),
 			{ID: "metrics", Label: "监控台 · 性能", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) { report(func() error { return service.SetPage("metrics") }) }},
 			{ID: "quota", Label: "监控台 · 订阅额度", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) { report(func() error { return service.SetPage("quota") }) }},
+			{ID: "voice", Label: "监控台 · 语音助手", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) { report(func() error { return service.SetPage("voice") }) }},
 			mygo.Separator(),
 			{ID: "screen-on", Label: "点亮屏幕", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) {
 				report(func() error { return service.SetScreen(true, service.Snapshot().Brightness) })
@@ -140,6 +141,7 @@ func main() {
 				menu.ItemByID("stop").SetEnabled(s.Running)
 				menu.ItemByID("metrics").SetEnabled(s.Connected)
 				menu.ItemByID("quota").SetEnabled(s.Connected)
+				menu.ItemByID("voice").SetEnabled(s.Connected)
 				menu.ItemByID("screen-on").SetEnabled(s.Connected && s.ScreenKnown && !s.ScreenOn)
 				menu.ItemByID("screen-off").SetEnabled(s.Connected && s.ScreenKnown && s.ScreenOn)
 			}

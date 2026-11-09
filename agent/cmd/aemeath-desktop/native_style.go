@@ -44,7 +44,8 @@ func (a *nativeUI) recordMetrics() {
 		a.history = append([]nativeSample(nil), a.history[len(a.history)-60:]...)
 	}
 }
-var nativePageNames = []string{"metrics", "quota"}
+
+var nativePageNames = []string{"metrics", "quota", "voice"}
 
 var (
 	screenMonitorIcon    = sidebarSVG("<rect x='2' y='3' width='20' height='14' rx='2'/><path d='M8 21h8M12 17v4'/>")
@@ -68,10 +69,12 @@ func (a *nativeUI) header(c *ui.Context) {
 		}
 		ui.Text(c, "● "+state).FontSize(11).TextColor(color).Background(color.Alpha(0.1)).Padding(5, 9).Radius(12)
 		pageIndex := 0
-		if a.snapshot.Page == "quota" {
-			pageIndex = 1
+		for i, page := range nativePageNames {
+			if a.snapshot.Page == page {
+				pageIndex = i
+			}
 		}
-		seg := ui.Segmented(c, &pageIndex, "性能屏", "额度屏").FontSize(12).Disabled(!a.snapshot.Connected || a.busy["page"])
+		seg := ui.Segmented(c, &pageIndex, "性能屏", "额度屏", "语音屏").FontSize(12).Disabled(!a.snapshot.Connected || a.busy["page"])
 		if seg.Changed() {
 			page := nativePageNames[pageIndex]
 			a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify("切页指令已发送") })

@@ -62,3 +62,21 @@ flowchart LR
     end
 
     MDNS -. "advertises _aemeath._tcp" .-> DISC
+
+    subgraph VOICEPC["Host voice (optional)"]
+        KWS["sherpa-onnx KWS 你好小爱 + Silero VAD"]
+        ASR["MiMo mimo-v2.5-asr"]
+        BRAIN["Eino ReAct / OpenAI-compatible LLM"]
+        TTS["MiMo mimo-v2.5-tts-voiceclone (whole WAV)"]
+        PCM["WAV decode + 16k resample"]
+        KWS -- "woken utterance only" --> ASR --> BRAIN --> TTS --> PCM
+        BRAIN -. "metrics/quota/page/screen tools" .-> LINK
+    end
+    MIC["ES7210 dual mic → 16k mono PCM"]
+    VWS["/voice WS · epochs/turns/sequence/credits"]
+    SPEAKER["ES8311 + EXIO3 PA → speaker"]
+    AVATAR["LVGL chibi · wave/listen/think/speak"]
+    MIC --> VWS --> KWS
+    PCM --> VWS --> SPEAKER
+    VWS -. "state + actual DMA playback events" .-> AVATAR
+    AVATAR --> LCD

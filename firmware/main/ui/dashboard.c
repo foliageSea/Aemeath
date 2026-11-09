@@ -10,6 +10,8 @@
 #include "metrics.h"
 #include "net.h"
 #include "quota_page.h"
+#include "voice_page.h"
+#include "display.h"
 
 #define C_BG        0x0B0F14
 #define C_CARD      0x151B23
@@ -45,7 +47,11 @@ static lv_obj_t *s_net_up, *s_net_down, *s_disk_rd, *s_disk_wr, *s_disk_bar, *s_
 static lv_obj_t *s_overlay, *s_ov_title, *s_ov_body, *s_ov_qr;
 static uint32_t s_last_seq;
 static net_state_t s_last_overlay_state = (net_state_t)-1;
-static lv_obj_t *s_tiles, *s_dots[2];
+static lv_obj_t *s_tiles, *s_dots[3];
+static bool s_voice_active, s_voice_navigation, s_auto_navigation;
+static uint32_t s_voice_previous_page, s_voice_finish_deadline;
+static bool s_voice_finish_pending;
+#define VOICE_IDLE_DWELL_MS 3000
 
 static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -398,14 +404,14 @@ static void update_dots(void)
 {
     lv_obj_t *active = lv_tileview_get_tile_active(s_tiles);
     int page = active ? lv_obj_get_index(active) : 0;
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         lv_obj_set_style_bg_color(s_dots[i], lv_color_hex(i == page ? C_TEXT : C_BORDER), 0);
     }
 }
 
 bool dashboard_show_page(dashboard_page_t page)
 {
-    if (page != DASHBOARD_PAGE_METRICS && page != DASHBOARD_PAGE_QUOTA) {
+    if (page < DASHBOARD_PAGE_METRICS || page > DASHBOARD_PAGE_VOICE) {
         return false;
     }
     if (!lvgl_port_lock(0)) {
@@ -413,12 +419,75 @@ bool dashboard_show_page(dashboard_page_t page)
     }
     bool ready = s_tiles != NULL;
     if (ready) {
-        // Use the same tileview as touch gestures; do not rebuild either page.
+        // Explicit remote navigation also supersedes automatic restoration.
+        if (s_voice_active) s_voice_navigation = true;
+        // Use the same tileview as touch gestures; do not rebuild pages.
         lv_tileview_set_tile_by_index(s_tiles, (uint32_t)page, 0, LV_ANIM_OFF);
         update_dots();
     }
     lvgl_port_unlock();
     return ready;
+}
+
+static void page_changed(lv_event_t *e)
+{
+    (void)e;
+    if (s_voice_active && !s_auto_navigation) s_voice_navigation = true;
+    update_dots();
+}
+
+void dashboard_voice_begin(void)
+{
+    if (!lvgl_port_lock(0)) return;
+    s_voice_finish_pending = false;
+    if (s_tiles && !s_voice_active) {
+        lv_obj_t *active = lv_tileview_get_tile_active(s_tiles);
+        s_voice_previous_page = active ? lv_obj_get_index(active) : 0;
+        s_voice_active = true;
+        s_voice_navigation = false;
+        s_auto_navigation = true;
+        lv_tileview_set_tile_by_index(s_tiles, DASHBOARD_PAGE_VOICE, 0, LV_ANIM_OFF);
+        s_auto_navigation = false;
+        update_dots();
+        display_voice_begin();
+    }
+    lvgl_port_unlock();
+}
+
+void dashboard_voice_finish(void)
+{
+    if (!lvgl_port_lock(0)) return;
+    if (s_voice_active && !s_voice_finish_pending) {
+        s_voice_finish_deadline = lv_tick_get() + VOICE_IDLE_DWELL_MS;
+        s_voice_finish_pending = true;
+    }
+    lvgl_port_unlock();
+}
+
+// Runs on the LVGL timer task, with its lock already held. No sleeping or task wait.
+static void voice_finish_tick(void)
+{
+    if (s_voice_finish_pending && (int32_t)(lv_tick_get() - s_voice_finish_deadline) >= 0) {
+        s_voice_finish_pending = false;
+        // A swipe or explicit page request during the round wins, even if the
+        // user navigated back to voice afterwards.
+        if (s_tiles && !s_voice_navigation) {
+            s_auto_navigation = true;
+            lv_tileview_set_tile_by_index(s_tiles, s_voice_previous_page, 0, LV_ANIM_OFF);
+            s_auto_navigation = false;
+            update_dots();
+        }
+        s_voice_active = false;
+        display_voice_finish();
+    }
+}
+
+bool dashboard_voice_active(void)
+{
+    if (!lvgl_port_lock(0)) return false;
+    bool active = s_voice_active;
+    lvgl_port_unlock();
+    return active;
 }
 
 static lv_obj_t *page_tile(int col, lv_dir_t dir)
@@ -430,6 +499,8 @@ static lv_obj_t *page_tile(int col, lv_dir_t dir)
 
 static void tick_cb(lv_timer_t *t)
 {
+    (void)t;
+    voice_finish_tick();
     update_dots();
     quota_page_tick();
 
@@ -500,12 +571,14 @@ void dashboard_create(void)
     lv_image_set_src(bg_img, &bg);
     lv_obj_center(bg_img);
 
-    // Swipe left/right between the PC monitor and the quota page.
+    // Swipe left/right between telemetry, quotas and the voice companion.
     s_tiles = lv_tileview_create(scr);
     lv_obj_set_style_bg_opa(s_tiles, LV_OPA_TRANSP, 0);
     lv_obj_set_scrollbar_mode(s_tiles, LV_SCROLLBAR_MODE_OFF);
     lv_obj_t *pc = page_tile(0, LV_DIR_RIGHT);
-    lv_obj_t *quota = page_tile(1, LV_DIR_LEFT);
+    lv_obj_t *quota = page_tile(1, LV_DIR_LEFT | LV_DIR_RIGHT);
+    lv_obj_t *voice = page_tile(2, LV_DIR_LEFT);
+    lv_obj_add_event_cb(s_tiles, page_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     build_header(pc);
     gauge_create(&s_cpu, pc, 8, "CPU", C_CPU);
@@ -514,14 +587,15 @@ void dashboard_create(void)
     build_charts(pc);
     build_io(pc);
     quota_page_create(quota);
+    voice_page_create(voice);
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         s_dots[i] = lv_obj_create(scr);
         lv_obj_remove_style_all(s_dots[i]);
         lv_obj_set_size(s_dots[i], 6, 6);
         lv_obj_set_style_radius(s_dots[i], 3, 0);
         lv_obj_set_style_bg_opa(s_dots[i], LV_OPA_COVER, 0);
-        lv_obj_align(s_dots[i], LV_ALIGN_BOTTOM_MID, i ? 6 : -6, -2);
+        lv_obj_align(s_dots[i], LV_ALIGN_BOTTOM_MID, (i - 1) * 12, -2);
     }
     build_overlay(scr);
     set_pill(C_DIM, "starting");

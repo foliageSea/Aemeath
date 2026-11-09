@@ -1,7 +1,11 @@
-# Aemeath — PC 性能监控台
+# Aemeath — 性能监控台与爱弥斯语音 Agent
 
 Go 采集端（macOS / Windows）通过 Wi‑Fi WebSocket 把 CPU、内存、磁盘、网络、温度、GPU 推送到
-Waveshare **ESP32‑S3‑Touch‑LCD‑4B**（480×480 ST7701 + GT911），在单页 LVGL 仪表盘上显示。
+Waveshare **ESP32‑S3‑Touch‑LCD‑4B**（480×480 ST7701 + GT911），在 LVGL 多页仪表盘上显示。
+
+新增**爱弥斯语音助手**：监控台采集/播放音频，电脑离线检测“你好，小爱”，通过 MiMo ASR → CloudWeGo Eino / OpenAI 兼容模型 → `mimo-v2.5-tts-voiceclone` 完成对话。唤醒后显示爱弥斯 Q 版动画，按聆听、思考、播报状态切换。
+
+→ [语音助手安装、配置与运行](docs/voice-agent.md) · [协议约定](docs/voice-contract.md) · [验证记录与限制](docs/voice-validation.md)
 
 ```
 agent/      Go 1.27.3+ 采集端 + MyGO 0.8.3 桌面管理端（gopsutil + cgo IOKit / WMI + NVML）
@@ -118,6 +122,6 @@ cd agent
 每秒一帧 JSON 文本（字段见 `agent/internal/proto/proto.go`，固件解析见 `firmware/main/metrics.c`），
 缺失字段直接省略。设备用 `ts` + `tz` 同步时钟。
 额度数据是另一种帧（`"type":"quota"`，见 `proto.QuotaFrame` 与 `firmware/main/quota.c`）；没有 `type` 的帧按性能数据处理。
-切页指令是 `"type":"display"` 帧（`{"v":1,"type":"display","page":"metrics"|"quota"}`）。
+切页指令是 `"type":"display"` 帧（`{"v":1,"type":"display","page":"metrics"|"quota"|"voice"}`）。
 屏幕电源/亮度指令是 `"type":"screen"` 帧（`{"v":1,"type":"screen","on":true|false,"brightness":0-100}`，`on` 为 `false` 时关闭显示并熄灭背光，`brightness` 仍被记住用于下次亮屏）。
 设备会回传 `{"v":1,"type":"screen_state","on":…,"brightness":…}`（连接时及每次变化后），见 `firmware/main/net/server.c` 与 `firmware/main/display.c`。

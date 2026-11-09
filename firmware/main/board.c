@@ -88,6 +88,11 @@ esp_err_t board_init(void)
 i2c_master_bus_handle_t board_i2c_bus(void) { return s_i2c; }
 esp_io_expander_handle_t board_expander(void) { return s_exp; }
 
+esp_err_t board_audio_amp(bool enabled)
+{
+    return s_exp ? esp_io_expander_set_level(s_exp, EXIO_PA_EN, enabled ? 1 : 0) : ESP_ERR_INVALID_STATE;
+}
+
 void board_lcd_reset(void)
 {
     esp_io_expander_set_level(s_exp, EXIO_LCD_RST, 0);

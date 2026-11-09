@@ -8,3 +8,4 @@ dependencies:
   espressif/esp_lcd_touch_gt911: "^1.2"
   espressif/mdns: "^1.8"
   espressif/cjson: "^1.7"
+  espressif/esp_codec_dev: "==1.6.2"
