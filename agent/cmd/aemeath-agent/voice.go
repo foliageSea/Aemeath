@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"aemeath/agent/internal/link"
+	"aemeath/agent/internal/sessionlock"
 	"aemeath/agent/internal/voice"
 )
 
@@ -178,6 +179,8 @@ type cliVoiceHost struct {
 	conn           *link.Conn
 	metrics, quota string
 }
+
+func (h *cliVoiceHost) LockComputer(ctx context.Context) error { return sessionlock.Lock(ctx) }
 
 func (h *cliVoiceHost) setMetrics(value any) {
 	b, _ := json.Marshal(value)

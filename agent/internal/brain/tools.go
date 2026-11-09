@@ -34,6 +34,19 @@ func deviceTools(host Host) []tool.BaseTool {
 	}
 	noArgs := map[string]*schema.ParameterInfo{}
 	return []tool.BaseTool{
+		makeTool("lock_computer", "锁定运行 Agent 的电脑当前登录会话并保留应用。仅当用户明确要求电脑锁屏时调用。", noArgs, func(ctx context.Context, args string) (string, error) {
+			if err := decodeArgs(args, &struct{}{}); err != nil {
+				return "", err
+			}
+			err := host.LockComputer(ctx)
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			if err != nil {
+				return `{"ok":false,"message":"电脑锁屏请求未能提交，请检查系统支持和权限；电脑锁屏状态尚未确认。"}`, nil
+			}
+			return `{"ok":true,"message":"已向操作系统提交本机锁屏请求；没有检测最终锁屏状态。"}`, nil
+		}),
 		makeTool("get_metrics", "读取电脑当前系统指标；用户询问 CPU、内存、网络等状态时使用。", noArgs, func(ctx context.Context, args string) (string, error) {
 			if err := decodeArgs(args, &struct{}{}); err != nil {
 				return "", err
@@ -63,7 +76,7 @@ func deviceTools(host Host) []tool.BaseTool {
 			}
 			return "切页指令已发送；协议没有当前页面回执，不能确认设备实际已切换。", nil
 		}),
-		makeTool("set_screen", "按用户请求开关屏幕并设置 0 到 100 的亮度。", map[string]*schema.ParameterInfo{"on": {Type: schema.Boolean, Required: true}, "brightness": {Type: schema.Integer, Required: true, Desc: "屏幕亮度，0 到 100"}}, func(ctx context.Context, args string) (string, error) {
+		makeTool("set_screen", "按用户请求开关 ESP32 监控台的屏幕并设置 0 到 100 的亮度。", map[string]*schema.ParameterInfo{"on": {Type: schema.Boolean, Required: true}, "brightness": {Type: schema.Integer, Required: true, Desc: "屏幕亮度，0 到 100"}}, func(ctx context.Context, args string) (string, error) {
 			var input struct {
 				On         *bool `json:"on"`
 				Brightness *int  `json:"brightness"`

@@ -46,7 +46,7 @@ func TestReplyStreamFirstDeltaBeforeCompletion(t *testing.T) {
 					}
 				}
 				if tools && n == 1 {
-					if req["stream"] == true || lenOrZero(req["tools"]) != 4 {
+					if req["stream"] == true || lenOrZero(req["tools"]) != 5 {
 						t.Error("tool decision must be completed before speech")
 					}
 					json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls", "message": map[string]any{"role": "assistant", "content": "我正在切换页面，不应朗读。", "reasoning_content": "private plan", "tool_calls": []any{call("p", "set_page", `{"page":"voice"}`)}}}}})

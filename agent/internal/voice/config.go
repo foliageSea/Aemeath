@@ -59,6 +59,7 @@ type Host interface {
 	Quota() string
 	SetPage(context.Context, string) error
 	SetScreen(context.Context, bool, int) error
+	LockComputer(context.Context) error
 }
 
 // NormalizeConfig applies local defaults. Credentials and installed assets are

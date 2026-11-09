@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"aemeath/agent/internal/sessionlock"
 	"aemeath/agent/internal/voice"
 )
 
@@ -115,6 +116,8 @@ func (s *Service) VoiceCommand(kind, text string) error {
 }
 
 type voiceHost struct{ service *Service }
+
+func (h voiceHost) LockComputer(ctx context.Context) error { return sessionlock.Lock(ctx) }
 
 func (h voiceHost) Metrics() string {
 	state := h.service.Snapshot()
