@@ -43,9 +43,9 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags -H=windowsgui -o aemea
   未运行时温度字段省略，屏幕显示 `--`。
 - 命令行版本开机自启：macOS 可用 `~/Library/LaunchAgents` plist；Windows 可把 exe 快捷方式放进 `shell:startup`。桌面版本通过设置页管理系统登录项。
 
-## MyGO 桌面端（macOS）
+## MyGO 桌面端（macOS / Windows）
 
-使用 [MyGO](https://mygo.egoist.dev/) 的纯 Go 原生 UI（Metal 渲染）与原生托盘 API，不使用 WebView，也不依赖 Bun、Vite 或前端构建。桌面版本与命令行版本是独立入口；使用桌面版本时请先退出已有命令行 Agent，避免两个进程同时向设备推送。
+使用 [MyGO](https://mygo.egoist.dev/) 的纯 Go 原生 UI（macOS 使用 Metal 渲染）与原生托盘 API，不使用 WebView，也不依赖 Bun、Vite 或前端构建。桌面版本与命令行版本是独立入口；使用桌面版本时请先退出已有命令行 Agent，避免两个进程同时向设备推送。
 
 - **托盘运行**：关闭窗口后继续采集与推送；菜单可打开窗口、启动/暂停推送服务、切换设备显示页、退出应用。退出才停止全部后台工作。
 - **服务状态**：显示发现中、连接中、已连接、重连、暂停状态，设备地址、最近成功发送时间、连接错误，以及本机 CPU / 内存 / GPU / 网络数据。暂停服务只暂停设备推送，本地指标与额度仍会更新。
@@ -55,7 +55,7 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags -H=windowsgui -o aemea
 - **屏幕电源与亮度**：窗口标题栏、设置页与托盘菜单均可远程息屏/亮屏，设置页还可拖动调整亮度（0-100）；屏幕状态以设备为准：设备把息屏/亮度保存到 NVS（调整停止 1 秒后写入），重启后恢复，并在每次连接及每次变化后上报；软件连接时不会覆盖设备状态，设备离线或尚未上报时控件禁用。息屏会同时关闭 ST7701 显示输出（`DISPOFF`），因为板载 AP3032 的使能脚常开，仅靠背光 PWM 无法完全熄灭。
 - **开机自启**：设置页启用系统登录项；登录启动时只驻留托盘。应用要求 macOS 13+，使用系统 Login Items。请先把打包的应用拖入 Applications，再启用此项。
 
-开发与运行要求 **macOS 13+**。开发需要 Go **1.27.3+**（Go 可自动下载对应 toolchain）和 Xcode Command Line Tools。MyGO 原生 UI 使用纯 Go；macOS 硬件传感器使用 cgo，因此开发、测试和构建需保持 `CGO_ENABLED=1`。
+macOS 开发与运行要求 **macOS 13+**。开发需要 Go **1.27.3+**（Go 可自动下载对应 toolchain）和 Xcode Command Line Tools。MyGO 原生 UI 使用纯 Go；macOS 硬件传感器使用 cgo，因此开发、测试和构建需保持 `CGO_ENABLED=1`。
 
 ```bash
 ./agent/scripts/dev.sh
@@ -81,6 +81,26 @@ cd agent
 产物位于 `agent/build/darwin-universal/`（或 `darwin-arm64/`、`darwin-amd64/`）。默认 ad-hoc 签名；对外分发时可通过 `AEMEATH_SIGN_IDENTITY="Developer ID Application: …" ./scripts/build-dmg.sh` 指定签名，公证选项参见 [MyGO 分发文档](https://mygo.egoist.dev/docs/distribution)。本仓库不包含 Developer ID 或公证凭据。
 
 配置原子写入 `~/Library/Application Support/Aemeath/settings.json`，权限 `0600`；登录项状态读取自系统。日志位于 `~/Library/Logs/Aemeath/agent.log`。设备地址留空使用 mDNS，或输入 IP/主机名（端口默认 80）；首次连接需允许本地网络权限。
+
+### Windows 安装包（macOS / Linux 交叉编译）
+
+需要 Go **1.27.3+**、Bash 和 **NSIS 3**（`makensis` 在 PATH 中）。macOS 安装依赖：`brew install nsis`；Debian / Ubuntu：`sudo apt-get install nsis`。无需 Windows SDK、MinGW 或 cgo。
+
+从仓库根目录运行（脚本也支持从任意目录调用）：
+
+```bash
+./agent/scripts/build-windows.sh                  # 默认 Windows x64
+./agent/scripts/build-windows.sh windows/arm64    # Windows ARM64
+./agent/scripts/build-windows.sh windows/amd64 -o build/release
+```
+
+脚本生成图标，强制 `CGO_ENABLED=0`，通过当前模块锁定版本的 MyGO 构建桌面应用和 NSIS 安装程序。额外参数传给 `mygo build`，例如 `-o` 修改输出目录（相对于 `agent`）。默认产物：
+
+- `agent/build/windows-amd64/Aemeath.exe`：桌面应用。直接运行时需保留同目录的资源文件。
+- `agent/build/windows-amd64/aemeath-setup-0.1.0-amd64.exe`：可分发的安装包，版本来自 `agent/mygo.json`。
+- ARM64 产物位于 `agent/build/windows-arm64/`，安装包名称中的架构为 `arm64`。
+
+安装程序默认安装到当前用户的 `%LOCALAPPDATA%\Programs\Aemeath`，创建开始菜单入口，提供桌面快捷方式选项，并可在系统“已安装的应用”中卸载，无需管理员权限。Windows 开机自启通过桌面设置页管理；温度与 GPU 采集的依赖见上文 Windows 说明。默认安装包未进行代码签名；签名可配置 `agent/mygo.json` 的 `windows.signCommand`，参见 [MyGO 分发文档](https://mygo.egoist.dev/docs/distribution)。
 
 ## Magpie 订阅额度页
 
