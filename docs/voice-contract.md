@@ -66,6 +66,7 @@ type Host interface {
  Quota() string
  SetPage(context.Context,string) error
  SetScreen(context.Context,bool,int) error
+ LockComputer(context.Context) error
 }
 func NormalizeConfig(Config) (Config,error) // does not require keys/paths while Disabled; defaults only; no network
 func Run(ctx context.Context, address string, cfg Config, host Host, commands <-chan Command, emit func(State)) error
@@ -76,6 +77,8 @@ Run owns ONE connection; caller retries with bounded backoff and cancels/restart
 Snapshots expose `FirstAudioMillis` (submit-to-first actual playing ACK), `GeneratedSegments`, and `PlayedSegments`; the first-audio timer is written once per logical request, and segment counters distinguish generated PCM from drained playback.
 
 Snapshots may carry `Notice` (`json:"notice,omitempty"`) for ordinary listening guidance, separate from `Error`. A wake-only ASR result can rearm capture once within the same turn; silence or another wake-only result then returns to idle without Agent/TTS calls. State messages carry the same guidance in `text`.
+
+The `lock_computer` Function Call has an empty argument object and calls Host.LockComputer for the machine running the Agent. Structured `{ok,message}` results reflect OS request submission, not visual verification of a completed lock screen. Cancelled/invalid calls do not invoke the OS; normal system refusal is returned as ok:false so the final assistant can explain failure. macOS/Windows use native session-lock operations; unsupported platforms report failure without display-sleep substitutes or arbitrary command text.
 
 `internal/voiceapi` owns MiMo, WAV and resampling:
 ```go
@@ -90,7 +93,7 @@ func EncodeWAV(pcm []int16,rate int) []byte
 `internal/brain` owns Eino:
 ```go
 type Config struct {BaseURL,APIKey,Model,Persona string; Tools bool}
-type Host interface {Metrics() string; Quota() string; SetPage(context.Context,string)error; SetScreen(context.Context,bool,int)error}
+type Host interface {Metrics() string; Quota() string; SetPage(context.Context,string)error; SetScreen(context.Context,bool,int)error; LockComputer(context.Context)error}
 type Engine struct{}
 func New(ctx context.Context,cfg Config,host Host)(*Engine,error)
 func (e *Engine) Reply(ctx context.Context,text string)(string,error)

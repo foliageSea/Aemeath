@@ -75,6 +75,13 @@
 - 固件协议 Clang ASan/UBSan、完整 ESP-IDF 构建、Go 全套测试/vet 和语音/桌面/CLI 竞态检查通过。新固件 5,757,984 字节已烧录并校验，保留 NVS。实板本地假 Fish 通过正常排空与中途取消：正常一条流播放总计 67,200 样本，故意在第一秒音频后等待 1.5 秒以制造欠载，未提前完成；取消时实际已开始播放且没有错误报告已播完。原固定长度 MiMo 分段两段播放仍通过。实板日志为 `agent/build/fish-hardware.log`。
 - 首轮实板测试完成后主动取消上下文时，发送错误被泛化为网络失败；现已保留父上下文取消原因，重新验证正常流 5.57s、取消 1.04s、旧分段 9.60s 均通过。假云端的首渲染 178/179ms 不代表真实 Fish 云端延迟。没有实际 Fish API Key/reference_id，因此未声称真实音色合成成功、音色相似度或线上延迟已验证；没有产生付费云调用。
 
+## 电脑锁屏 Function Call（2026-11-10）
+
+- 新增无参数 `lock_computer`，接通桌面和 CLI Host，注册到真实 Eino 工具链；屏幕亮度工具描述明确指向 ESP32。锁屏请求成功/系统拒绝均以结构化 ok 结果送回最终模型，取消及参数错误保持错误返回，不输出原始系统诊断。
+- macOS 当前主机没有 CGSession，login.framework 的 SACLockScreenImmediate 可从 dyld shared cache 动态解析（仅探测未调用），按 Chromium 记录的 OSStatus 签名检查请求结果；旧 CGSession 存在时使用静态 argv。Windows 检查 user32 LockWorkStation 返回值。无 cgo 的 macOS 在没有 CGSession 时明确返回 unavailable；其他平台返回 unsupported。
+- 原生 macOS 竞态、锁屏包 CGO0 测试和 Windows/Linux 锁屏包测试二进制交叉编译通过。脑层 CGO0 测试也通过；完整 macOS 无 cgo CLI 检查遇到原有 collect/newSensors 缺少实现，不影响已通过的原生语音版构建。模拟系统请求覆盖取消前不执行、失败结果、清理、时间预算和固定命令；Eino SSE 端到端测试验证锁屏只调用一次、成功/失败结果完整进入模型上下文且最终正文才朗读。桌面与 CLI 的已取消调用不需要设备连接。完整 Go 测试/vet 通过。
+- 没有实际锁定用户电脑，没有调用真实 LLM 或云端 TTS；Windows/Linux 仅交叉编译，未声称运行时验证成功。
+
 ## 视觉结果
 
 [角色状态总览](../firmware/build-avatar-host/avatar-lvgl-preview.png) 来自主机实际 LVGL 快照（每个状态原生 480×480），不是物理 LCD 拍摄。生成方法见 [主机验证说明](../firmware/tools/avatar_tests/README.md)。
