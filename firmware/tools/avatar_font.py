@@ -8,6 +8,7 @@ static 400-weight source subset. Upstream URL and SHA are recorded in metadata.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -57,7 +58,7 @@ def prepare(upstream):
                     subset_sha256=hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
                     fonttools="4.61.1", weight=400, glyphs=len(supported),
                     license="SIL Open Font License 1.1 (OFL.txt)", converter="lv_font_conv@1.5.3",
-                    size=20, bpp=4, kerning=False)
+                    size=20, bpp=4, kerning=False, compression=False)
     (FONTS / "source/manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
 
 
@@ -65,13 +66,16 @@ def build(check):
     supported = (FONTS / "source/symbols.txt").read_text(encoding="utf-8")
     meta = json.loads((FONTS / "source/manifest.json").read_text())
     assert hashlib.sha256(SOURCE.read_bytes()).hexdigest() == meta["subset_sha256"]
+    assert meta["compression"] is False, "parallel drawing requires plain glyph bitmaps"
     # Use stable repository-relative command arguments in generated comments.
     with tempfile.TemporaryDirectory(prefix="avatar-font-") as tmp:
         output = Path(tmp) / "voice_font_20.c"
         args = ["npm", "exec", "--yes", "--package=lv_font_conv@1.5.3", "--", "lv_font_conv",
                 "--size", "20", "--bpp", "4", "--format", "lvgl", "--font",
                 str(SOURCE.relative_to(ROOT)), "--symbols", supported,
-                "--no-kerning", "--lv-font-name", "voice_font_20", "-o", str(output)]
+                # LVGL 9.6 compressed glyph RLE cursor is global, not per draw worker.
+                # Plain 4bpp glyphs avoid that decoder race without serializing drawing.
+                "--no-compress", "--no-kerning", "--lv-font-name", "voice_font_20", "-o", str(output)]
         subprocess.run(args, cwd=ROOT, check=True)
         data = output.read_text()
         # Converter includes command line in its header: normalize temp path.
@@ -79,12 +83,26 @@ def build(check):
         # Keep generated output reproducible without a whitespace-error EOF.
         data = data.rstrip() + "\n"
         data = "// Noto Sans SC derivative; Copyright Adobe. SIL OFL 1.1: see OFL.txt.\n" + data
+        assert re.search(r"\.bitmap_format\s*=\s*0,", data), "converter must emit plain font"
         target = FONTS / "voice_font_20.c"
+        bitmap = data.split("glyph_bitmap[] = {", 1)[1].split("};", 1)[0]
+        bitmap_bytes = len(re.findall(r"0x[0-9a-fA-F]+", bitmap))
+        if bitmap_bytes > 1 << 20:
+            # Default LVGL descriptors have only 20 bits for bitmap_index. Fail
+            # loudly instead of wrapping the final Chinese glyphs at 1 MiB.
+            data = data.replace("#if VOICE_FONT_20\n", "#if VOICE_FONT_20\n"
+                "#if !LV_FONT_FMT_TXT_LARGE\n"
+                '#error "voice_font_20 requires LV_FONT_FMT_TXT_LARGE for bitmap offsets above 1 MiB"\n'
+                "#endif\n", 1)
+        previous = target.read_text() if target.exists() else ""
+        old_bitmap = previous.split("glyph_bitmap[] = {", 1)[1].split("};", 1)[0] if previous else ""
+        old_bytes = len(re.findall(r"0x[0-9a-fA-F]+", old_bitmap))
         if check:
             assert target.read_text() == data, "font output differs"
         else:
             target.write_text(data)
-    print(("Verified" if check else "Generated") + f" 20px/4bpp Chinese font, {len(supported)} characters")
+    print(("Verified" if check else "Generated") + f" plain 20px/4bpp Chinese font, {len(supported)} characters; "
+          f"bitmap {bitmap_bytes:,} bytes ({bitmap_bytes - old_bytes:+,} vs previous)")
 
 
 def main():

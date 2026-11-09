@@ -47,11 +47,11 @@ func productionDependencies() dependencies {
 			return wake.New(wake.Config{ModelDir: c.WakeModelDir, Threshold: c.WakeThreshold})
 		},
 		newVAD:    func(c Config) (vad, error) { return wake.NewVAD(c.WakeModelDir) },
-		newSpeech: func(c Config) speechAPI { return voiceapi.New(c.MiMoBaseURL, c.MiMoAPIKey) },
+		newSpeech: func(c Config) speechAPI { return managedSpeech{voiceapi.New(c.MiMoBaseURL, c.MiMoAPIKey)} },
 		newBrain: func(ctx context.Context, c Config, h Host) (brainAPI, error) {
 			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools}, h)
 		},
-		reference: voiceapi.ReferencePCM,
+		reference: managedReference,
 	}
 }
 
@@ -110,7 +110,10 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 			continue
 		}
 		func() {
-			fail := func(stage string, err error) { publish(w, result{phase: stage, err: err}) }
+			stageStarted := time.Now()
+			fail := func(stage string, err error) {
+				publish(w, result{phase: stage, err: err, millis: max(1, time.Since(stageStarted).Milliseconds())})
+			}
 			if w.kind == "reference" {
 				pcm, err := d.reference(cfg.ReferenceAudio)
 				if err != nil {
@@ -133,14 +136,24 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 					return
 				}
 				start := time.Now()
-				transcript, err := speech.Recognize(w.ctx, w.pcm)
+				stageStarted = start
+				recognitionCtx, stopRecognition := context.WithTimeout(w.ctx, recognitionBudget)
+				transcript, err := speech.Recognize(recognitionCtx, w.pcm)
+				stopRecognition()
 				if err != nil {
 					fail("recognizing", err)
 					return
 				}
-				transcript = stripWakePrefix(transcript)
+				rawTranscript := strings.TrimSpace(transcript)
+				transcript = stripWakePrefix(rawTranscript)
 				if transcript == "" {
-					fail("recognizing", errors.New("no speech recognized"))
+					if rawTranscript != "" {
+						// Hearing only the wake invocation is a normal invitation to listen,
+						// not a question for the Agent and not a provider transport failure.
+						publish(w, result{phase: "wake_only", millis: time.Since(start).Milliseconds()})
+					} else {
+						fail("recognizing", errors.New("未识别到有效语音，请重新唤醒后说出问题"))
+					}
 					return
 				}
 				if len(transcript) > maxTextBytes/2 {
@@ -158,14 +171,18 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 					return
 				}
 				start = time.Now()
+				stageStarted = start
+				agentCtx, stopAgent := context.WithTimeout(w.ctx, agentBudget)
+				defer stopAgent()
 				if engine == nil {
-					engine, err = d.newBrain(w.ctx, cfg, host)
+					engine, err = d.newBrain(agentCtx, cfg, host)
 					if err != nil {
 						fail("thinking", err)
 						return
 					}
 				}
-				text, err = engine.Reply(w.ctx, transcript)
+				text, err = engine.Reply(agentCtx, transcript)
+				stopAgent()
 				if err != nil {
 					fail("thinking", err)
 					return
@@ -190,7 +207,10 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 				return
 			}
 			start := time.Now()
-			pcm, err := speech.Synthesize(w.ctx, text, cfg.ReferenceAudio)
+			stageStarted = start
+			synthesisCtx, stopSynthesis := context.WithTimeout(w.ctx, synthesisBudget)
+			pcm, err := speech.Synthesize(synthesisCtx, text, cfg.ReferenceAudio)
+			stopSynthesis()
 			if err != nil {
 				fail("synthesizing", err)
 				return

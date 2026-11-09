@@ -8,24 +8,50 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-const maxResponseBytes = 24 << 20
+const (
+	maxResponseBytes = 24 << 20
+
+	// Budgets include upload, provider generation, response transfer, and decoding.
+	// Batch clone synthesis is not a streaming response and can exceed one minute.
+	// Callers may impose a shorter deadline; retries never reset these budgets.
+	ASRRequestTimeout   = 60 * time.Second
+	TTSRequestTimeout   = 180 * time.Second
+	connectTimeout      = 10 * time.Second
+	responseBodyTimeout = TTSRequestTimeout
+)
+
+var errResponseBodyTimeout = errors.New("response body timeout")
 
 // Client is safe for concurrent use. No request or response body is included in errors.
 type Client struct {
 	endpoint, key string
 	http          *http.Client
 	configErr     error
+	// Immutable after construction; separate fields permit short offline deadline tests.
+	asrTimeout, ttsTimeout, bodyTimeout time.Duration
 }
 
 func New(baseURL, key string) *Client {
-	c := &Client{key: strings.TrimSpace(key), http: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second}).DialContext
+	transport.TLSHandshakeTimeout = connectTimeout
+	transport.ResponseHeaderTimeout = TTSRequestTimeout
+	c := &Client{
+		key: strings.TrimSpace(key),
+		// A shared 60s http.Client.Timeout also cuts off a partly downloaded TTS WAV.
+		// Operation contexts below supply bounded, phase-specific overall deadlines.
+		http:       &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		asrTimeout: ASRRequestTimeout, ttsTimeout: TTSRequestTimeout, bodyTimeout: responseBodyTimeout,
+	}
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://api.xiaomimimo.com/v1"
 	}
@@ -54,6 +80,8 @@ type completion struct {
 }
 
 func (c *Client) Recognize(ctx context.Context, pcm []int16) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.asrTimeout)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -62,7 +90,7 @@ func (c *Client) Recognize(ctx context.Context, pcm []int16) (string, error) {
 		return "", errors.New("MiMo ASR: audio must contain 1 to 1920000 PCM16 samples")
 	}
 	req := map[string]any{"model": "mimo-v2.5-asr", "stream": false, "asr_options": map[string]string{"language": "zh"}, "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_audio", "input_audio": map[string]string{"data": dataURL(wav), "format": "wav"}}}}}}
-	out, err := c.complete(ctx, req)
+	out, err := c.complete(ctx, req, "ASR")
 	if err != nil {
 		return "", err
 	}
@@ -77,6 +105,8 @@ func (c *Client) Recognize(ctx context.Context, pcm []int16) (string, error) {
 }
 
 func (c *Client) Synthesize(ctx context.Context, text, referencePath string) ([]int16, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.ttsTimeout)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -93,7 +123,7 @@ func (c *Client) Synthesize(ctx context.Context, text, referencePath string) ([]
 	}
 	// Re-encode the validated 24-bit/48 kHz reference as portable PCM16 WAV.
 	req := map[string]any{"model": "mimo-v2.5-tts-voiceclone", "stream": false, "messages": []any{map[string]any{"role": "assistant", "content": text}}, "audio": map[string]string{"format": "wav", "voice": dataURL(EncodeWAV(reference, sampleRate))}}
-	out, err := c.complete(ctx, req)
+	out, err := c.complete(ctx, req, "TTS")
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +152,63 @@ func dataURL(wav []byte) string {
 	return "data:audio/wav;base64," + base64.StdEncoding.EncodeToString(wav)
 }
 
-func (c *Client) complete(ctx context.Context, payload any) (*completion, error) {
+// requestFailure never formats a transport error: url.Error, proxy failures, and
+// custom transports can include the endpoint, credentials, or request content.
+func requestFailure(ctx context.Context, operation string, err error) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("MiMo %s: request ended before response headers: %w", operation, ctx.Err())
+	}
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+		return fmt.Errorf("MiMo %s: timeout before response headers; request not retried: %w", operation, context.DeadlineExceeded)
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("MiMo %s: connection closed before response headers; request not retried", operation)
+	}
+	return fmt.Errorf("MiMo %s: network request failed before response headers; request not retried", operation)
+}
+
+func (c *Client) readResponse(ctx context.Context, cancel context.CancelCauseFunc, res *http.Response, operation string) ([]byte, error) {
+	// The total operation deadline still wins. A phase cap also protects a body
+	// returned by a custom transport; cancellation must unblock its Read/Close.
+	timer := time.AfterFunc(c.bodyTimeout, func() { cancel(errResponseBodyTimeout) })
+	var closeOnce sync.Once
+	closeBody := func() { closeOnce.Do(func() { _ = res.Body.Close() }) }
+	stopClose := context.AfterFunc(ctx, closeBody)
+	raw, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
+	timer.Stop()
+	stopClose()
+	closeBody()
+	failure := func(description string, cause error) ([]byte, error) {
+		message := fmt.Sprintf("MiMo %s: %s (HTTP %d, received %d bytes)", operation, description, res.StatusCode, len(raw))
+		if cause != nil {
+			return nil, fmt.Errorf("%s: %w", message, cause)
+		}
+		return nil, errors.New(message)
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		if errors.Is(cause, errResponseBodyTimeout) || errors.Is(cause, context.DeadlineExceeded) {
+			return failure("response body timed out; request not retried", context.DeadlineExceeded)
+		}
+		return failure("response body canceled; request not retried", context.Canceled)
+	}
+	if err != nil {
+		var timeout net.Error
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+			return failure("response body timed out; request not retried", context.DeadlineExceeded)
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) || (res.ContentLength >= 0 && int64(len(raw)) < res.ContentLength) {
+			return failure("truncated response body; request not retried", io.ErrUnexpectedEOF)
+		}
+		return failure("connection interrupted while reading response body; request not retried", nil)
+	}
+	if res.ContentLength >= 0 && int64(len(raw)) < res.ContentLength && len(raw) <= maxResponseBytes {
+		return failure("truncated response body; request not retried", io.ErrUnexpectedEOF)
+	}
+	return raw, nil
+}
+
+func (c *Client) complete(ctx context.Context, payload any, operation string) (*completion, error) {
 	if c.configErr != nil {
 		return nil, c.configErr
 	}
@@ -136,26 +222,25 @@ func (c *Client) complete(ctx context.Context, payload any) (*completion, error)
 	// Retry only explicit rejection (429/503). Never replay ambiguous transport failures,
 	// successful-but-invalid responses, authentication errors, or synthesis already accepted.
 	for attempt := 0; attempt < 3; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
+		requestCtx, stopRequest := context.WithCancelCause(ctx)
+		req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 		if err != nil {
+			stopRequest(nil)
 			return nil, errors.New("MiMo: invalid request")
 		}
+		// This paid POST must not be automatically replayed after an ambiguous write.
+		req.GetBody = nil
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+c.key)
 		res, err := c.http.Do(req)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, errors.New("MiMo: HTTP request failed")
+			stopRequest(nil)
+			return nil, requestFailure(ctx, operation, err)
 		}
-		raw, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
-		res.Body.Close()
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+		raw, readErr := c.readResponse(requestCtx, stopRequest, res, operation)
+		stopRequest(nil)
 		if readErr != nil {
-			return nil, errors.New("MiMo: could not read response")
+			return nil, readErr
 		}
 		if len(raw) > maxResponseBytes {
 			return nil, errors.New("MiMo: response exceeds size limit")
@@ -165,14 +250,14 @@ func (c *Client) complete(ctx context.Context, payload any) (*completion, error)
 			retryAfter := res.Header.Get("Retry-After")
 			if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
 				if seconds > 2 {
-					return nil, fmt.Errorf("MiMo: HTTP %d; retry later", res.StatusCode)
+					return nil, fmt.Errorf("MiMo %s: HTTP %d; retry later", operation, res.StatusCode)
 				}
 				delay = time.Duration(seconds) * time.Second
 			} else if date, err := http.ParseTime(retryAfter); err == nil && time.Until(date) > delay {
 				delay = time.Until(date)
 			}
 			if delay > 2*time.Second {
-				return nil, fmt.Errorf("MiMo: HTTP %d; retry later", res.StatusCode)
+				return nil, fmt.Errorf("MiMo %s: HTTP %d; retry later", operation, res.StatusCode)
 			}
 			timer := time.NewTimer(delay)
 			select {
@@ -184,11 +269,14 @@ func (c *Client) complete(ctx context.Context, payload any) (*completion, error)
 			continue
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
-			return nil, fmt.Errorf("MiMo: HTTP %d", res.StatusCode)
+			return nil, fmt.Errorf("MiMo %s: HTTP %d", operation, res.StatusCode)
 		}
 		var out completion
 		if json.Unmarshal(raw, &out) != nil {
-			return nil, errors.New("MiMo: invalid JSON response")
+			return nil, fmt.Errorf("MiMo %s: invalid or truncated JSON response (HTTP %d, received %d bytes)", operation, res.StatusCode, len(raw))
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("MiMo %s: response decoding interrupted: %w", operation, err)
 		}
 		if len(out.Error) > 0 && string(out.Error) != "null" {
 			return nil, errors.New("MiMo: provider rejected request")

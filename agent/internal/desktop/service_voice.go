@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"aemeath/agent/internal/voice"
@@ -33,10 +34,17 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	}
 	emit := func(state voice.State) {
 		s.mu.Lock()
+		report := false
 		if s.conn == conn && ctx.Err() == nil {
+			previous := s.state.Voice
+			report = state.Error != "" && (state.Error != previous.Error || state.Turn != previous.Turn || state.Phase != previous.Phase)
 			s.state.Voice = state
 		}
 		s.mu.Unlock()
+		if report {
+			// Runtime errors are sanitized; never log keys, transcripts or response audio.
+			log.Printf("voice: turn=%d phase=%s asr_ms=%d agent_ms=%d tts_ms=%d error=%s", state.Turn, state.Phase, state.ASRMillis, state.AgentMillis, state.TTSMillis, state.Error)
+		}
 	}
 	go func() {
 		defer close(done)

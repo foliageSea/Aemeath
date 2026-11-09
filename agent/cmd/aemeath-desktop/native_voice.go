@@ -76,6 +76,9 @@ func (a *nativeUI) voiceStatusView(c *ui.Context) {
 		if a.snapshot.Settings.Voice.Enabled && !state.WakeReady {
 			ui.Text(c, "请安装或检查唤醒模型；连接后仍可手动唤醒、试听语音和播放参考音频。").FontSize(12).TextColor(t.TextMuted).Wrap()
 		}
+		if state.Notice != "" {
+			ui.Text(c, state.Notice).FontSize(12).TextColor(t.Text).Wrap()
+		}
 		if state.Error != "" {
 			ui.Text(c, "语音提示："+state.Error).FontSize(12).TextColor(t.Warning).Wrap().Selectable()
 		}
@@ -89,6 +92,9 @@ func (a *nativeUI) voiceStatusView(c *ui.Context) {
 			ui.Button(c.Key("voice-preview"), "试听语音").Disabled(disabled).OnClick(func() { a.voiceCommand("preview", a.voicePreview) })
 			ui.Button(c.Key("voice-reference"), "播放参考音频").Disabled(disabled).OnClick(func() { a.voiceCommand("reference", "") })
 		})
+		if state.Phase == "error" && state.Response != "" {
+			ui.Button(c.Key("voice-retry-response"), "重试回复语音").Disabled(disabled).OnClick(func() { a.voiceCommand("preview", state.Response) })
+		}
 		ui.Text(c, "操作使用已保存的设置；修改后请先保存。").FontSize(11).TextColor(t.TextMuted).Wrap()
 		transcript, response := state.Transcript, state.Response
 		if transcript == "" {

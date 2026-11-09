@@ -60,6 +60,8 @@ func Run(ctx context.Context, address string, cfg Config, host Host, commands <-
 
 Run owns ONE connection; caller retries with bounded backoff and cancels/restarts on config/device changes. Emits snapshots containing no keys. Commands are nonblocking from desktop service; preview synthesizes Text (default short greeting), reference plays configured sample without cloud, clear drops history, wake manually starts a round. Empty/missing wake model gives explicit error; manual wake/reference/preview should remain available to diagnose, but never pretend offline wake is ready.
 
+Snapshots may carry `Notice` (`json:"notice,omitempty"`) for ordinary listening guidance, separate from `Error`. A wake-only ASR result can rearm capture once within the same turn; silence or another wake-only result then returns to idle without Agent/TTS calls. State messages carry the same guidance in `text`.
+
 `internal/voiceapi` owns MiMo, WAV and resampling:
 ```go
 type Client struct {}

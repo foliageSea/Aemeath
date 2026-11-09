@@ -9,5 +9,6 @@
   "converter": "lv_font_conv@1.5.3",
   "size": 20,
   "bpp": 4,
-  "kerning": false
+  "kerning": false,
+  "compression": false
 }

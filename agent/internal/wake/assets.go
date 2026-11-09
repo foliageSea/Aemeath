@@ -35,7 +35,12 @@ var modelAssets = []asset{
 	{"tokens.txt", "72316508d9119696145abc6f1f8cdc46287535c34e5ce7e595f845cb1499cf2e", 1627},
 }
 var vadAsset = asset{"silero_vad.onnx", "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6", 643854}
-var referenceAsset = asset{"reference.wav", "34395b182a88c7371882e9cddd334bb76042c7993ad8c46245989b4b2b0049ee", 1530546}
+
+// Original stays available for comparison; the default uses a natural pause at 4.20s.
+const ReferenceDurationMillis = 4200
+
+var referenceOriginalAsset = asset{"reference-original.wav", "34395b182a88c7371882e9cddd334bb76042c7993ad8c46245989b4b2b0049ee", 1530546}
+var referenceAsset = asset{"reference.wav", "de29dbfe3950a2020aeaafb88ad0cb9e9a6c606a983ff546386cd44ced6232bb", 604844}
 var archiveFiles = map[string]string{
 	"encoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx": "encoder.onnx",
 	"decoder-epoch-99-avg-1-chunk-16-left-64.onnx":      "decoder.onnx",
@@ -155,17 +160,8 @@ func InstallAssets(ctx context.Context, dir string, referenceOnly bool) error {
 			}
 		}
 	}
-	dst := filepath.Join(dir, referenceAsset.Name)
-	if _, err := os.Lstat(dst); os.IsNotExist(err) {
-		tmp := filepath.Join(stage, referenceAsset.Name)
-		if err = download(ctx, client, ReferenceURL, tmp, referenceAsset); err != nil {
-			return err
-		}
-		if err = os.Rename(tmp, dst); err != nil {
-			return err
-		}
-	} else if err = verifyFile(dst, referenceAsset); err != nil {
-		return fmt.Errorf("existing reference is damaged; choose a fresh -dir: %w", err)
+	if err = installReference(ctx, client, dir, stage); err != nil {
+		return err
 	}
 	return VerifyAssets(dir, referenceOnly)
 }

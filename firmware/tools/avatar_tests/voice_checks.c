@@ -5,7 +5,15 @@
 #include <math.h>
 #include <stdio.h>
 #include "ui/dashboard.h"
+static unsigned label_writes;
+static void counted_label_set_text(lv_obj_t *obj, const char *text)
+{
+    ++label_writes;
+    lv_label_set_text(obj, text);
+}
+#define lv_label_set_text counted_label_set_text
 #include "ui/voice_page.c"
+#undef lv_label_set_text
 
 static void click(int command)
 {
@@ -20,6 +28,22 @@ void voice_checks(const char *directory)
     assert(dashboard_show_page(DASHBOARD_PAGE_VOICE));
     host_advance(40);
     assert(s_frame >= 0 && s_frame < avatar_sequences[AVATAR_IDLE].count);
+    // Repeated transport snapshots must not reallocate/relayout unchanged labels,
+    // including long captions whose rendered buffer has been ellipsized by LVGL.
+    const char *long_caption = "这是较长的中文字幕，用来覆盖省略号布局以及重复传输相同字幕时的稳定性，"
+        "即使角色动画持续刷新，也不应该反复设置没有发生变化的标题和字幕内容。";
+    voice_page_update("thinking", long_caption, 99);
+    voice_page_tick();
+    host_advance(40);
+    unsigned writes = label_writes;
+    for (unsigned i = 0; i < 100; ++i) {
+        voice_page_update("thinking", long_caption, 99);
+        voice_page_tick();
+        host_advance(10);
+    }
+    assert(label_writes == writes && !strcmp(s_caption, long_caption));
+    voice_page_update("idle", "", 0);
+    voice_page_tick();
     lv_font_glyph_dsc_t glyph;
     const char *chinese = "爱弥斯我在听正在识别让我想想准备说话遇到问题唤醒取消清空静音你好小";
     while (*chinese) {

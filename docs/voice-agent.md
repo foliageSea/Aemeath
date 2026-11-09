@@ -85,8 +85,8 @@ CGO_ENABLED=1 go run ./cmd/aemeath-agent -voice-config voice.local.json -addr ae
 ## 5. 对话与动画
 
 - 说“你好，小爱”后角色页立即挥手；随后播放聆听 `waiting`、识别/推理 `review`、合成/播报 `running`，错误 `failed`，完成 `idle`。
-- 可连续说“你好，小爱，帮我看看 CPU”；2 秒预缓冲按关键词末端截取，识别文字中的句首唤醒词会被剔除。模型对齐点并非精确音素边界，应在实际说话速度下验证是否截掉首字。
-- 约 800 ms 尾部静音提交问题，5 秒无问题退出，最长一轮录音 30 秒。云端整轮有超时和取消控制，播放音频最多 120 秒。
+- 可连续说“你好，小爱，帮我看看 CPU”；2 秒预缓冲按关键词末端截取，识别文字中的句首唤醒词会被剔除。如果识别到的只有唤醒词，会正常提示“我在听，请继续说出问题”并重新聆听一次；5 秒内没有问题则回到待命，不作为故障。重复唤醒词最多再识别一次，不会无限重试或调用 Agent/TTS。模型对齐点并非精确音素边界，应在实际说话速度下验证是否截掉首字。
+- 约 800 ms 尾部静音提交问题，5 秒无问题退出，最长一轮录音 30 秒。识别、Agent、合成分别最多等待 60、90、180 秒，取消随时生效；播放音频最多 120 秒。合成单独计时，不再被较早阶段耗时或旧的 60 秒 HTTP 总超时截断。
 - 音频真正开始输出后才显示说话，播放能量驱动声波；不能把网络收到音频误作扬声器已经播放完成。
 - 结束后角色页停留 3 秒再恢复原页面。临时亮屏不覆盖持久亮度设置；手动切页或屏幕操作优先于自动恢复。
 - 只保留最近 10 轮完整文字上下文，清空或重启会话后不保留历史录音。
@@ -97,9 +97,9 @@ Agent 工具包括 `get_metrics`、`get_quota`、`set_page`、`set_screen`；不
 
 ASR 为 `mimo-v2.5-asr`；TTS 固定为 `mimo-v2.5-tts-voiceclone`。两者使用 `/chat/completions`，不是 `/audio/speech` 或 `/audio/transcriptions`。克隆合成将目标文字放 assistant 消息，参考 WAV 转 Base64 data URL 放 `audio.voice`。不上传网页地址，不需要虚构“训练音色 ID”。
 
-**此 voiceclone 模型目前不是低延迟逐块生成。**首版使用 `stream:false` 接收完整 WAV，随后转换成 16 kHz PCM 发给设备。等待时角色展示合成动画；不对首包延迟作实时承诺。
+**此 voiceclone 模型目前不是低延迟逐块生成。**首版使用 `stream:false` 接收完整 WAV，随后转换成 16 kHz PCM 发给设备。等待时角色展示合成动画；不对首包延迟作实时承诺。若请求超时或响应中断，界面显示具体阶段、错误类别和实际耗时。已经获得文字回复时，可点“重试回复语音”只重新合成这条文字；不会重复运行 Agent 工具，也不会自动重发可能已经计费的请求。
 
-默认素材来自用户提供的[爱弥斯 Wiki](https://wiki.kurobbs.com/mc/item/1457744312692867072?wkFrom=catalog) 中的[中文“自我介绍”](https://web-static.kurobbs.com/wiki_audio/1770098269166323983.wav)，约 10.624 秒、48 kHz、24-bit、单声道；原始字节在本地缓存，使用时会重采样并转为 PCM16 WAV。可换成自己的清晰、单人 WAV；支持 PCM8/16/24/32 和 float32 WAV，MP3 请先自行转成 WAV。素材和角色权利归其权利人，分发、商业用途和声音复刻需自行确认授权，不能把公开可读取等同于版权授权。
+默认素材来自用户提供的[爱弥斯 Wiki](https://wiki.kurobbs.com/mc/item/1457744312692867072?wkFrom=catalog) 中的[中文“自我介绍”](https://web-static.kurobbs.com/wiki_audio/1770098269166323983.wav)，原始录音为 10.624 秒、48 kHz、24-bit、单声道。默认参考现截到 4.20 秒，结束点位于 4.02–4.76 秒的停顿中；安装器保留完整原版为 `reference-original.wav`，短版仍使用 `reference.wav`。新版应用会在使用默认参考前本地升级与旧校验值完全匹配的长版，不下载文件、不更改其他自定义音频。使用时重采样为 16 kHz PCM16 WAV；每次参考 Base64 约 179 KB，比原版 453 KB 减少约 60%。可换成自己的清晰、单人 WAV；支持 PCM8/16/24/32 和 float32 WAV，MP3 请先自行转成 WAV。素材和角色权利归其权利人，分发、商业用途和声音复刻需自行确认授权，不能把公开可读取等同于版权授权。
 
 官方接口说明：[MiMo ASR](https://mimo.mi.com/static/docs/quick-start/usage-guide/audio/Speech-Recognition.md)、[MiMo 语音合成](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5)、[Eino ReAct](https://www.cloudwego.cn/docs/eino/core_modules/flow_integration_components/react_agent_manual/)。
 

@@ -161,6 +161,43 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	}
 }
 
+func TestNativeRetryOnlySynthesizesSavedReply(t *testing.T) {
+	a, f, updates, tt := nativeTest(t)
+	voiceService := &nativeVoiceFake{nativeFake: f}
+	a.service = voiceService
+	f.state.Settings.Voice.Enabled = true
+	f.state.Voice.Connected = true
+	f.state.Voice.Phase = "error"
+	f.state.Voice.Response = "这条回复已经完成，只重新合成声音。"
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	nativeClick(t, tt, "重试回复语音")
+	nativeComplete(t, updates, tt)
+	voiceService.mu.Lock()
+	defer voiceService.mu.Unlock()
+	if len(voiceService.commands) != 1 || voiceService.commands[0] != [2]string{"preview", f.state.Voice.Response} {
+		t.Fatalf("retry commands=%v", voiceService.commands)
+	}
+}
+
+func TestNativeListeningNoticeIsNotAnError(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	a.service = &nativeVoiceFake{nativeFake: f}
+	f.state.Settings.Voice.Enabled = true
+	f.state.Voice.Connected = true
+	f.state.Voice.WakeReady = true
+	f.state.Voice.Phase = "listening"
+	f.state.Voice.Notice = "我在听，请继续说出问题"
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	if !tt.HasText(f.state.Voice.Notice) {
+		t.Fatal("missing normal listening notice")
+	}
+	if tt.HasText("需要处理") || tt.HasText("语音提示："+f.state.Voice.Notice) {
+		t.Fatal("normal notice displayed as error")
+	}
+}
+
 func TestNativeVoiceOfflineAndUnsupportedControls(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	f.state.Settings.Voice.Enabled = true

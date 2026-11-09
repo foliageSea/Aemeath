@@ -31,6 +31,7 @@ type State struct {
 	WakeReady   bool   `json:"wakeReady"`
 	Phase       string `json:"phase"`
 	Error       string `json:"error"`
+	Notice      string `json:"notice,omitempty"`
 	Transcript  string `json:"transcript"`
 	Response    string `json:"response"`
 	Turn        uint32 `json:"turn"`

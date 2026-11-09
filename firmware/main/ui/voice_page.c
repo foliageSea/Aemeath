@@ -42,6 +42,9 @@ static avatar_sequence_id_t s_sequence = AVATAR_IDLE;
 static bool s_waving, s_muted;
 static int s_frame = -1;
 static float s_level;
+// LV_LABEL_LONG_DOT may temporarily replace the label buffer tail with dots.
+// Keep the original caption separately so duplicate snapshots do not relayout it.
+static char s_caption[TEXT_BYTES];
 
 static phase_t parse_phase(const char *state)
 {
@@ -110,6 +113,18 @@ static const char *status_for(phase_t phase)
     return text[phase];
 }
 
+static void set_short_label(lv_obj_t *obj, const char *text)
+{
+    if (strcmp(lv_label_get_text(obj), text)) lv_label_set_text(obj, text);
+}
+
+static void set_caption(const char *text)
+{
+    if (!strcmp(s_caption, text)) return;
+    copy_text(s_caption, text);
+    lv_label_set_text(s_text, s_caption);
+}
+
 static void action(lv_event_t *e)
 {
     intptr_t command = (intptr_t)lv_event_get_user_data(e);
@@ -123,12 +138,12 @@ static void action(lv_event_t *e)
         if (accepted) {
             s_muted = !s_muted;
             voice_page_set_muted(s_muted);
-            lv_label_set_text(s_mute_label, s_muted ? "取消静音" : "静音");
+            set_short_label(s_mute_label, s_muted ? "取消静音" : "静音");
         }
         break;
     }
-    if (!accepted) lv_label_set_text(s_text, "语音尚未连接，请检查桌面端");
-    else if (command == 2) lv_label_set_text(s_text, "对话已清空");
+    if (!accepted) set_caption("语音尚未连接，请检查桌面端");
+    else if (command == 2) set_caption("对话已清空");
 }
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, uint32_t color)
@@ -181,6 +196,7 @@ void voice_page_create(lv_obj_t *parent)
         lv_obj_add_flag(s_bars[i], LV_OBJ_FLAG_HIDDEN);
     }
     s_text = label(parent, "说“你好小爱”，或轻触唤醒", C_DIM);
+    copy_text(s_caption, "说“你好小爱”，或轻触唤醒");
     lv_obj_set_pos(s_text, 22, 362);
     lv_obj_set_size(s_text, 436, 48);
     lv_obj_set_style_text_align(s_text, LV_TEXT_ALIGN_CENTER, 0);
@@ -212,13 +228,16 @@ void voice_page_tick(void)
     portEXIT_CRITICAL(&s_lock);
     uint32_t now = lv_tick_get();
     if (snapshot.revision != s_seen) {
+        bool phase_changed = s_seen == 0 || s_phase != snapshot.phase;
         s_seen = snapshot.revision;
         s_phase = snapshot.phase;
         s_muted = snapshot.muted;
-        lv_label_set_text(s_mute_label, s_muted ? "取消静音" : "静音");
-        lv_label_set_text(s_status, status_for(s_phase));
-        lv_obj_set_style_text_color(s_status, lv_color_hex(s_phase == PH_ERROR ? C_ERROR : C_ACCENT), 0);
-        lv_label_set_text(s_text, snapshot.text[0] ? snapshot.text :
+        set_short_label(s_mute_label, s_muted ? "取消静音" : "静音");
+        if (phase_changed) {
+            set_short_label(s_status, status_for(s_phase));
+            lv_obj_set_style_text_color(s_status, lv_color_hex(s_phase == PH_ERROR ? C_ERROR : C_ACCENT), 0);
+        }
+        set_caption(snapshot.text[0] ? snapshot.text :
             (s_phase == PH_IDLE ? "说“你好小爱”，或轻触唤醒" : status_for(s_phase)));
     }
     if (snapshot.wake_serial != s_wake_seen) {

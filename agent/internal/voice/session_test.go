@@ -116,12 +116,29 @@ func (d testDevice) mic(seq uint32, value int16) error {
 	for i := range p {
 		p[i] = value
 	}
-	return d.ws.Write(d.ctx, websocket.MessageBinary, encodeAudio(audioFrame{Kind: kindMicrophone, Epoch: d.epoch, Seq: seq, PCM: p}))
+	err := d.ws.Write(d.ctx, websocket.MessageBinary, encodeAudio(audioFrame{Kind: kindMicrophone, Epoch: d.epoch, Seq: seq, PCM: p}))
+	// The board produces one frame per 20ms. An unpaced six-second recording
+	// flooded the bounded receive queue in microseconds and made capture tests
+	// fail with an unrelated socket overflow under scheduler/compile load.
+	if err == nil {
+		timer := time.NewTimer(time.Millisecond) // accelerated device cadence
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-d.ctx.Done():
+			return d.ctx.Err()
+		}
+	}
+	return err
 }
 
-func sessionHarness(t *testing.T, cfg Config, dep dependencies, scenario func(testDevice) error) (chan Command, <-chan error, func() []State) {
+func sessionHarness(t *testing.T, cfg Config, dep dependencies, scenario func(testDevice) error, timeout ...time.Duration) (chan Command, <-chan error, func() []State) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	limit := 10 * time.Second
+	if len(timeout) > 0 {
+		limit = timeout[0]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	cmds := make(chan Command, 16)
 	serverResult := make(chan error, 1)
 	runResult := make(chan error, 1)

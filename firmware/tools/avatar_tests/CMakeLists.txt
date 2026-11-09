@@ -7,16 +7,25 @@ set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_compile_definitions(LV_MEM_SIZE=8388608 LV_USE_SNAPSHOT=1 LV_USE_QRCODE=1
-    LV_USE_FONT_COMPRESSED=1 LV_BIN_DECODER_RAM_LOAD=1
+    LV_USE_FONT_COMPRESSED=0 LV_FONT_FMT_TXT_LARGE=1 LV_BIN_DECODER_RAM_LOAD=1
     LV_FONT_MONTSERRAT_12=1 LV_FONT_MONTSERRAT_16=1 LV_FONT_MONTSERRAT_20=1 LV_FONT_MONTSERRAT_28=1)
+option(AVATAR_PARALLEL_DRAW "Exercise the device-style two-worker software renderer" OFF)
+if(AVATAR_PARALLEL_DRAW)
+    add_compile_definitions(LV_USE_OS=LV_OS_PTHREAD LV_DRAW_SW_DRAW_UNIT_CNT=2)
+endif()
+find_package(Threads REQUIRED)
 add_subdirectory("${FIRMWARE}/managed_components/lvgl__lvgl" lvgl)
 configure_file(embedded.S.in embedded.S @ONLY)
 add_executable(avatar_checks host.c voice_checks.c dashboard_checks.c "${CMAKE_CURRENT_BINARY_DIR}/embedded.S"
     "${FIRMWARE}/main/assets/avatar_frames.c"
     "${FIRMWARE}/main/assets/fonts/voice_font_20.c")
 target_include_directories(avatar_checks PRIVATE stubs "${FIRMWARE}/main" "${FIRMWARE}/main/net" "${FIRMWARE}/main/ui")
-target_link_libraries(avatar_checks PRIVATE lvgl m)
+target_link_libraries(avatar_checks PRIVATE lvgl m Threads::Threads)
+add_executable(font_checks font_checks.c "${FIRMWARE}/main/assets/fonts/voice_font_20.c")
+target_link_libraries(font_checks PRIVATE lvgl m Threads::Threads)
+target_compile_options(font_checks PRIVATE -Wall -Wextra -Werror=implicit-function-declaration -UNDEBUG)
 # Compile UI sources with warnings enabled, while preserving LVGL's own settings.
 target_compile_options(avatar_checks PRIVATE -Wall -Wextra -Werror=implicit-function-declaration -UNDEBUG)
 enable_testing()
 add_test(NAME avatar_behavior COMMAND avatar_checks "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME font_parallel_bitmap COMMAND font_checks)

@@ -29,28 +29,30 @@ type playback struct {
 	deadline       time.Time
 }
 type session struct {
-	ctx         context.Context
-	ws          *websocket.Conn
-	cfg         Config
-	state       State
-	emit        func(State)
-	epoch       uint32
-	detector    detector
-	vad         vad
-	diagnostic  string
-	ring        sampleRing
-	kwsSamples  int64
-	capture     *capture
-	manualFixed bool
-	muted       bool
-	nextMic     uint32
-	jobs        chan work
-	results     chan result
-	cancelTurn  context.CancelFunc
-	generation  uint64
-	active      bool
-	play        *playback
-	deadline    time.Time
+	ctx          context.Context
+	ws           *websocket.Conn
+	cfg          Config
+	state        State
+	emit         func(State)
+	epoch        uint32
+	detector     detector
+	vad          vad
+	diagnostic   string
+	ring         sampleRing
+	kwsSamples   int64
+	capture      *capture
+	manualFixed  bool
+	muted        bool
+	nextMic      uint32
+	jobs         chan work
+	results      chan result
+	cancelTurn   context.CancelFunc
+	generation   uint64
+	active       bool
+	play         *playback
+	deadline     time.Time
+	stageStarted time.Time
+	reprompted   bool
 }
 
 // Run connects once to /voice. It never retries and never downloads assets.
@@ -300,10 +302,18 @@ func deviceCaption(text string) string {
 	return text + "…"
 }
 
-func (s *session) phase(phase string) error {
+func (s *session) phase(phase string, notice ...string) error {
 	s.state.Phase = phase
+	s.state.Notice = ""
+	if len(notice) > 0 {
+		s.state.Notice = notice[0]
+	}
+	if budget := phaseBudget(phase); budget > 0 {
+		s.stageStarted = time.Now()
+		s.deadline = s.stageStarted.Add(budget + stageGrace)
+	}
 	s.emit(s.state)
-	return s.send(message{Type: "state", Turn: s.state.Turn, State: phase})
+	return s.send(message{Type: "state", Turn: s.state.Turn, State: phase, Text: s.state.Notice})
 }
 func (s *session) resetCapture() {
 	s.capture = nil
@@ -339,6 +349,7 @@ func (s *session) begin() error {
 	if s.state.Turn == 0 {
 		s.state.Turn = 1
 	}
+	s.reprompted = false
 	s.state.Transcript = ""
 	s.state.Response = ""
 	s.state.ASRMillis = 0
@@ -346,11 +357,11 @@ func (s *session) begin() error {
 	s.state.TTSMillis = 0
 	s.state.Error = s.diagnostic
 	s.active = true
-	s.deadline = time.Now().Add(120 * time.Second)
+	s.deadline = time.Now().Add(cloudWorkBudget + stageGrace)
 	return nil
 }
 func (s *session) submit(kind, text string, pcm []int16) {
-	c, cancel := context.WithTimeout(s.ctx, 115*time.Second)
+	c, cancel := context.WithTimeout(s.ctx, cloudWorkBudget)
 	s.cancelTurn = cancel
 	w := work{ctx: c, turn: s.state.Turn, generation: s.generation, kind: kind, text: text, pcm: pcm}
 	select {
@@ -398,6 +409,10 @@ func (s *session) command(c Command) error {
 		if err := s.begin(); err != nil {
 			return err
 		}
+		if c.Kind == "preview" {
+			// Keep the text available for another explicit retry if synthesis fails again.
+			s.state.Response = strings.TrimSpace(c.Text)
+		}
 		s.submit(c.Kind, c.Text, nil)
 		return s.phase("synthesizing")
 	default:
@@ -405,6 +420,9 @@ func (s *session) command(c Command) error {
 	}
 }
 func (s *session) fail(code string, err error) error {
+	if phaseBudget(s.state.Phase) > 0 && !s.stageStarted.IsZero() {
+		s.recordStageMillis(s.state.Phase, max(1, time.Since(s.stageStarted).Milliseconds()))
+	}
 	if e := s.abort(true); e != nil {
 		return e
 	}
@@ -455,12 +473,12 @@ func (s *session) microphone(b []byte) error {
 		}
 		if done {
 			if empty {
-				return s.fail("no_speech", errors.New("no speech detected before timeout"))
+				return s.finishNoQuestion()
 			}
 			pcm := s.capture.pcm
 			s.capture = nil
 			s.manualFixed = false
-			s.deadline = time.Now().Add(120 * time.Second)
+			s.deadline = time.Now().Add(cloudWorkBudget + stageGrace)
 			s.submit("utterance", "", pcm)
 			return s.phase("recognizing")
 		}
@@ -561,14 +579,56 @@ func (s *session) control(b []byte) error {
 	}
 	return nil
 }
+func (s *session) finishNoQuestion() error {
+	if err := s.abort(true); err != nil {
+		return err
+	}
+	s.state.Error = s.diagnostic
+	return s.phase("idle", "没有听到问题，请重新唤醒后说出问题")
+}
+
+func (s *session) continueAfterWakeOnly(millis int64) error {
+	s.state.ASRMillis = millis
+	// At most one additional capture per turn. Repeated wake words must not
+	// create an unbounded sequence of recognition requests.
+	if s.reprompted {
+		return s.finishNoQuestion()
+	}
+	s.reprompted = true
+	if s.cancelTurn != nil {
+		s.cancelTurn()
+		s.cancelTurn = nil
+	}
+	s.resetCapture()
+	s.capture = &capture{}
+	s.manualFixed = s.vad == nil
+	s.state.Error = s.diagnostic
+	s.deadline = time.Now().Add(40 * time.Second)
+	return s.phase("listening", "我在听，请继续说出问题")
+}
+
+func (s *session) recordStageMillis(stage string, millis int64) {
+	switch stage {
+	case "recognizing":
+		s.state.ASRMillis = max(s.state.ASRMillis, millis)
+	case "thinking":
+		s.state.AgentMillis = max(s.state.AgentMillis, millis)
+	case "synthesizing":
+		s.state.TTSMillis = max(s.state.TTSMillis, millis)
+	}
+}
+
 func (s *session) result(r result) error {
 	if !s.active || r.turn != s.state.Turn {
 		return nil
 	}
 	if r.err != nil {
+		s.recordStageMillis(r.phase, r.millis)
 		return s.fail(r.phase, r.err)
 	}
 	switch r.phase {
+	case "wake_only":
+		return s.continueAfterWakeOnly(r.millis)
 	case "transcript":
 		s.state.Transcript = r.text
 		s.state.ASRMillis = r.millis
