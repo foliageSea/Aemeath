@@ -5,12 +5,17 @@ import "strings"
 // speechTextFilter removes numeric citations and numbered source lines before
 // sentence splitting. It buffers only a possible marker, so ordinary prose can
 // reach synthesis immediately, even when transport deltas split a marker.
-// The original response remains available to the display and conversation.
+// Display and speech share this filter; conversation memory retains the original.
 type speechTextFilter struct {
 	marker        string
 	lineHasText   bool
 	markerAtStart bool
 	skipLine      bool
+}
+
+func cleanResponseText(text string) string {
+	var filter speechTextFilter
+	return strings.TrimSpace(filter.Push(text) + filter.Finish())
 }
 
 func (f *speechTextFilter) Push(delta string) string {

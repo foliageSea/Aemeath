@@ -34,7 +34,7 @@ func TestSpeechTextFilterChunkBoundaries(t *testing.T) {
 	}
 }
 
-func TestPipelineCitationsOnlyExcludedFromSpeech(t *testing.T) {
+func TestPipelineCitationsExcludedFromSpeechAndDisplay(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		name := "wav"
 		if streaming {
@@ -73,11 +73,14 @@ func TestPipelineCitationsOnlyExcludedFromSpeech(t *testing.T) {
 			var displayed string
 			for _, event := range events.snapshot() {
 				if event.phase == "response" {
+					if strings.Contains(event.text, "[1]") || strings.Contains(event.text, "IP.cn") {
+						t.Fatalf("citation leaked into display: %q", event.text)
+					}
 					displayed = event.text
 				}
 			}
-			if displayed != response {
-				t.Fatalf("display lost citations: %q", displayed)
+			if displayed != "东莞今天（11月10日）多云，气温约17～25°C。" {
+				t.Fatalf("unexpected display text: %q", displayed)
 			}
 		})
 	}

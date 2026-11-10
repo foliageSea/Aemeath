@@ -48,6 +48,7 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 		var splitter sentenceSegmenter
 		var speechText speechTextFilter
 		var full strings.Builder
+		var visible strings.Builder
 		send := func(chunks []string) error {
 			for _, chunk := range chunks {
 				if strings.TrimSpace(chunk) == "" {
@@ -69,12 +70,14 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 				return errors.New("agent response too long")
 			}
 			full.WriteString(s)
-			chunks, err := splitter.Push(speechText.Push(s))
+			clean := speechText.Push(s)
+			visible.WriteString(clean)
+			chunks, err := splitter.Push(clean)
 			if err != nil {
 				return err
 			}
 			if len(chunks) > 0 {
-				if !emit(ctx, result{phase: "response", text: full.String(), millis: time.Since(start).Milliseconds()}) {
+				if !emit(ctx, result{phase: "response", text: strings.TrimSpace(visible.String()), millis: time.Since(start).Milliseconds()}) {
 					return context.Canceled
 				}
 			}
@@ -105,7 +108,7 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 				if err == nil {
 					err = send(tail)
 				}
-				if err == nil && !emit(ctx, result{phase: "response", text: response, millis: time.Since(start).Milliseconds()}) {
+				if err == nil && !emit(ctx, result{phase: "response", text: cleanResponseText(response), millis: time.Since(start).Milliseconds()}) {
 					err = context.Canceled
 				}
 			}
