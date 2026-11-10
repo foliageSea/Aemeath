@@ -185,24 +185,6 @@ func (a *nativeUI) wakeModelsView(c *ui.Context) {
 		if current && state.ready && filepath.Clean(a.snapshot.Settings.Voice.WakeModelDir) != target {
 			ui.Text(c, "保存设置后使用此模型目录。").FontSize(11).TextColor(t.TextMuted)
 		}
-		label := "模型目录与高级选项"
-		if a.wakeAdvanced {
-			label = "收起模型目录"
-		}
-		ui.Button(c.Key("wake-advanced"), label).FontSize(11).OnClick(func() { a.wakeAdvanced = !a.wakeAdvanced })
-		if a.wakeAdvanced {
-			ui.Field(c.Key("voice-wake-dir"), "唤醒模型目录", func() {
-				if ui.TextInput(c, &a.draft.Voice.WakeModelDir).Label("唤醒模型目录").Placeholder(wake.DefaultModelDir()).FillWidth().Disabled(busy).Changed() {
-					a.edited()
-				}
-			}).FillWidth()
-			ui.Button(c.Key("wake-default-dir"), "使用默认模型目录").Disabled(busy).OnClick(func() {
-				if a.draft.Voice.WakeModelDir != wake.DefaultModelDir() {
-					a.draft.Voice.WakeModelDir = wake.DefaultModelDir()
-					a.edited()
-				}
-			})
-			ui.Text(c, "安装到当前目录；已有文件校验失败时，请检查文件或更换新的目录。").FontSize(11).TextColor(t.TextMuted).Wrap()
-		}
+		a.wakeDirectoryView(c, busy)
 	})
 }
