@@ -216,40 +216,29 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 			})
 		}
 		ui.Column(c.Key("voice-controls")).Label("语音操作栏").FillWidth().Shrink(0).Padding(14, 16).Gap(12).Radius(18).Border(1, t.Border.Alpha(0.5)).Background(t.Surface).Children(func() {
-			a.voiceStatusView(c)
-			key := a.voiceGlobalKey
-			if key == "" {
-				key = "F8"
-			}
-			holdHint := fmt.Sprintf("全局 %s · 后台也可按住说话 · 松开发送 · 最长 30 秒", key)
-			if !a.voiceGlobalReady {
-				holdHint = "全局快捷键尚未就绪"
-			}
-			if a.voiceHold {
-				holdHint = fmt.Sprintf("正在按住录音 · 松开 %s 发送 · 前台 Esc 取消", key)
-			}
-			ui.Text(c, holdHint).FontSize(12).TextColor(t.Accent).Wrap()
-			if a.voiceGlobalError != "" {
-				ui.Text(c, a.voiceGlobalError).FontSize(12).TextColor(t.Warning).Wrap()
-			}
-			if state.Notice != "" {
-				ui.Text(c, state.Notice).FontSize(12).Wrap().MaxLines(2).Ellipsis("…")
-			}
-			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(8, 8).Shrink(0).Radius(4).Background(nativeVoicePhaseColor(t, state))
 				ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
-					ui.Text(c, nativeVoiceActivity(state)).FontSize(12).Bold().Wrap()
+					ui.Text(c, nativeVoiceActivity(state)).FontSize(14).Bold().Wrap()
 					if state.Turn > 0 && !(a.voiceCleared && state.Turn == a.voiceClearTurn && state.Session == a.voiceClearSession) {
 						a.voiceLiveStatusView(c)
 					} else {
 						ui.Text(c, "通过设备麦克风与你对话").FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 					}
 				})
-				ui.Button(c.Key("voice-cancel"), "取消对话").Height(36).FontSize(12).Disabled(disabled).OnClick(func() { a.voiceCommand("cancel", "") })
-				ui.PrimaryButton(c.Key("voice-wake"), "手动唤醒").Height(36).Padding(8, 18).FontSize(13).Disabled(disabled).OnClick(func() { a.voiceCommand("wake", "") })
+				ui.Row(c).Shrink(0).Gap(8).AlignItems(ui.Center).Children(func() {
+					if state.Phase == "error" && state.Response != "" {
+						voiceIconButton(c, "voice-retry-response", "重试回复语音", voiceRetryIcon, false, disabled, func() { a.voiceCommand("preview", state.Response) })
+					}
+					voiceIconButton(c, "voice-cancel", "取消对话", voiceCancelIcon, false, disabled, func() { a.voiceCommand("cancel", "") })
+					voiceIconButton(c, "voice-wake", "手动唤醒", sidebarVoice, true, disabled, func() { a.voiceCommand("wake", "") })
+				})
 			})
-			if state.Phase == "error" && state.Response != "" {
-				ui.Button(c.Key("voice-retry-response"), "重试回复语音").Disabled(disabled).OnClick(func() { a.voiceCommand("preview", state.Response) })
-			}
+			a.voiceNoticeView(c)
+			ui.Row(c).FillWidth().Wrap().GapX(16).GapY(6).Padding(10, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(t.Border.Alpha(0.4)).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+				a.voiceStatusView(c)
+				a.voiceHoldHintView(c)
+			})
 		})
 	})
 }
@@ -268,21 +257,88 @@ func (a *nativeUI) voiceBubble(c *ui.Context, speaker, text string, user bool) {
 	})
 }
 
-func (a *nativeUI) voiceStatusView(c *ui.Context) {
+var (
+	voiceCancelIcon = sidebarSVG("<path d='M6 6l12 12M18 6 6 18'/>")
+	voiceRetryIcon  = sidebarSVG("<path d='M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5'/>")
+)
+
+func voiceIconButton(c *ui.Context, key, label string, icon *ui.SVG, primary, disabled bool, onClick func()) {
+	t := c.Theme()
+	background, hover, border, color := t.Surface, t.SurfaceHover, t.Border, t.TextMuted
+	if primary {
+		background, hover, border, color = t.Accent, t.Accent.Alpha(0.85), t.Accent, t.AccentText
+	}
+	if disabled {
+		background, hover, border, color = background.Alpha(0.5), background.Alpha(0.5), border.Alpha(0.5), color.Alpha(0.5)
+	}
+	size := float32(36)
+	if primary {
+		size = 40
+	}
+	button := ui.ButtonBase(c.Key(key)).Label(label).Tooltip(label).Size(size, size).Shrink(0).Radius(size/2).Border(1, border).Background(background).Center().Disabled(disabled)
+	if !disabled && button.Hovered() {
+		button.Background(hover)
+	}
+	button.Children(func() {
+		ui.Icon(c, icon).FontSize(18).TextColor(color)
+	}).OnClick(onClick)
+}
+
+func nativeVoicePhaseColor(t *ui.Theme, state voice.State) ui.Color {
+	switch state.Phase {
+	case "error":
+		return t.Warning
+	case "wake", "listening", "recognizing", "thinking", "synthesizing", "speaking", "connecting":
+		return t.Accent
+	default:
+		return t.TextMuted
+	}
+}
+
+func (a *nativeUI) voiceNoticeView(c *ui.Context) {
 	t, state := c.Theme(), a.snapshot.Voice
 	if _, supported := a.service.(nativeVoiceService); !supported {
 		ui.Text(c, "当前服务不支持语音操作，请更新桌面应用。").FontSize(12).TextColor(t.Warning).Wrap()
 	}
+	if state.Error != "" {
+		ui.Text(c, "语音提示："+state.Error).FontSize(12).TextColor(t.Warning).Wrap().MaxLines(2).Ellipsis("…").Tooltip(state.Error).Selectable()
+	}
+	if a.voiceGlobalError != "" {
+		ui.Text(c, a.voiceGlobalError).FontSize(12).TextColor(t.Warning).Wrap()
+	}
+	if state.Notice != "" {
+		ui.Text(c, state.Notice).FontSize(12).Wrap().MaxLines(2).Ellipsis("…")
+	}
+}
+
+func (a *nativeUI) voiceStatusView(c *ui.Context) {
+	t, state := c.Theme(), a.snapshot.Voice
 	wake, color := "离线唤醒：未就绪（模型缺失或不可用）", t.Warning
 	if !a.snapshot.Settings.Voice.Enabled {
 		wake, color = "语音助手尚未启用，填写设置后保存即可开始。", t.TextMuted
 	} else if state.WakeReady {
 		wake, color = fmt.Sprintf("离线唤醒：已就绪 · 请说「%s」", a.savedWakePhrase()), t.Success
 	}
-	ui.Text(c, wake).FontSize(12).TextColor(color).Wrap()
-	if state.Error != "" {
-		ui.Text(c, "语音提示："+state.Error).FontSize(12).TextColor(t.Warning).Wrap().MaxLines(2).Ellipsis("…").Tooltip(state.Error).Selectable()
+	ui.Row(c).MinWidth(0).Shrink(1).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(color)
+		ui.Text(c, wake).FontSize(11).TextColor(t.TextMuted).Wrap()
+	})
+}
+
+func (a *nativeUI) voiceHoldHintView(c *ui.Context) {
+	t := c.Theme()
+	key := a.voiceGlobalKey
+	if key == "" {
+		key = "F8"
 	}
+	hint, color := fmt.Sprintf("全局 %s · 后台也可按住说话 · 松开发送 · 最长 30 秒", key), t.TextMuted
+	if !a.voiceGlobalReady {
+		hint = "全局快捷键尚未就绪"
+	}
+	if a.voiceHold {
+		hint, color = fmt.Sprintf("正在按住录音 · 松开 %s 发送 · 前台 Esc 取消", key), t.Accent
+	}
+	ui.Text(c, hint).FontSize(11).TextColor(color).Wrap()
 }
 
 func (a *nativeUI) voicePreviewView(c *ui.Context) {
