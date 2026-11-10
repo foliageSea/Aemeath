@@ -211,6 +211,9 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 			t.Fatalf("manual diagnosis command disabled without models: %s", label)
 		}
 		nativeClick(t, tt, label)
+		if label == "清空对话" {
+			nativeClick(t, tt, "清空")
+		}
 		nativeComplete(t, updates, tt)
 	}
 	nativeClick(t, tt, "语音设置")

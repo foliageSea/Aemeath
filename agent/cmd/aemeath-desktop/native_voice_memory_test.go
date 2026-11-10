@@ -25,7 +25,7 @@ func TestNativeRestoresVoiceTextWithoutInventedDiagnostics(t *testing.T) {
 	a.page = "语音助手"
 	tt := ui.NewTester(a.view, 1100, 900)
 	tt.Frame()
-	for _, text := range []string{"我叫小明", "你好，小明。", "历史对话 · 仅恢复问答文字"} {
+	for _, text := range []string{"我叫小明", "你好，小明。"} {
 		if !tt.HasText(text) {
 			t.Fatalf("restored text not shown: %s", text)
 		}
@@ -73,6 +73,7 @@ func TestNativeClearDoesNotSuppressFirstTurnAfterReconnect(t *testing.T) {
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
 	nativeClick(t, tt, "清空对话")
+	nativeClick(t, tt, "清空")
 	nativeComplete(t, updates, tt)
 	a.refresh()
 	if len(a.voiceHistory) != 0 {
@@ -83,5 +84,23 @@ func TestNativeClearDoesNotSuppressFirstTurnAfterReconnect(t *testing.T) {
 	a.refresh()
 	if len(a.voiceHistory) != 1 || a.voiceHistory[0].transcript != "新问题" {
 		t.Fatal("reused turn number after reconnect was incorrectly suppressed")
+	}
+}
+
+func TestNativeClearRequiresConfirmation(t *testing.T) {
+	a, base, _, tt := nativeTest(t)
+	f := &nativeVoiceFake{nativeFake: base}
+	a.service = f
+	base.state.Settings.Voice.Enabled = true
+	base.state.Voice = voice.State{Connected: true, Session: 1, Turn: 1, Transcript: "问题", Response: "回答"}
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	nativeClick(t, tt, "清空对话")
+	if !tt.HasText("清空对话？") {
+		t.Fatal("clear did not ask for confirmation")
+	}
+	nativeClick(t, tt, "取消")
+	if tt.HasText("清空对话？") || len(a.voiceHistory) != 1 {
+		t.Fatal("canceling confirmation cleared conversation")
 	}
 }

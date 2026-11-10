@@ -181,9 +181,12 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 				}
 				ui.Text(c, connection+" · "+nativeVoicePhase(state.Phase)).FontSize(11).TextColor(t.TextMuted).Wrap()
 			})
-			ui.Button(c.Key("voice-configure"), "语音设置").FontSize(12).OnClick(a.openVoiceSettings)
-			ui.Button(c.Key("voice-clear"), "清空对话").FontSize(12).Disabled(disabled).OnClick(func() { a.voiceCommand("clear", "") })
+			voiceIconButton(c, "voice-configure", "语音设置", voiceSettingsIcon, false, false, a.openVoiceSettings)
+			voiceIconButton(c, "voice-clear", "清空对话", voiceClearIcon, false, disabled, func() { a.voiceClearConfirm = true })
 		})
+		if ui.AlertDialog(c, &a.voiceClearConfirm, "清空对话？", "当前对话记录和上下文将被清除，且无法恢复。", "取消", "清空") == 1 {
+			a.voiceCommand("clear", "")
+		}
 		if len(a.voiceHistory) == 0 {
 			ui.Column(c.Key("voice-empty")).Label("对话记录").FillWidth().Grow(1).MinHeight(0).Clip().Center().Children(func() {
 				ui.Column(c).MaxWidth(400).FillWidth().Padding(16).Gap(12).AlignItems(ui.Center).Children(func() {
@@ -200,9 +203,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 					for i, turn := range a.voiceHistory {
 						ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().Gap(12).Children(func() {
 							a.voiceBubble(c, "你", turn.transcript, true)
-							if turn.restored {
-								ui.Text(c, "历史对话 · 仅恢复问答文字").FontSize(11).TextColor(t.TextMuted)
-							} else {
+							if !turn.restored {
 								a.voiceTurnProcessView(c, i)
 							}
 							if turn.response != "" {
@@ -258,8 +259,10 @@ func (a *nativeUI) voiceBubble(c *ui.Context, speaker, text string, user bool) {
 }
 
 var (
-	voiceCancelIcon = sidebarSVG("<path d='M6 6l12 12M18 6 6 18'/>")
-	voiceRetryIcon  = sidebarSVG("<path d='M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5'/>")
+	voiceCancelIcon   = sidebarSVG("<path d='M6 6l12 12M18 6 6 18'/>")
+	voiceSettingsIcon = sidebarSVG("<path d='M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1'/><circle cx='15' cy='6' r='2'/><circle cx='9' cy='12' r='2'/><circle cx='17' cy='18' r='2'/>")
+	voiceClearIcon    = sidebarSVG("<path d='M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3'/>")
+	voiceRetryIcon    = sidebarSVG("<path d='M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5'/>")
 )
 
 func voiceIconButton(c *ui.Context, key, label string, icon *ui.SVG, primary, disabled bool, onClick func()) {

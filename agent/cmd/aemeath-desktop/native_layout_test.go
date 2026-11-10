@@ -136,12 +136,14 @@ func TestNativeConversationRetainsTurnsAndClearHandlesStaleSnapshot(t *testing.T
 	}
 	f.commandError = errors.New("clear failed")
 	nativeClick(t, tt, "清空对话")
+	nativeClick(t, tt, "清空")
 	nativeComplete(t, updates, tt)
 	if len(a.voiceHistory) != 2 {
 		t.Fatal("failed clear lost history")
 	}
 	f.commandError = nil
 	nativeClick(t, tt, "清空对话")
+	nativeClick(t, tt, "清空")
 	nativeComplete(t, updates, tt)
 	a.refresh() // Command acceptance may precede the device's next snapshot.
 	if len(a.voiceHistory) != 0 {
