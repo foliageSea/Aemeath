@@ -45,6 +45,71 @@ func TestNativeSettingsTabsKeepDraftAndSaveAcrossTabs(t *testing.T) {
 	}
 }
 
+func TestNativeVoiceSectionsKeepDraftSelectionAndSaveAcrossGroups(t *testing.T) {
+	a, f, updates, tt := nativeTest(t)
+	tt.SetSize(1100, 1600)
+	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "语音")
+	if a.voiceSettingsSection != 0 {
+		t.Fatalf("default voice section = %d, want 0", a.voiceSettingsSection)
+	}
+	fields := [...]string{"角色设定", "对话模型", "MiMo 服务地址", "参考音频路径", "唤醒阈值", "试听文本"}
+	values := [...]string{"分组中的角色草稿。", "section-model", "https://asr.example/v1", "/tmp/section-reference.wav", "0.68", "保留试听草稿。"}
+	for section, title := range nativeVoiceSections {
+		nativeClick(t, tt, title)
+		if a.voiceSettingsSection != section {
+			t.Fatalf("clicked %s selected section %d", title, a.voiceSettingsSection)
+		}
+		for i, label := range nativeVoiceSections {
+			info, ok := tt.AccessByRole(ui.RoleButton, label)
+			if !ok || (info.Selected || info.Checked) != (i == section) {
+				t.Fatalf("navigation selection: %s %+v", label, info)
+			}
+		}
+		for i, field := range fields {
+			_, rendered := tt.AccessByRole(ui.RoleTextField, field)
+			if rendered != (i == section) {
+				t.Fatalf("section %s rendered field %s: %v", title, field, rendered)
+			}
+		}
+		if _, ok := tt.AccessByRole(ui.RoleButton, "保存设置"); !ok {
+			t.Fatalf("missing unified save in %s", title)
+		}
+		if _, ok := tt.AccessByRole(ui.RoleButton, "保存语音设置"); ok {
+			t.Fatal("obsolete bottom voice save remains")
+		}
+		for _, label := range []string{"连接", "通用", "屏幕", "语音"} {
+			info, ok := tt.AccessByRole(ui.RoleTab, label)
+			if !ok || info.Selected != (label == "语音") {
+				t.Fatalf("top-level settings tab changed: %s %+v", label, info)
+			}
+		}
+		nativeVoiceEdit(t, tt, fields[section], values[section])
+		tt.Key(0, ui.KeyTab)
+	}
+	before := a.draft.Voice
+	if before.Persona != values[0] || before.LLMModel != values[1] || before.MiMoBaseURL != values[2] || before.ReferenceAudio != values[3] || before.WakeThreshold != 0.68 || a.voicePreview != values[5] || !a.dirty {
+		t.Fatal("section navigation lost edited draft")
+	}
+	for section := len(nativeVoiceSections) - 1; section >= 0; section-- {
+		nativeClick(t, tt, nativeVoiceSections[section])
+		info, ok := tt.AccessByRole(ui.RoleTextField, fields[section])
+		if !ok || (section != 4 && info.Value != values[section]) {
+			t.Fatalf("section roundtrip lost editor %s: %+v", fields[section], info)
+		}
+		if a.draft.Voice != before || a.voicePreview != values[5] {
+			t.Fatal("section roundtrip replaced draft")
+		}
+	}
+	nativeClick(t, tt, "保存设置")
+	nativeComplete(t, updates, tt)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.saves) != 1 || f.saves[0].Voice != before || a.dirty {
+		t.Fatal("unified save did not persist all voice groups")
+	}
+}
+
 func TestNativeConversationRetainsTurnsAndClearHandlesStaleSnapshot(t *testing.T) {
 	a, base, updates, tt := nativeTest(t)
 	f := &nativeVoiceFake{nativeFake: base}

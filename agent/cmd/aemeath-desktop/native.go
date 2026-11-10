@@ -21,34 +21,36 @@ type nativeService interface {
 }
 
 type nativeUI struct {
-	service        nativeService
-	snapshot       desktop.State
-	draft          desktop.Settings
-	page           string
-	notice         string
-	noticePending  bool
-	dirty          bool
-	revision       int
-	busy           map[string]bool
-	update         func(func()) // Host must assign win.Update before displaying the view.
-	login          bool
-	loginRead      func() bool
-	loginWrite     func(bool) error
-	history        []nativeSample
-	details        bool
-	quotaList      ui.ListState
-	quotaUnsaved   bool
-	voicePreview   string
-	visibleKeys    map[string]bool
-	settingsTab    int
-	voiceHistory   []nativeVoiceTurn
-	voiceNextID    uint64
-	voiceScroll    ui.ScrollState
-	voiceCleared   bool
-	voiceClearTurn uint32
-	wakeAssets     nativeWakeAssets
-	wakeAssetOps   nativeWakeAssetOps
-	wakeAdvanced   bool
+	service              nativeService
+	snapshot             desktop.State
+	draft                desktop.Settings
+	page                 string
+	notice               string
+	noticePending        bool
+	dirty                bool
+	revision             int
+	busy                 map[string]bool
+	update               func(func()) // Host must assign win.Update before displaying the view.
+	login                bool
+	loginRead            func() bool
+	loginWrite           func(bool) error
+	history              []nativeSample
+	details              bool
+	quotaList            ui.ListState
+	quotaUnsaved         bool
+	voicePreview         string
+	visibleKeys          map[string]bool
+	settingsTab          int
+	voiceSettingsSection int
+	voiceSettingsScroll  [6]ui.ScrollState
+	voiceHistory         []nativeVoiceTurn
+	voiceNextID          uint64
+	voiceScroll          ui.ScrollState
+	voiceCleared         bool
+	voiceClearTurn       uint32
+	wakeAssets           nativeWakeAssets
+	wakeAssetOps         nativeWakeAssetOps
+	wakeAdvanced         bool
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
@@ -202,6 +204,10 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 		}
 		ui.PrimaryButton(c.Key("save-settings"), "保存设置").Disabled(a.busy["save"]).OnClick(a.save)
 	})
+	if a.settingsTab == 3 {
+		a.voiceSettingsView(c)
+		return
+	}
 	ui.Scroll(c.Key(fmt.Sprintf("settings-tab-%d", a.settingsTab))).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().Gap(16).Children(func() {
 			switch a.settingsTab {
@@ -209,9 +215,6 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 				a.generalSettingsView(c)
 			case 2:
 				a.screenSettingsView(c)
-			case 3:
-				a.voiceSettingsView(c)
-				a.voicePreviewView(c)
 			default:
 				a.connectionSettingsView(c)
 			}

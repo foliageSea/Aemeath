@@ -12,6 +12,7 @@ func TestNativeFishReferenceIDMaskedKeyAndDraftPersistence(t *testing.T) {
 	tt.SetSize(1100, 3200)
 	nativeClick(t, tt, "设置")
 	nativeClick(t, tt, "语音")
+	nativeClick(t, tt, "语音合成")
 	nativeClick(t, tt, "Fish")
 	if a.draft.Voice.TTSProvider != "fish" || !a.dirty {
 		t.Fatal("Fish selection not bound to draft")
@@ -66,7 +67,7 @@ func TestNativeFishReferenceIDMaskedKeyAndDraftPersistence(t *testing.T) {
 	if first != cfg {
 		t.Fatal("save did not capture complete Fish configuration")
 	}
-	nativeClick(t, tt, "保存语音设置")
+	nativeClick(t, tt, "保存设置")
 	nativeComplete(t, updates, tt)
 	reopened := nativeState(f)
 	if reopened.draft.Voice != a.draft.Voice || reopened.draft.Voice.FishAPIKey != fields[1].value {

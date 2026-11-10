@@ -223,23 +223,20 @@ func (a *nativeUI) voiceStatusView(c *ui.Context) {
 func (a *nativeUI) voicePreviewView(c *ui.Context) {
 	t, state := c.Theme(), a.snapshot.Voice
 	disabled := a.voiceDisabled()
-	ui.Column(c.Key("voice-preview-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(t.Surface).Children(func() {
-		ui.Text(c, "声音试听").Bold().FontSize(17)
-		ui.Text(c, "操作使用已保存的设置；修改后请先保存。").FontSize(12).TextColor(t.TextMuted).Wrap()
-		ui.TextInput(c.Key("voice-preview-text"), &a.voicePreview).Label("试听文本").Placeholder("输入试听文本，留空使用默认问候语").FillWidth()
-		ui.Row(c).Gap(8).Children(func() {
-			ui.Button(c.Key("voice-preview"), "试听语音").Disabled(disabled).OnClick(func() { a.voiceCommand("preview", a.voicePreview) })
-			ui.Button(c.Key("voice-reference"), "播放参考音频").Disabled(disabled).OnClick(func() { a.voiceCommand("reference", "") })
-		})
-		ui.Text(c, fmt.Sprintf("第 %d 轮 · 识别 %d ms · 思考 %d ms · 合成累计 %d ms", state.Turn, state.ASRMillis, state.AgentMillis, state.TTSMillis)).FontSize(11).TextColor(t.TextMuted).Wrap()
-		if state.GeneratedSegments > 0 || state.Phase == "synthesizing" || state.Phase == "speaking" {
-			first := "首段待播放"
-			if state.FirstAudioMillis > 0 {
-				first = fmt.Sprintf("首段播放 %d ms", state.FirstAudioMillis)
-			}
-			ui.Text(c, fmt.Sprintf("%s · 已合成 %d 段 · 播放完成 %d 段", first, state.GeneratedSegments, state.PlayedSegments)).FontSize(11).TextColor(t.TextMuted).Wrap()
-		}
+	ui.Text(c, "操作使用已保存的设置；修改后请先保存。").FontSize(12).TextColor(t.TextMuted).Wrap()
+	ui.TextInput(c.Key("voice-preview-text"), &a.voicePreview).Label("试听文本").Placeholder("输入试听文本，留空使用默认问候语").FillWidth()
+	ui.Row(c).Gap(8).Children(func() {
+		ui.Button(c.Key("voice-preview"), "试听语音").Disabled(disabled).OnClick(func() { a.voiceCommand("preview", a.voicePreview) })
+		ui.Button(c.Key("voice-reference"), "播放参考音频").Disabled(disabled).OnClick(func() { a.voiceCommand("reference", "") })
 	})
+	ui.Text(c, fmt.Sprintf("第 %d 轮 · 识别 %d ms · 思考 %d ms · 合成累计 %d ms", state.Turn, state.ASRMillis, state.AgentMillis, state.TTSMillis)).FontSize(11).TextColor(t.TextMuted).Wrap()
+	if state.GeneratedSegments > 0 || state.Phase == "synthesizing" || state.Phase == "speaking" {
+		first := "首段待播放"
+		if state.FirstAudioMillis > 0 {
+			first = fmt.Sprintf("首段播放 %d ms", state.FirstAudioMillis)
+		}
+		ui.Text(c, fmt.Sprintf("%s · 已合成 %d 段 · 播放完成 %d 段", first, state.GeneratedSegments, state.PlayedSegments)).FontSize(11).TextColor(t.TextMuted).Wrap()
+	}
 }
 
 var (
@@ -279,84 +276,4 @@ func (a *nativeUI) voiceField(c *ui.Context, key, label, placeholder string, val
 			}
 		})
 	}).FillWidth()
-}
-
-func (a *nativeUI) voiceSettingsView(c *ui.Context) {
-	cfg := &a.draft.Voice
-	t := c.Theme()
-	ui.Column(c.Key("voice-settings")).FillWidth().Padding(20).Gap(10).Radius(18).Background(t.Surface).Children(func() {
-		ui.Text(c, "语音设置").Bold().FontSize(17)
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "启用语音助手").Grow(1)
-			if ui.Switch(c.Key("voice-enabled"), &cfg.Enabled).Label("启用语音助手").Changed() {
-				a.edited()
-			}
-		})
-		ui.Text(c, "对话服务 · OpenAI 兼容接口").Bold()
-		a.voiceField(c, "voice-llm-url", "OpenAI 服务地址", "https://api.openai.com/v1", &cfg.LLMBaseURL, false)
-		a.voiceField(c, "voice-llm-key", "OpenAI API 密钥", "输入 API 密钥", &cfg.LLMAPIKey, true)
-		a.voiceField(c, "voice-llm-model", "对话模型", "填写服务提供的模型名称", &cfg.LLMModel, false)
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "允许查询监控与控制设备").Grow(1)
-			if ui.Switch(c.Key("voice-tools"), &cfg.LLMTools).Label("允许查询监控与控制设备").Changed() {
-				a.edited()
-			}
-		})
-		ui.Text(c, "语音识别 · MiMo").Bold()
-		ui.Text(c, "语音对话使用 MiMo 识别；Fish 试听只需 Fish 设置。").FontSize(12).TextColor(t.TextMuted).Wrap()
-		a.voiceField(c, "voice-mimo-url", "MiMo 服务地址", "填写 MiMo 服务地址", &cfg.MiMoBaseURL, false)
-		a.voiceField(c, "voice-mimo-key", "MiMo API 密钥", "输入 API 密钥", &cfg.MiMoAPIKey, true)
-		ui.Text(c, "语音合成").Bold()
-		provider := 0
-		if cfg.TTSProvider == "fish" {
-			provider = 1
-		}
-		if ui.Segmented(c.Key("voice-tts-provider"), &provider, "MiMo", "Fish").Label("语音合成提供方").Changed() {
-			cfg.TTSProvider = []string{"mimo", "fish"}[provider]
-			a.edited()
-		}
-		if cfg.TTSProvider == "fish" {
-			a.voiceField(c, "voice-fish-url", "Fish 服务地址", "https://api.fish.audio", &cfg.FishBaseURL, false)
-			a.voiceField(c, "voice-fish-key", "Fish API 密钥", "输入 Fish API 密钥", &cfg.FishAPIKey, true)
-			a.voiceField(c, "voice-fish-model", "Fish 模型", "s2.1-pro", &cfg.FishModel, false)
-			a.voiceField(c, "voice-fish-reference-id", "Fish reference_id", "优先填写已创建的音色 ID", &cfg.FishReferenceID, false)
-			ui.Text(c, "音色 ID 优先：填写 reference_id 后，无需参考音频或转写文本。留空时，请提供下方 WAV 和与音频逐字一致的转写文本。").FontSize(12).TextColor(t.TextMuted).Wrap()
-			ui.Field(c.Key("voice-fish-reference-text"), "Fish 参考音频转写", func() {
-				if ui.TextArea(c, &cfg.FishReferenceText).Label("Fish 参考音频转写").Placeholder("与参考音频逐字一致；使用 reference_id 时可留空").FillWidth().Height(80).Changed() {
-					a.edited()
-				}
-			}).FillWidth()
-			latency := 0
-			if cfg.FishLatency == "normal" {
-				latency = 1
-			}
-			if cfg.FishLatency == "low" {
-				latency = 2
-			}
-			ui.Text(c, "Fish 延迟偏好").FontSize(12).TextColor(t.TextMuted)
-			if ui.Segmented(c.Key("voice-fish-latency"), &latency, "均衡", "标准", "低延迟").Label("Fish 延迟偏好").Changed() {
-				cfg.FishLatency = []string{"balanced", "normal", "low"}[latency]
-				a.edited()
-			}
-		}
-		a.voiceField(c, "voice-reference-path", "参考音频路径", "参考声音的 WAV 文件完整路径", &cfg.ReferenceAudio, false)
-		ui.Text(c, "离线唤醒与声音").Bold()
-		a.wakeModelsView(c)
-		ui.Field(c.Key("voice-wake-threshold"), "唤醒阈值", func() {
-			if ui.NumberInput(c, &cfg.WakeThreshold, 0.01, 1, 0.05).FillWidth().Changed() {
-				a.edited()
-			}
-		}).FillWidth().Description("0.01–1，越高越严格。")
-		ui.Text(c, fmt.Sprintf("播放音量 · %d%%", cfg.Volume)).FontSize(12).TextColor(t.TextMuted)
-		volume := float64(cfg.Volume)
-		if ui.Slider(c.Key("voice-volume"), &volume, 0, 100).Label("播放音量").FillWidth().Changed() {
-			cfg.Volume = int(volume)
-			a.edited()
-		}
-		ui.Text(c, "角色设定").FontSize(12).TextColor(t.TextMuted)
-		if ui.TextArea(c.Key("voice-persona"), &cfg.Persona).Label("角色设定").Placeholder("描述爱弥斯的性格、语气与回答偏好").FillWidth().Height(100).Changed() {
-			a.edited()
-		}
-		ui.PrimaryButton(c.Key("save-voice-settings-bottom"), "保存语音设置").Disabled(a.busy["save"]).OnClick(a.save)
-	})
 }

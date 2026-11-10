@@ -9,9 +9,42 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+var nativeVoiceSections = [...]string{"基础设置", "对话服务", "语音识别", "语音合成", "离线唤醒", "声音试听"}
+
+func nativeVoiceNavigate(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	section := ""
+	switch label {
+	case "启用语音助手", "角色设定":
+		section = "基础设置"
+	case "OpenAI 服务地址", "OpenAI API 密钥", "对话模型", "允许查询监控与控制设备":
+		section = "对话服务"
+	case "MiMo 服务地址", "MiMo API 密钥":
+		section = "语音识别"
+	case "MiMo", "Fish", "Fish 服务地址", "Fish API 密钥", "Fish 模型", "Fish reference_id", "Fish 参考音频转写", "参考音频路径", "低延迟":
+		section = "语音合成"
+	case "唤醒模型目录", "唤醒阈值", "模型目录与高级选项", "安装唤醒模型":
+		section = "离线唤醒"
+	case "播放音量", "试听文本", "试听语音", "播放参考音频":
+		section = "声音试听"
+	}
+	if section != "" {
+		nativeClick(t, tt, section)
+	}
+	if label == "唤醒模型目录" {
+		if _, ok := tt.AccessByRole(ui.RoleTextField, label); !ok {
+			nativeClick(t, tt, "模型目录与高级选项")
+		}
+	}
+}
+
 func nativeVoiceClickRole(t *testing.T, tt *ui.Tester, role ui.Role, label string) {
 	t.Helper()
 	info, ok := tt.AccessByRole(role, label)
+	if !ok {
+		nativeVoiceNavigate(t, tt, label)
+		info, ok = tt.AccessByRole(role, label)
+	}
 	if !ok {
 		t.Fatalf("missing control: %s", label)
 	}
@@ -31,7 +64,6 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 	tt.SetSize(1100, 2600)
 	nativeClick(t, tt, "设置")
 	nativeClick(t, tt, "语音")
-	nativeClick(t, tt, "模型目录与高级选项")
 	fields := []struct{ label, value string }{
 		{"OpenAI 服务地址", "https://chat.example/v1"},
 		{"OpenAI API 密钥", "private-openai-key"},
@@ -47,6 +79,7 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 	}
 	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "启用语音助手")
 	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "允许查询监控与控制设备")
+	nativeClick(t, tt, "离线唤醒")
 	nativeClick(t, tt, "唤醒阈值")
 	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("0.65")
@@ -56,6 +89,7 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 		t.Fatalf("switches, threshold or volume not bound: %+v", a.draft.Voice)
 	}
 	for _, label := range []string{"OpenAI API 密钥", "MiMo API 密钥"} {
+		nativeVoiceNavigate(t, tt, label)
 		info, ok := tt.AccessByRole(ui.RoleTextField, label)
 		if !ok || !info.Password || strings.Contains(info.Value, "private-") {
 			t.Fatalf("secret exposed through accessibility: %+v", info)
@@ -88,7 +122,7 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 	if saved != before {
 		t.Fatalf("save did not capture the full voice configuration: got %+v want %+v", saved, before)
 	}
-	nativeClick(t, tt, "保存语音设置")
+	nativeClick(t, tt, "保存设置")
 	nativeComplete(t, updates, tt)
 	if a.dirty {
 		t.Fatal("latest voice draft remained dirty after save")
@@ -130,6 +164,7 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 		nativeComplete(t, updates, tt)
 	}
 	nativeClick(t, tt, "语音设置")
+	nativeClick(t, tt, "声音试听")
 	nativeVoiceEdit(t, tt, "试听文本", "你好，爱弥斯。")
 	for _, label := range []string{"试听语音", "播放参考音频"} {
 		nativeClick(t, tt, label)
@@ -160,6 +195,7 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 		}
 	}
 	nativeClick(t, tt, "语音设置")
+	nativeClick(t, tt, "声音试听")
 	for _, text := range []string{"第 3 轮 · 识别 12 ms · 思考 34 ms · 合成累计 56 ms", "首段播放 789 ms · 已合成 3 段 · 播放完成 1 段"} {
 		if !tt.HasText(text) {
 			t.Fatalf("missing audio diagnostics: %s", text)
@@ -257,14 +293,59 @@ func TestNativeVoiceMinimumWindowAndScrollableSettings(t *testing.T) {
 		}
 	}
 	nativeClick(t, tt, "语音设置")
-	tt.Scroll(600, 400, 0, 4000)
+	nativeClick(t, tt, "基础设置")
 	info, ok := tt.AccessByRole(ui.RoleTextField, "角色设定")
 	if !ok || info.Bounds.W <= 0 || info.Bounds.X < 206 || info.Bounds.X+info.Bounds.W > 760 || info.Bounds.Y+info.Bounds.H > 600 {
 		t.Fatalf("voice settings cannot scroll into view: %+v", info)
 	}
 	nativeVoiceEdit(t, tt, "角色设定", "保持简洁。")
 	if a.draft.Voice.Persona != "保持简洁。" || !a.dirty {
-		t.Fatal("scrolled voice settings not editable")
+		t.Fatal("basic voice settings not editable")
+	}
+	for _, test := range []struct {
+		section      int
+		label, value string
+	}{
+		{3, "参考音频路径", "/tmp/scrolled-reference.wav"},
+		{4, "唤醒阈值", "0.72"},
+	} {
+		if test.section == 4 {
+			// A wrapped installation error must not hide the editable wake fields.
+			a.wakeAssets.path = a.wakeModelPath()
+			a.wakeAssets.checked = true
+			a.wakeAssets.err = errors.New(strings.Repeat("下载失败，请检查网络连接。", 8))
+		}
+		nativeClick(t, tt, nativeVoiceSections[test.section])
+		if test.section == 3 {
+			nativeClick(t, tt, "Fish")
+		} else {
+			nativeClick(t, tt, "模型目录与高级选项")
+		}
+		tt.Scroll(650, 400, 0, 4000)
+		if a.voiceSettingsScroll[test.section].Y <= 0 {
+			t.Fatalf("section did not scroll: %s", nativeVoiceSections[test.section])
+		}
+		info, ok := tt.AccessByRole(ui.RoleTextField, test.label)
+		if !ok || info.Bounds.W <= 0 || info.Bounds.Y < 0 || info.Bounds.Y+info.Bounds.H > 600 {
+			t.Fatalf("scrolled field outside minimum window: %s %+v", test.label, info)
+		}
+		nativeVoiceEdit(t, tt, test.label, test.value)
+		tt.Key(0, ui.KeyTab)
+		if save, ok := tt.AccessByRole(ui.RoleButton, "保存设置"); !ok || save.Bounds.Y < 0 || save.Bounds.Y+save.Bounds.H > 600 {
+			t.Fatalf("save moved outside window after scrolling: %+v", save)
+		}
+	}
+	synthesisY, wakeY := a.voiceSettingsScroll[3].Y, a.voiceSettingsScroll[4].Y
+	nativeClick(t, tt, "语音合成")
+	if a.voiceSettingsScroll[3].Y != synthesisY {
+		t.Fatal("synthesis section lost its scroll position")
+	}
+	nativeClick(t, tt, "离线唤醒")
+	if a.voiceSettingsScroll[4].Y != wakeY {
+		t.Fatal("wake section lost its scroll position")
+	}
+	if a.draft.Voice.ReferenceAudio != "/tmp/scrolled-reference.wav" || a.draft.Voice.WakeThreshold != 0.72 {
+		t.Fatal("scrolled synthesis or wake settings not editable")
 	}
 }
 

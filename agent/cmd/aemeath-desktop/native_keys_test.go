@@ -17,14 +17,16 @@ func TestNativeAPIKeysCanBeRevealedIndependentlyAndHiddenAfterEditing(t *testing
 	before := a.draft.Voice
 	nativeClick(t, tt, "设置")
 	nativeClick(t, tt, "语音")
-	fields := []struct{ label, value string }{{"OpenAI API 密钥", before.LLMAPIKey}, {"MiMo API 密钥", before.MiMoAPIKey}, {"Fish API 密钥", before.FishAPIKey}}
+	fields := []struct{ section, label, value string }{{"对话服务", "OpenAI API 密钥", before.LLMAPIKey}, {"语音识别", "MiMo API 密钥", before.MiMoAPIKey}, {"语音合成", "Fish API 密钥", before.FishAPIKey}}
 	for _, field := range fields {
+		nativeClick(t, tt, field.section)
 		info, ok := tt.AccessByRole(ui.RoleTextField, field.label)
 		if !ok || !info.Password || strings.Contains(info.Value, field.value) {
 			t.Fatalf("key not hidden by default: %s", field.label)
 		}
 	}
 	for _, field := range fields {
+		nativeClick(t, tt, field.section)
 		nativeClick(t, tt, "显示 "+field.label)
 		info, ok := tt.AccessByRole(ui.RoleTextField, field.label)
 		if !ok || info.Password || info.Value != field.value {
@@ -34,11 +36,13 @@ func TestNativeAPIKeysCanBeRevealedIndependentlyAndHiddenAfterEditing(t *testing
 			if other.label == field.label {
 				continue
 			}
+			nativeClick(t, tt, other.section)
 			info, _ := tt.AccessByRole(ui.RoleTextField, other.label)
 			if !info.Password {
 				t.Fatalf("revealing one key revealed another: %s", other.label)
 			}
 		}
+		nativeClick(t, tt, field.section)
 		a.refresh()
 		tt.Frame()
 		info, _ = tt.AccessByRole(ui.RoleTextField, field.label)
@@ -54,6 +58,7 @@ func TestNativeAPIKeysCanBeRevealedIndependentlyAndHiddenAfterEditing(t *testing
 	if a.dirty || a.draft.Voice != before {
 		t.Fatal("visibility toggle edited the saved configuration")
 	}
+	nativeClick(t, tt, "对话服务")
 	nativeClick(t, tt, "显示 OpenAI API 密钥")
 	nativeVoiceEdit(t, tt, "OpenAI API 密钥", "edited-key")
 	nativeClick(t, tt, "隐藏 OpenAI API 密钥")
