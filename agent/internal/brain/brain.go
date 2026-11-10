@@ -40,7 +40,7 @@ type Host interface {
 const (
 	maxTurns       = 10
 	maxTextBytes   = 16 << 10
-	maxSteps       = 8
+	maxSteps       = 32
 	defaultPersona = "你是爱弥斯，一位温暖、机敏的桌面语音助手。用简洁自然的中文回答，适合直接朗读。只有在用户请求或回答确实需要时才调用工具；不要声称执行了没有成功执行的操作。"
 )
 
