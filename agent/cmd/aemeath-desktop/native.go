@@ -39,6 +39,7 @@ type nativeUI struct {
 	quotaList      ui.ListState
 	quotaUnsaved   bool
 	voicePreview   string
+	visibleKeys    map[string]bool
 	settingsTab    int
 	voiceHistory   []nativeVoiceTurn
 	voiceNextID    uint64

@@ -242,15 +242,42 @@ func (a *nativeUI) voicePreviewView(c *ui.Context) {
 	})
 }
 
+var (
+	voiceKeyShowIcon = sidebarSVG("<path d='M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z'/><circle cx='12' cy='12' r='3'/>")
+	voiceKeyHideIcon = sidebarSVG("<path d='M3 3l18 18M10.6 5.1A12 12 0 0 1 12 5c6.5 0 10 7 10 7a19 19 0 0 1-3.1 4M6.1 6.1A23 23 0 0 0 2 12s3.5 7 10 7a12 12 0 0 0 5.9-1.9M9.9 9.9a3 3 0 0 0 4.2 4.2'/>")
+)
+
 func (a *nativeUI) voiceField(c *ui.Context, key, label, placeholder string, value *string, secret bool) {
 	ui.Field(c.Key(key), label, func() {
-		field := ui.TextInput(c, value).Label(label).Placeholder(placeholder).FillWidth()
-		if secret {
-			field = field.Password()
-		}
-		if field.Changed() {
-			a.edited()
-		}
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			visible := a.visibleKeys[key]
+			field := ui.TextInput(c.Key("input"), value).Label(label).Placeholder(placeholder).Grow(1).MinWidth(0)
+			if secret && !visible {
+				field = field.Password()
+			}
+			if field.Changed() {
+				a.edited()
+			}
+			if secret {
+				t := c.Theme()
+				action, icon, color := "显示", voiceKeyShowIcon, t.TextMuted
+				if visible {
+					action, icon, color = "隐藏", voiceKeyHideIcon, t.Accent
+				}
+				button := ui.ButtonBase(c.Key("visibility")).Label(action+" "+label).Tooltip(action+label).Size(30, 28).Shrink(0).Radius(6).Background(ui.Color{})
+				if button.Hovered() {
+					button.Background(t.SurfaceHover)
+				}
+				button.Children(func() {
+					ui.Icon(c, icon).Size(17, 17).TextColor(color)
+				}).OnClick(func() {
+					if a.visibleKeys == nil {
+						a.visibleKeys = map[string]bool{}
+					}
+					a.visibleKeys[key] = !a.visibleKeys[key]
+				})
+			}
+		})
 	}).FillWidth()
 }
 
