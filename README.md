@@ -3,14 +3,22 @@
 Go 采集端（macOS / Windows）通过 Wi‑Fi WebSocket 把 CPU、内存、磁盘、网络、温度、GPU 推送到
 Waveshare **ESP32‑S3‑Touch‑LCD‑4B**（480×480 ST7701 + GT911），在 LVGL 多页仪表盘上显示。
 
-新增**爱弥斯语音助手**：监控台采集/播放音频，电脑离线检测唤醒词（默认“你好小爱”，可在语音设置中自定义），通过 MiMo ASR → CloudWeGo Eino / OpenAI 兼容模型 → `mimo-v2.5-tts-voiceclone` 完成对话。唤醒后显示爱弥斯 Q 版动画，按聆听、思考、播报状态切换。
+**爱弥斯语音助手**使用监控台麦克风和扬声器，由电脑离线检测唤醒词（默认“你好小爱”，支持自定义），通过 MiMo ASR → CloudWeGo Eino / OpenAI 兼容模型 → MiMo 音色克隆或 Fish 双向流式合成完成对话。也可使用全局 F8 按住说话。设备上的爱弥斯 Q 版动画随聆听、思考、播报状态切换，桌面端显示对话与工具执行过程。
 
 → [语音助手安装、配置与运行](docs/voice-agent.md) · [协议约定](docs/voice-contract.md) · [验证记录与限制](docs/voice-validation.md)
 
 ```
 agent/      Go 1.27.3+ 采集端 + MyGO 0.8.3 桌面管理端（gopsutil + cgo IOKit / WMI + NVML）
 firmware/   ESP-IDF v6.0.2 固件（LVGL 9、esp_lvgl_port、mDNS、esp_http_server WS）
+docs/       语音安装配置、通信协议与验证记录
 ```
+
+## 开始使用
+
+1. 构建并烧录固件，按屏幕提示完成 Wi-Fi 配网，让设备与电脑处于同一局域网。
+2. 运行 MyGO 桌面端或命令行采集端，通过 mDNS 自动发现设备，也可手动填写设备地址。
+3. 使用语音助手时，更新支持音频通道的固件，在桌面“设置 → 语音”启用助手、配置 LLM 和 MiMo ASR，再选择 MiMo 或 Fish 语音合成。
+4. 在“离线唤醒”安装模型并保存设置，随后测试唤醒；也可直接使用 F8 按住说话。完整步骤见[语音助手使用说明](docs/voice-agent.md)。
 
 ## 固件
 
@@ -105,6 +113,30 @@ cd agent
 - ARM64 产物位于 `agent/build/windows-arm64/`，安装包名称中的架构为 `arm64`。
 
 安装程序默认安装到当前用户的 `%LOCALAPPDATA%\Programs\Aemeath`，创建开始菜单入口，提供桌面快捷方式选项，并可在系统“已安装的应用”中卸载，无需管理员权限。Windows 开机自启通过桌面设置页管理；温度与 GPU 采集的依赖见上文 Windows 说明。默认安装包未进行代码签名；签名可配置 `agent/mygo.json` 的 `windows.signCommand`，参见 [MyGO 分发文档](https://mygo.egoist.dev/docs/distribution)。
+
+### Windows 语音版
+
+上面的默认 Windows 安装包使用 `CGO_ENABLED=0`，不提供离线唤醒能力。需要离线唤醒时，使用语音版脚本，额外准备目标架构的 MinGW-w64 / llvm-mingw C 编译器；Go、Bash 和 NSIS 要求相同：
+
+```bash
+# 从仓库根目录构建 Windows x64 语音版
+CC=x86_64-w64-mingw32-gcc bash agent/scripts/build-windows-voice.sh windows/amd64
+```
+
+脚本启用 cgo 并打包 sherpa-onnx / ONNX Runtime DLL；运行时需保留配套资源。macOS 的 `build-dmg.sh` 已包含对应架构的语音原生库。唤醒模型仍需在应用内安装，具体要求与发布包校验方法见[构建与诊断](docs/voice-agent.md#8-构建与诊断)。
+
+## 爱弥斯语音助手
+
+电脑主动连接设备的独立 `/voice` WebSocket，采集与播放均使用 **ESP32 设备的麦克风和扬声器**；性能与额度仍通过 `/ws` 独立推送。语音配置统一在“设置 → 语音”保存。
+
+- **离线唤醒**：默认“你好小爱”，支持 2–12 个模型支持的中文汉字；模型可在桌面端下载安装。待机音频不发送给云端 ASR，唤醒后才识别问题；对话期间再次说出已保存的唤醒词会取消当前对话并回到待命。
+- **全局按住说话**：按住 **F8** 录音，松开后识别并发送给 Agent，无需先说唤醒词，也不要求离线模型就绪；需要语音助手已启用、语音通道已连接且设备麦克风未静音。切到其他应用或关闭窗口驻留托盘仍可使用，单次最长 30 秒；按下快捷键会打断当前对话或播报。F8 被占用时自动尝试 **Ctrl + Shift + F8**，实际快捷键或注册错误显示在语音助手页；部分 Mac 键盘需使用 **Fn + F8**。
+- **对话与历史**：桌面端显示识别文字、回复、阶段耗时及可展开的工具执行记录；最近完整文字对话会持久化并在重启后恢复，可清空上下文。语音合成失败后可仅重试回复语音，避免重复运行工具。
+- **语音合成**：MiMo 使用 `mimo-v2.5-tts-voiceclone` 分句合成；Fish 支持双向流式音频，可配置 `reference_id` 或参考 WAV 与对应转写文字。语音问题识别均使用 MiMo ASR；Fish 流式播放需要支持 `stream_playback` 的固件。
+- **Agent 工具**：支持查询性能与订阅额度、切页、屏幕电源/亮度、锁定电脑、Tavily 网页搜索和当前时间。需启用“Agent 工具”并使用支持 tool calling 的模型；网页搜索另需 Tavily API Key。
+- **智能家居**：可接入 Home Assistant 官方 MCP Server，通过语音调用 HA 暴露的工具。在“智能家居”配置 MCP 地址、长期访问令牌并测试连接，再保存设置；同时需要开启 Agent 工具。
+
+首次使用建议按“参考音频播放 → 合成试听 → 唤醒或 F8 → 完整对话”的顺序检查。安装资源、API 配置、命令行参数与排障见[语音助手使用说明](docs/voice-agent.md)，硬件与云端实测范围见[验证记录](docs/voice-validation.md)。
 
 ## Magpie 订阅额度页
 
