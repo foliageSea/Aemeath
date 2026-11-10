@@ -290,7 +290,7 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 }
 
 func (s *session) safe(text string) string {
-	for _, secret := range []string{s.cfg.MiMoAPIKey, s.cfg.LLMAPIKey, s.cfg.FishAPIKey, s.cfg.TavilyAPIKey} {
+	for _, secret := range []string{s.cfg.MiMoAPIKey, s.cfg.LLMAPIKey, s.cfg.FishAPIKey, s.cfg.TavilyAPIKey, s.cfg.HAAccessToken} {
 		if secret != "" {
 			text = strings.ReplaceAll(text, secret, "[redacted]")
 		}
@@ -734,6 +734,12 @@ func (s *session) recordStageMillis(stage string, millis int64) {
 
 func (s *session) result(r result) error {
 	if !s.active || r.turn != s.state.Turn || r.generation != s.generation {
+		return nil
+	}
+	if r.homeAssistant != nil {
+		s.state.HomeAssistant = *r.homeAssistant
+		s.state.HomeAssistant.Error = s.safe(s.state.HomeAssistant.Error)
+		s.emitState()
 		return nil
 	}
 	if r.toolCall != nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"aemeath/agent/internal/brain"
+	"aemeath/agent/internal/hamcp"
 )
 
 type streamingBrain interface {
@@ -30,6 +31,9 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 	ctx, cancel := context.WithCancelCause(parent)
 	ctx = brain.WithToolObserver(ctx, func(call brain.ToolCall) {
 		emit(ctx, result{toolCall: &call})
+	})
+	ctx = brain.WithHomeAssistantObserver(ctx, func(status hamcp.Status) {
+		emit(ctx, result{homeAssistant: &status})
 	})
 	defer cancel(nil)
 	agentCtx, stopAgent := context.WithTimeout(ctx, agentBudget)

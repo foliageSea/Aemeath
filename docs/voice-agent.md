@@ -47,7 +47,7 @@ idf.py -p /dev/cu.usbmodem11101 flash monitor
 
 ## 3. 桌面配置
 
-在 MyGO 桌面应用打开“设置 → 语音”（也可从“语音助手”页点击“语音设置”）。左侧分为“基础设置、对话服务、语音识别、语音合成、离线唤醒、声音试听”六组，右侧显示对应表单；切换分组保留草稿和各组滚动位置，顶部“保存设置”统一保存所有分组的修改：
+在 MyGO 桌面应用打开“设置 → 语音”（也可从“语音助手”页点击“语音设置”）。左侧分为“基础设置、对话服务、智能家居、语音识别、语音合成、离线唤醒、声音试听”七组，右侧显示对应表单；切换分组保留草稿和各组滚动位置，顶部“保存设置”统一保存所有分组的修改：
 
 1. 在“基础设置”开启语音助手、设置角色偏好，再在“对话服务”填写 OpenAI 兼容 API 的 Base URL、模型与 API Key。Base URL 通常以 `/v1` 结尾；接本地无鉴权兼容服务时可以留空 LLM Key。
 2. 若启用工具，所选模型必须支持 tool calling；不支持时关闭工具模式使用纯对话。
@@ -58,6 +58,22 @@ idf.py -p /dev/cu.usbmodem11101 flash monitor
 设置先保存才生效，刷新不会覆盖未保存表单。API Key 只保存在电脑的现有私有设置文件中，权限 `0600`（Windows 实际访问控制仍由用户目录 ACL 决定）；界面遮罩，错误日志不输出 Key。不要把包含 Key 的设置文件提交到 Git 或分享。
 
 未安装 KWS/VAD 时显示“离线唤醒未就绪”；仍可手动唤醒和试听用于排障。缺少 VAD 的手动录音采用明确提示的 6 秒固定窗口，不代表自动唤醒已经就绪。
+
+### 智能家居：Home Assistant MCP
+
+桌面 Agent 从本机通过 Streamable HTTP 连接 Home Assistant（HA）官方 MCP Server；运行桌面的电脑必须能访问 HA，接入 HA 无需更改 ESP32 固件。HA MCP 默认关闭，需要同时在“对话服务”启用“启用 Agent 工具”，对话模型支持 tool calling 后才能在语音对话中调用。
+
+1. 在 Home Assistant 中启用 **Model Context Protocol Server** 集成，并选择允许 Assist 暴露的实体，具体步骤见 [HA 官方 MCP Server 文档](https://www.home-assistant.io/integrations/mcp_server/)。
+2. 复制集成提供的 **Device control** 地址，默认是 `http://homeassistant.local:8123/api/mcp/assist`；将主机名替换为桌面能访问的 HA 地址。
+3. 在 HA 的个人资料（Profile）中创建长期访问令牌（Long-Lived Access Token），复制到桌面“设置 → 语音 → 智能家居”的“长期访问令牌”。首版手动填写令牌，通过 `Authorization: Bearer <token>` 请求头认证，没有浏览器 OAuth 登录流程。
+4. 在“智能家居”开启“启用 HA MCP”，填写“服务地址”和令牌。令牌默认遮罩，可用眼睛按钮显示/隐藏；点击“测试连接与刷新工具清单”检查连接和当前可用工具，然后点击顶部“保存设置”。
+5. 保存并确认 Agent 工具已开启后，可以说“你好小爱，打开客厅灯”或“你好小爱，客厅温度是多少？”。可操作设备取决于 HA 实际返回的工具和权限。
+
+默认 Device control 地址使用 HA 的 Assist 暴露实体范围。也允许填写完整 `/api/mcp` 地址或自定义工具集 URL；这些地址的可访问工具、实体和权限以 HA 服务端实际配置及令牌权限为准，不能假定仍受 Assist 暴露列表限制。
+
+工具从 HA 动态发现，在模型中使用 `ha_` 名称前缀。每轮对话刷新工具清单，新增或移除的工具会随之更新；HA 离线或发现失败不会阻断现有的七个 Agent 工具，下一轮对话或再次点击测试可重连。发现预算为 8 秒，单次工具调用预算为 20 秒；取消对话或更短的父请求期限会提前终止。客户端不会自动重放 `tools/call` 动作。HA 工具沿用现有语音对话的执行过程和结果卡片，显示标题、状态、耗时、参数及结果。
+
+HA 配置与其他语音设置一起持久化到本机私有设置文件。令牌只用于桌面到 HA 的认证，不发送给 LLM，不放在 URL、工具结果或日志中；不要分享含令牌的配置副本。
 
 ## 4. 命令行
 
@@ -82,6 +98,9 @@ CGO_ENABLED=1 go run ./cmd/aemeath-agent -voice-config voice.local.json -addr ae
 | `MIMO_BASE_URL` | MiMo 根地址 |
 | `MIMO_API_KEY` | MiMo 密钥，覆盖 JSON |
 | `TAVILY_API_KEY` | Tavily 网页搜索密钥，覆盖 JSON 的 `tavilyAPIKey` |
+| `HA_MCP_ENABLED` | `true` / `false`，覆盖 JSON 的 `haMCPEnabled`（默认 `false`） |
+| `HA_MCP_URL` | HA MCP Streamable HTTP 地址，覆盖 JSON 的 `haMCPURL`；默认 `http://homeassistant.local:8123/api/mcp/assist` |
+| `HA_ACCESS_TOKEN` | HA 用户长期访问令牌，覆盖 JSON 的 `haAccessToken`（默认空） |
 
 终端中输入 `wake` 手动唤醒、`cancel` 取消、`clear` 清空上下文、`preview 你好，我是爱弥斯。` 合成试听、`reference` 播放参考音频。Ctrl+C 退出并取消请求。桌面版与 CLI 不要同时占用同一台设备；音频通道只允许一个拥有者。
 
@@ -95,7 +114,7 @@ CGO_ENABLED=1 go run ./cmd/aemeath-agent -voice-config voice.local.json -addr ae
 - 结束后角色页停留 3 秒再恢复原页面。临时亮屏不覆盖持久亮度设置；手动切页或屏幕操作优先于自动恢复。
 - 只保留最近 10 轮完整文字上下文，清空或重启会话后不保留历史录音。
 
-Agent 工具包括 `get_metrics`、`get_quota`、`set_page`、`set_screen`、`lock_computer`、`web_search` 和 `get_current_time`；不包含任意 shell 或文件执行。在“设置 → 语音 → 对话服务”启用“启用 Agent 工具”并保存后，可以说“你好小爱，帮我锁屏”或“锁定这台电脑”。`lock_computer` 无参数，作用于运行 Agent 的电脑当前登录会话；`set_screen` 仍控制 ESP32 监控台屏幕。锁屏工具仅在用户明确要求电脑锁屏时使用，返回结构化的请求提交成功/失败结果，不把请求提交当作已验证最终锁屏状态。macOS 使用系统原生锁屏接口（旧系统可用 CGSession），Windows 使用 LockWorkStation；其他平台明确返回不支持。开启工具时先用独立的短工具选择请求完成 ReAct 工具调用，再以禁止工具的流式请求生成最终正文；选择过程、推理内容和工具参数不会朗读。这会比无工具模式多一次选择请求；无工具模式直接使用单次 SSE。切页协议没有设备页面 ACK，工具会说明指令已发送，而非声称已确认切页。
+内置 Agent 工具包括 `get_metrics`、`get_quota`、`set_page`、`set_screen`、`lock_computer`、`web_search` 和 `get_current_time`；不包含任意 shell 或文件执行。在“设置 → 语音 → 对话服务”启用“启用 Agent 工具”并保存后，可以说“你好小爱，帮我锁屏”或“锁定这台电脑”。`lock_computer` 无参数，作用于运行 Agent 的电脑当前登录会话；`set_screen` 仍控制 ESP32 监控台屏幕。锁屏工具仅在用户明确要求电脑锁屏时使用，返回结构化的请求提交成功/失败结果，不把请求提交当作已验证最终锁屏状态。macOS 使用系统原生锁屏接口（旧系统可用 CGSession），Windows 使用 LockWorkStation；其他平台明确返回不支持。开启工具时先用独立的短工具选择请求完成 ReAct 工具调用，再以禁止工具的流式请求生成最终正文；选择过程、推理内容和工具参数不会朗读。这会比无工具模式多一次选择请求；无工具模式直接使用单次 SSE。切页协议没有设备页面 ACK，工具会说明指令已发送，而非声称已确认切页。
 
 网页搜索可直接说“你好小爱，帮我上网搜索 ESP32-S3 的官方文档”。`web_search` 接受 `query`（最多 256 个字符）和可选 `limit`（默认 3，最多 5）；使用 Tavily Search API，需在“设置 → 语音 → 对话服务”填写“Tavily API 密钥”并保存；CLI 可在 JSON 配置 `tavilyAPIKey` 或设置 `TAVILY_API_KEY`（环境变量优先）。单次最多等待 12 秒，固定使用 basic 搜索深度，不请求 Tavily 生成答案或返回网页原文。模型得到网页标题、摘要和 URL，界面工具卡片可展开查看并打开来源，回答可用 [1] 等编号对应来源。搜索只读取摘要，不抓取网页全文；外部资料不作为指令执行，失败或无结果会明确返回，取消对话会取消搜索。搜索词会发送给 Tavily；请求使用 Bearer 鉴权，密钥不放在 URL 或结果中，不自动切换其他搜索源。未配置密钥只影响网页搜索，时间查询和设备工具仍可用；鉴权失败、请求过频和额度不足会分别提示。Tavily 的额度与计费以账户方案为准。
 
@@ -156,5 +175,7 @@ CC=x86_64-w64-mingw32-gcc bash agent/scripts/build-windows-voice.sh windows/amd6
 **局域网信任边界：**首版设备通道是明文 WebSocket，没有设备配对鉴权。仅在可信私有 LAN 使用，不要端口映射到公网；同网段其他程序可能占用语音通道或请求采集。需要跨网、多人环境或商用时，应先增加设备配对/令牌及加密传输。
 
 ## 验证范围
+
+HA MCP 本轮仅使用 mock 协议测试；未提供真实 HA 地址和令牌，未调用真实设备，未验证真实 HA 实例连接、用户权限或设备控制效果。
 
 自动测试使用本地 HTTP/WS 模拟服务，不消耗 MiMo/LLM 额度；它们验证请求结构、Agent 工具循环、取消、流控和恢复，不证明真实云端账号权限、音色相似度或硬件声学效果。详细实测记录见 [voice-validation.md](voice-validation.md)。

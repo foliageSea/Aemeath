@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"time"
 
 	"aemeath/agent/internal/desktop"
+	"aemeath/agent/internal/hamcp"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -51,6 +53,8 @@ type nativeUI struct {
 	wakeAssets           nativeWakeAssets
 	wakeAssetOps         nativeWakeAssetOps
 	wakeAdvanced         bool
+	homeAssistant        nativeHAState
+	haProbe              func(context.Context, hamcp.Config) ([]hamcp.Tool, error)
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
@@ -195,7 +199,7 @@ func nativeProgress(c *ui.Context, v float64) {
 func (a *nativeUI) overview(c *ui.Context) { a.metricGrid(c) }
 func (a *nativeUI) settingsView(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Tabs(c.Key("settings-tabs"), &a.settingsTab, "连接", "通用", "屏幕", "语音").Grow(1)
+		ui.Tabs(c.Key("settings-tabs"), &a.settingsTab, "连接", "通用", "屏幕", "语音", "智能家居").Grow(1)
 		if a.dirty {
 			ui.Text(c, "未保存").FontSize(12).TextColor(c.Theme().Warning)
 		}
@@ -212,6 +216,8 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 				a.generalSettingsView(c)
 			case 2:
 				a.screenSettingsView(c)
+			case 4:
+				a.homeAssistantSettingsView(c)
 			default:
 				a.connectionSettingsView(c)
 			}

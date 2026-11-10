@@ -124,6 +124,7 @@ func (a *nativeUI) sidebar(c *ui.Context) {
 			}
 		})
 		a.sidebarConnection(c)
+		a.sidebarHomeAssistant(c)
 		label := "启动服务"
 		if a.snapshot.Running {
 			label = "停止服务"

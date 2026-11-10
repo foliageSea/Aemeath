@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,10 +65,18 @@ func loadVoiceConfig(path string, enabled bool) (voice.Config, error) {
 		"FISH_BASE_URL": &cfg.FishBaseURL, "FISH_MODEL": &cfg.FishModel,
 		"FISH_REFERENCE_ID": &cfg.FishReferenceID, "FISH_REFERENCE_TEXT": &cfg.FishReferenceText,
 		"FISH_LATENCY": &cfg.FishLatency, "TAVILY_API_KEY": &cfg.TavilyAPIKey,
+		"HA_MCP_URL": &cfg.HAMCPURL, "HA_ACCESS_TOKEN": &cfg.HAAccessToken,
 	} {
 		if value := os.Getenv(name); value != "" {
 			*target = value
 		}
+	}
+	if value := os.Getenv("HA_MCP_ENABLED"); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return cfg, errors.New("HA_MCP_ENABLED must be true or false")
+		}
+		cfg.HAMCPEnabled = enabled
 	}
 	return voice.NormalizeConfig(cfg)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 )
@@ -13,6 +14,7 @@ import (
 type ToolCall struct {
 	ID        uint64 `json:"id"`
 	Name      string `json:"name"`
+	Title     string `json:"title,omitempty"`
 	Arguments string `json:"arguments"`
 	Result    string `json:"result"`
 	Status    string `json:"status"`
@@ -33,12 +35,15 @@ func WithToolObserver(ctx context.Context, observer func(ToolCall)) context.Cont
 	return context.WithValue(ctx, toolObserverKey{}, &toolObserver{observe: observer})
 }
 
-func startTool(ctx context.Context, name, args string) func(string, error) {
+func startTool(ctx context.Context, name, args string, title ...string) func(string, error) {
 	observer, _ := ctx.Value(toolObserverKey{}).(*toolObserver)
 	if observer == nil || observer.observe == nil {
 		return func(string, error) {}
 	}
 	event := ToolCall{Name: name, Arguments: toolArguments(name, args), Status: "running"}
+	if len(title) > 0 {
+		event.Title = haSafe(title[0], "", 128)
+	}
 	observer.mu.Lock()
 	observer.next++
 	event.ID = observer.next
@@ -104,6 +109,16 @@ func startTool(ctx context.Context, name, args string) func(string, error) {
 				}
 			}
 		}
+		if strings.HasPrefix(name, "ha_") && err == nil && ctx.Err() == nil {
+			if report, ok := ParseHomeAssistantReport(result); ok {
+				event.Result = haReport(report)
+				if !report.OK {
+					event.Status = "failed"
+				}
+			} else {
+				event.Status, event.Result = "failed", "Home Assistant 结果无效"
+			}
+		}
 		observer.mu.Lock()
 		defer observer.mu.Unlock()
 		observer.observe(event)
@@ -113,6 +128,9 @@ func startTool(ctx context.Context, name, args string) func(string, error) {
 func toolArguments(name, args string) string {
 	if len(args) > 4096 {
 		return ""
+	}
+	if strings.HasPrefix(name, "ha_") {
+		return haSafeArguments(args, "")
 	}
 	switch name {
 	case "get_current_time":

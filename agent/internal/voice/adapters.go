@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"aemeath/agent/internal/brain"
+	"aemeath/agent/internal/hamcp"
 	"aemeath/agent/internal/wake"
 )
 
@@ -48,7 +49,7 @@ func productionDependencies() dependencies {
 		newVAD:    func(c Config) (vad, error) { return wake.NewVAD(c.WakeModelDir) },
 		newSpeech: configuredSpeech,
 		newBrain: func(ctx context.Context, c Config, h Host) (brainAPI, error) {
-			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey}, h)
+			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey, HomeAssistant: hamcp.Config{Enabled: c.HAMCPEnabled, Endpoint: c.HAMCPURL, Token: c.HAAccessToken}}, h)
 		},
 		reference: managedReference,
 	}
@@ -62,21 +63,27 @@ type work struct {
 	pcm        []int16
 }
 type result struct {
-	generation  uint64
-	toolCall    *brain.ToolCall
-	turn        uint32
-	phase, text string
-	pcm         []int16
-	millis      int64
-	err         error
-	final       bool
-	samples     int
+	generation    uint64
+	toolCall      *brain.ToolCall
+	homeAssistant *hamcp.Status
+	turn          uint32
+	phase, text   string
+	pcm           []int16
+	millis        int64
+	err           error
+	final         bool
+	samples       int
 }
 
 // One worker serializes all history access, including canceled Reply and Clear.
 // Its pending queue has one slot; the event loop replaces superseded work.
 func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-chan work, out chan<- result) {
 	var engine brainAPI
+	defer func() {
+		if closer, ok := engine.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+	}()
 	var speech speechAPI
 	var generation uint64
 	publish := func(w work, r result) bool {

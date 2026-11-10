@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"aemeath/agent/internal/hamcp"
 	"github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
@@ -23,6 +25,7 @@ type Config struct {
 	BaseURL, APIKey, Model, Persona string
 	Tools                           bool
 	TavilyAPIKey                    string
+	HomeAssistant                   hamcp.Config
 }
 type Host interface {
 	Metrics() string
@@ -40,6 +43,13 @@ const (
 )
 
 type Engine struct {
+	baseTools    []tool.BaseTool
+	haConfig     hamcp.Config
+	ha           homeAssistantClient
+	haFactory    homeAssistantFactory
+	lifeCtx      context.Context
+	lifeCancel   context.CancelFunc
+	closed       bool
 	model        *openai.ChatModel
 	agent        *react.Agent
 	persona      string
@@ -93,14 +103,21 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 	if err != nil {
 		return nil, errors.New("brain: cannot initialize OpenAI model")
 	}
-	e := &Engine{model: cm, persona: persona, gate: make(chan struct{}, 1)}
+	lifeCtx, lifeCancel := context.WithCancel(context.Background())
+	e := &Engine{model: cm, persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory}
+	if cfg.Tools && cfg.HomeAssistant.Enabled {
+		e.haConfig = cfg.HomeAssistant
+	}
 	if cfg.Tools {
 		if host == nil {
+			lifeCancel()
 			return nil, errors.New("brain: device tools require a host")
 		}
 		e.persona += "\n" + webSearchInstructions + "\n" + currentTimeInstructions
-		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: cm, decision: cm}, ToolsConfig: compose.ToolsNodeConfig{Tools: append(deviceTools(host), webSearchTool(search), currentTimeTool(currentTime)), ExecuteSequentially: true}, MaxStep: maxSteps})
+		e.baseTools = append(deviceTools(host), webSearchTool(search), currentTimeTool(currentTime))
+		err = e.rebuildAgent(ctx, nil)
 		if err != nil {
+			lifeCancel()
 			return nil, errors.New("brain: cannot initialize Eino ReAct tools")
 		}
 	}
@@ -134,10 +151,19 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		defer func() { <-e.gate }()
 	case <-ctx.Done():
 		return "", ctx.Err()
+	case <-e.lifeCtx.Done():
+		return "", context.Canceled
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	ctx, runCancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(e.lifeCtx, runCancel)
+	defer func() { stop(); runCancel() }()
+	if e.lifeCtx.Err() != nil {
+		return "", context.Canceled
+	}
+	ctx = context.WithValue(ctx, haAttemptKey{}, &haAttempts{uncertain: make(map[string]bool)})
 	if streaming {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
@@ -151,12 +177,20 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	generation := e.generation
 	hist := append([]*schema.Message(nil), e.history...)
 	e.mu.Unlock()
+	haPrompt := ""
+	if e.haConfig.Enabled {
+		haPrompt = e.refreshHomeAssistant(ctx)
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
 	// At most ten turns are sent, including the current request.
 	if len(hist) > 2*(maxTurns-1) {
 		hist = hist[len(hist)-2*(maxTurns-1):]
 	}
 	input := make([]*schema.Message, 0, len(hist)+2)
-	persona := e.persona
+	persona := e.persona + haPrompt
 	if e.agent != nil {
 		persona += "\n本机日期提示（未进行外部校时）：" + time.Now().Format("2006-01-02")
 	}
@@ -203,6 +237,34 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	}
 	e.mu.Unlock()
 	return reply, nil
+}
+
+func (e *Engine) rebuildAgent(ctx context.Context, extra []tool.BaseTool) error {
+	all := append(append([]tool.BaseTool(nil), e.baseTools...), extra...)
+	agent, err := react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: e.model, decision: e.model}, ToolsConfig: compose.ToolsNodeConfig{Tools: all, ExecuteSequentially: true}, MaxStep: maxSteps})
+	if err == nil {
+		e.agent = agent
+	}
+	return err
+}
+
+// Close cancels active and queued replies and releases the HA connection.
+func (e *Engine) Close() error {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return nil
+	}
+	e.closed = true
+	e.lifeCancel()
+	client := e.ha
+	e.mu.Unlock()
+	if client != nil {
+		if err := client.Close(); err != nil {
+			return errors.New("brain: cannot close Home Assistant connection")
+		}
+	}
+	return nil
 }
 
 func (e *Engine) Clear() {

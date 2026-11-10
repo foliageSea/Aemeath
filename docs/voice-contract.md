@@ -29,6 +29,9 @@ type Config struct {
  LLMAPIKey string `json:"llmAPIKey"`
  LLMModel string `json:"llmModel"`
  LLMTools bool `json:"llmTools"`
+ HAMCPEnabled bool `json:"haMCPEnabled"`
+ HAMCPURL string `json:"haMCPURL"`
+ HAAccessToken string `json:"haAccessToken"`
  MiMoBaseURL string `json:"mimoBaseURL"`
  MiMoAPIKey string `json:"mimoAPIKey"`
  TTSProvider string `json:"ttsProvider"` // mimo (default) | fish
@@ -83,6 +86,18 @@ The `lock_computer` Function Call has an empty argument object and calls Host.Lo
 The `web_search` Function Call accepts a required `query` (1–256 Unicode characters) and optional `limit` (default 3, range 1–5). It POSTs to the fixed Tavily Search API using a 12-second cancellable request, Bearer authentication, basic depth, and no answer/raw-content output and returns `{ok,query,results:[{title,url,snippet}],message?}`. The private `tavilyAPIKey` voice setting flows to the Agent; CLI `TAVILY_API_KEY` overrides JSON. Missing credentials, unauthorized responses, rate limits, and quota exhaustion return actionable ok:false reports without exposing keys or upstream bodies; canceled contexts propagate cancellation. There is no alternate-provider fallback, and missing Tavily credentials do not block unrelated tools. Only public HTTP(S) source links are accepted. Results remain untrusted tool data; the assistant references source titles/numbers rather than speaking URLs. The bounded search report is retained in ToolCall.Result for clickable source cards; tool events do not enter the speech stream.
 
 The `get_current_time` Function Call accepts optional `timezone` (IANA or supported city alias; omitted/Local selects the host timezone). Every call obtains a fresh UTC observation over a fixed timeapi.io HTTPS endpoint with a four-second request budget, then projects it using bundled IANA timezone data. `{ok,info,message?}` exposes dateTime/utc/unix/timezone/utcOffset/weekday/date/time/isDST/source/provider/notice. Source is `network` or explicit `system_fallback`; failures of the external service fall back to the local clock with a notice, while parent cancellation/deadline propagates without fallback. ToolCall.Result retains the bounded report for time/source cards. The tool does not set the clock or create scheduled tasks.
+
+### Home Assistant MCP
+
+The desktop Agent connects directly to the official [Home Assistant MCP Server](https://www.home-assistant.io/integrations/mcp_server/) using Streamable HTTP and `github.com/modelcontextprotocol/go-sdk` v1.8.0. The desktop must reach HA; no ESP32 firmware change is required. Voice JSON defaults are `haMCPEnabled:false`, `haMCPURL:"http://homeassistant.local:8123/api/mcp/assist"`, and `haAccessToken:""`. CLI `HA_MCP_ENABLED` (`true`/`false`), `HA_MCP_URL`, and `HA_ACCESS_TOKEN` override the corresponding JSON fields. HA tools are available to conversations only when both HA MCP and Agent tools (`llmTools`) are enabled.
+
+The default `/api/mcp/assist` Device control endpoint uses HA Assist exposed entities. Users may instead supply the full `/api/mcp` endpoint or a custom tool-set URL; effective tools, entity access, and permissions then follow the HA server and token, with no claim that the Assist exposure list still restricts them. Authentication in this version is a manually supplied HA user long-lived access token sent only in the `Authorization: Bearer <token>` header; browser OAuth is not implemented. Persist these settings in the existing private settings file, mask the token with an eye toggle, and never send the token to the LLM or include it in URLs, tool results, state snapshots, or logs.
+
+The voice settings add a 智能家居 group with 启用 HA MCP, 服务地址, 长期访问令牌, and a test-connection/refresh-tool-list action. Setup order is: enable HA MCP and select exposed entities, copy the Device control URL, create a token in HA Profile, fill the desktop settings, test/refresh, save, and ask to open the living-room light or query its temperature. Testing discovers tools without executing device actions.
+
+Discover HA tools dynamically, prefix their model-facing names with `ha_`, and refresh `tools/list` on every conversation turn so additions and removals take effect. HA discovery failure/offline status must not block the seven existing tools (`get_metrics`, `get_quota`, `set_page`, `set_screen`, `lock_computer`, `web_search`, `get_current_time`). A later turn or explicit test can reconnect. Discovery has an eight-second total budget and a tool call a twenty-second budget; parent cancellation or a shorter context deadline takes precedence. The client must not automatically replay a `tools/call` action, including after connection failures.
+
+Reuse existing voice-conversation tool events and cards for HA titles, execution status, elapsed time, arguments, and results; tool events stay out of the spoken response stream. HA tool descriptions and results are external, untrusted data. This integration is covered by mock protocol tests only in this round: no real HA address/token was supplied, no real device was called, and actual HA connection, permissions, and device behavior remain unverified.
 
 `internal/voiceapi` owns MiMo, WAV and resampling:
 ```go

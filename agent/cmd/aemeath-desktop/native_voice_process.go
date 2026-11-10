@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/voice"
@@ -30,10 +31,20 @@ func nativeToolName(name string) string {
 	}
 }
 
+func nativeToolLabel(call brain.ToolCall) string {
+	if strings.TrimSpace(call.Title) != "" {
+		return call.Title
+	}
+	if strings.HasPrefix(call.Name, "ha_") {
+		return "HA · " + strings.TrimPrefix(call.Name, "ha_")
+	}
+	return nativeToolName(call.Name)
+}
+
 func nativeVoiceActivity(state voice.State) string {
 	for _, call := range state.ToolCalls {
 		if call.Status == "running" {
-			return "正在调用：" + nativeToolName(call.Name)
+			return "正在调用：" + nativeToolLabel(call)
 		}
 	}
 	return nativeVoicePhase(state.Phase)
@@ -137,14 +148,14 @@ func (a *nativeUI) voiceToolCallView(c *ui.Context, index int, call brain.ToolCa
 	}
 	expanded := turn.toolDetails[call.ID]
 	ui.Column(c.Key(fmt.Sprintf("voice-tool-%d", call.ID))).FillWidth().MinWidth(0).Gap(8).Children(func() {
-		button := ui.ButtonBase(c.Key("toggle")).Label(fmt.Sprintf("第 %d 轮工具详情 %s #%d", turn.turn, nativeToolName(call.Name), call.ID)).Expanded(expanded).FillWidth().Gap(8).AlignItems(ui.Center).Justify(ui.Start).Padding(9, 10).Radius(8).Background(color.Alpha(0.08)).Border(1, color.Alpha(0.15))
+		button := ui.ButtonBase(c.Key("toggle")).Label(fmt.Sprintf("第 %d 轮工具详情 %s #%d", turn.turn, nativeToolLabel(call), call.ID)).Expanded(expanded).FillWidth().Gap(8).AlignItems(ui.Center).Justify(ui.Start).Padding(9, 10).Radius(8).Background(color.Alpha(0.08)).Border(1, color.Alpha(0.15))
 		button.Children(func() {
 			arrow := "›"
 			if expanded {
 				arrow = "⌄"
 			}
 			ui.Text(c, arrow).FontSize(14).TextColor(color)
-			ui.Text(c, nativeToolName(call.Name)).FontSize(12).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			ui.Text(c, nativeToolLabel(call)).FontSize(12).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
 			ui.Text(c, nativeToolStatus(call.Status)).FontSize(11).TextColor(color)
 			if call.Millis > 0 {
 				ui.Text(c, nativeVoiceMillis(call.Millis)).FontSize(11).TextColor(t.TextMuted)
@@ -190,7 +201,18 @@ func (a *nativeUI) voiceToolCallView(c *ui.Context, index int, call brain.ToolCa
 						result = "等待工具返回…"
 					}
 				}
-				if call.Name == "get_current_time" {
+				if strings.HasPrefix(call.Name, "ha_") {
+					if report, ok := brain.ParseHomeAssistantReport(result); ok {
+						if report.Text != "" {
+							ui.Text(c, report.Text).FontSize(11).Wrap().Selectable()
+						}
+						if report.Message != "" {
+							ui.Text(c, report.Message).FontSize(11).TextColor(t.TextMuted).Wrap()
+						}
+					} else {
+						ui.Text(c, result).FontSize(11).Wrap().Selectable()
+					}
+				} else if call.Name == "get_current_time" {
 					if report, ok := brain.ParseCurrentTimeReport(result); ok && report.OK {
 						a.voiceCurrentTimeView(c, report)
 					} else {
