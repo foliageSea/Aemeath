@@ -145,14 +145,10 @@ static void text_message(const uint8_t *data, size_t len)
         if (!strcmp(state,"idle")) { if (s_play.active) goto done; abort_round(true); }
         else if (!strcmp(state,"error")) { abort_round(false); ui(state,text); s_error_until=esp_timer_get_time()+5000000; }
         else {
-            // Entering listening (first capture or wake-only re-arm): chime so
-            // the user knows the recognizer is now recording.
-            bool cue=!strcmp(state,"listening") && strcmp(s_phase,"listening") && !s_play.active;
+            // Listening must not play a cue: without echo cancellation its mic
+            // gate erases the beginning of a question spoken right after wake.
+            // The avatar and listening waveform provide the ready indication.
             ui(state,text);
-            if (cue && s_audio_ready) {
-                esp_err_t err=audio_cue_ready(s_volume);
-                if (err!=ESP_OK) ESP_LOGW("voice","ready cue: %s",esp_err_to_name(err));
-            }
         }
     } else if (!strcmp(type,"playback_start")) {
         uint32_t samples, volume;
@@ -231,7 +227,6 @@ static void worker(void *arg)
         uint32_t epoch=0; voice_ws_connected(&epoch);
         if (epoch!=s_epoch) reset_connection(epoch);
         rendered();
-        if (s_audio_ready) audio_cue_poll();
         int64_t now=esp_timer_get_time();
         if (s_error_until && now>=s_error_until) { s_error_until=0; ui("idle",""); }
         if (s_play.active && s_play_deadline && now>=s_play_deadline) fail_round("playback_timeout","Playback stalled before drain");
@@ -260,9 +255,6 @@ static void capture(void *arg)
         if (audio_capture(pcm)!=ESP_OK) { voice_ws_close(epoch); vTaskDelay(pdMS_TO_TICKS(20)); continue; }
         portENTER_CRITICAL(&s_lock); bool current=s_capture_enabled && s_capture_epoch==epoch; portEXIT_CRITICAL(&s_lock);
         if (!current) continue;
-        // The speaker chime would otherwise be heard by the host VAD as speech
-        // and end the utterance before the user starts talking.
-        if (audio_cue_active()) muted=true;
         voice_packet_header(frame,1,epoch,0,seq++);
         for (size_t i=0;i<VOICE_FRAME_SAMPLES;i++) { uint16_t sample=muted?0:(uint16_t)pcm[i]; frame[20+2*i]=sample; frame[21+2*i]=sample>>8; }
         if (!muted) {

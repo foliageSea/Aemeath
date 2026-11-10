@@ -7,7 +7,6 @@
 #include "esp_codec_dev_defaults.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
-#include "esp_timer.h"
 #include "freertos/idf_additions.h"
 
 #if CONFIG_I2S_ISR_IRAM_SAFE
@@ -16,7 +15,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#include <math.h>
 #include <string.h>
 
 #define DMA_BLOCKS 4
@@ -163,72 +161,6 @@ esp_err_t audio_play_start(uint32_t epoch, uint32_t turn)
     return output_restart();
 }
 
-// Ready cue: a short rising two-note chime. Its blocks carry render.samples=0,
-// so the TX ISR never reports them as rendered turn audio.
-#define CUE_TAIL_MS 150 // speaker decay/room echo still muted on the mic path
-static const struct { float hz; int blocks; } CUE_NOTES[]={{880.0f,4},{1318.5f,6}};
-static block_t s_cue_block; // voice worker only; too large for its stack
-static uint32_t s_cue_generation;
-static int64_t s_cue_amp_off, s_cue_mute_until;
-
-esp_err_t audio_cue_ready(int volume)
-{
-    if (!s_ready) return ESP_ERR_INVALID_STATE;
-    if (volume<=0) return ESP_OK;
-    if (volume>100) volume=100;
-    // Gate the microphone from the moment the cue is requested; the restart
-    // below may take a few DMA laps before the chime actually starts.
-    int64_t now=esp_timer_get_time();
-    portENTER_CRITICAL(&s_lock); s_cue_generation=s_generation+1; s_cue_mute_until=now+1000000; portEXIT_CRITICAL(&s_lock);
-    esp_err_t err=output_restart();
-    if (err!=ESP_OK) { portENTER_CRITICAL(&s_lock); s_cue_mute_until=0; portEXIT_CRITICAL(&s_lock); return err; }
-    uint32_t generation; portENTER_CRITICAL(&s_lock); generation=s_generation; portEXIT_CRITICAL(&s_lock);
-    const float amplitude=9000.0f*volume/100.0f;
-    const int fade=VOICE_RATE/200; // 5 ms raised-cosine edges avoid clicks
-    int queued=0;
-    for (size_t n=0;n<sizeof(CUE_NOTES)/sizeof(CUE_NOTES[0]);n++) {
-        const int total=CUE_NOTES[n].blocks*VOICE_FRAME_SAMPLES;
-        const float step=2.0f*(float)M_PI*CUE_NOTES[n].hz/VOICE_RATE;
-        for (int b=0;b<CUE_NOTES[n].blocks;b++) {
-            memset(&s_cue_block,0,sizeof(s_cue_block));
-            s_cue_block.generation=generation;
-            for (int i=0;i<VOICE_FRAME_SAMPLES;i++) {
-                int k=b*VOICE_FRAME_SAMPLES+i, edge=k<total-1-k?k:total-1-k;
-                float env=edge<fade?0.5f-0.5f*cosf((float)M_PI*edge/fade):1.0f;
-                // Let the second note decay instead of stopping flat.
-                if (n==sizeof(CUE_NOTES)/sizeof(CUE_NOTES[0])-1) env*=1.0f-0.6f*k/total;
-                int16_t sample=(int16_t)(amplitude*env*sinf(step*k));
-                s_cue_block.pcm[2*i]=s_cue_block.pcm[2*i+1]=sample;
-            }
-            if (xQueueSend(s_pending,&s_cue_block,0)!=pdTRUE) break;
-            queued++;
-        }
-    }
-    // Queued blocks start after the DMA ring's already-armed buffers drain.
-    int64_t done=esp_timer_get_time()+(int64_t)(queued+DMA_BLOCKS)*VOICE_FRAME_SAMPLES*1000000/VOICE_RATE;
-    portENTER_CRITICAL(&s_lock);
-    s_cue_generation=generation; s_cue_amp_off=done; s_cue_mute_until=done+CUE_TAIL_MS*1000;
-    portEXIT_CRITICAL(&s_lock);
-    return ESP_OK;
-}
-void audio_cue_poll(void)
-{
-    if (!s_ready) return;
-    portENTER_CRITICAL(&s_lock);
-    bool off=s_cue_amp_off && esp_timer_get_time()>=s_cue_amp_off;
-    bool mine=s_cue_generation==s_generation;
-    if (off) s_cue_amp_off=0;
-    portEXIT_CRITICAL(&s_lock);
-    // A playback start after the cue owns the amplifier (new generation).
-    if (off && mine) board_audio_amp(false);
-}
-bool audio_cue_active(void)
-{
-    portENTER_CRITICAL(&s_lock);
-    bool active=s_cue_mute_until && s_cue_generation==s_generation && esp_timer_get_time()<s_cue_mute_until;
-    portEXIT_CRITICAL(&s_lock);
-    return active;
-}
 bool audio_play_queue(const voice_packet_t *p, int volume)
 {
     if (!s_ready) return false;
