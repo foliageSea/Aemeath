@@ -593,6 +593,21 @@ func (s *session) microphone(b []byte) error {
 	if s.muted {
 		return nil
 	}
+	// Keep keyword spotting live during recording, cloud work and playback.
+	// A second invocation cancels the turn; it must not start a new capture or
+	// send the cancellation keyword to ASR. Idle spotting below still wakes.
+	if s.active && s.state.WakeReady {
+		s.kwsSamples += int64(len(f.PCM))
+		hit, err := s.detector.Feed(f.PCM)
+		if err != nil {
+			s.state.WakeReady = false
+			s.diagnostic = "Offline wake unavailable: " + s.safe(err.Error())
+			return s.fail("wake", err)
+		}
+		if hit {
+			return s.command(Command{Kind: "cancel"})
+		}
+	}
 	if s.capture != nil {
 		var speech bool
 		if s.vad != nil {

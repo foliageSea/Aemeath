@@ -24,7 +24,9 @@ type fakeDetector struct {
 
 func (d *fakeDetector) Feed(p []int16) (bool, error) {
 	d.samples += int64(len(p))
-	return d.hitAt > 0 && d.samples == d.hitAt, nil
+	// Silence cannot contain a keyword, even when the fake alignment repeats
+	// after Reset while active-turn keyword spotting is enabled.
+	return d.hitAt > 0 && d.samples == d.hitAt && len(p) > 0 && p[0] != 0, nil
 }
 func (d *fakeDetector) KeywordEndSamples() int64 { return d.end }
 func (d *fakeDetector) Reset()                   { d.samples = 0 }
