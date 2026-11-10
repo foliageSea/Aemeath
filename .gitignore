@@ -13,3 +13,7 @@ agent/.mygo/
 agent/voice.local.json
 
 .DS_Store
+
+# Editor
+firmware/.vscode/
+firmware/.clangd
