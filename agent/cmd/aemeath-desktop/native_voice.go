@@ -221,7 +221,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 					ui.Text(c, nativeVoiceActivity(state)).FontSize(12).Bold().Wrap()
 					if state.Turn > 0 && !(a.voiceCleared && state.Turn == a.voiceClearTurn && state.Session == a.voiceClearSession) {
-						a.voiceLiveProgressView(c)
+						a.voiceLiveStatusView(c)
 					} else {
 						ui.Text(c, "通过设备麦克风与你对话").FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 					}

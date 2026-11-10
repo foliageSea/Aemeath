@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"strings"
 
 	"aemeath/agent/internal/brain"
@@ -120,12 +119,9 @@ func nativeVoicePlayback(state voice.State) string {
 	return fmt.Sprintf("已播放 %d 段 · 已合成 %d 段", state.PlayedSegments, state.GeneratedSegments)
 }
 
-func (a *nativeUI) voiceLiveProgressView(c *ui.Context) {
+func (a *nativeUI) voiceLiveStatusView(c *ui.Context) {
 	t, state := c.Theme(), a.snapshot.Voice
 	ui.Text(c, fmt.Sprintf("第 %d 轮 · %s", state.Turn, nativeVoicePlayback(state))).FontSize(11).TextColor(t.TextMuted).Wrap()
-	if state.GeneratedSegments > 0 {
-		ui.Progress(c.Key("voice-live-playback"), math.Min(1, float64(state.PlayedSegments)/float64(state.GeneratedSegments))).Label("当前语音播放进度").FillWidth().Height(4)
-	}
 }
 
 func (a *nativeUI) voiceTurnProcessView(c *ui.Context, index int) {
@@ -166,7 +162,6 @@ func (a *nativeUI) voiceTurnProcessView(c *ui.Context, index int) {
 		}
 		if state.GeneratedSegments > 0 {
 			ui.Text(c, nativeVoicePlayback(state)).FontSize(11).TextColor(t.TextMuted).Wrap()
-			ui.Progress(c, math.Min(1, float64(state.PlayedSegments)/float64(state.GeneratedSegments))).Label(fmt.Sprintf("第 %d 轮播放进度", turn.turn)).FillWidth().Height(4)
 		}
 	})
 }

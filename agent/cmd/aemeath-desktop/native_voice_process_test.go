@@ -54,8 +54,10 @@ func TestNativeVoiceToolLifecycleAndTimingRefreshWithoutTextChanges(t *testing.T
 	if len(a.voiceHistory) != 1 || a.voiceHistory[0].state.PlayedSegments != 2 || !tt.HasText("780 ms") {
 		t.Fatal("non-text progress failed to update")
 	}
-	if _, ok := tt.Find("当前语音播放进度"); !ok {
-		t.Fatal("missing live playback progress")
+	for _, label := range []string{"当前语音播放进度", "第 1 轮播放进度"} {
+		if _, ok := tt.Find(label); ok {
+			t.Fatalf("obsolete playback progress remains: %s", label)
+		}
 	}
 }
 
@@ -162,7 +164,7 @@ func TestNativeVoiceProcessSmallWindowKeepsControlsVisible(t *testing.T) {
 		f.state.Voice = voice.State{Connected: true, WakeReady: true, Turn: 1, Phase: "speaking", Transcript: "看看系统指标", Response: "当前CPU使用率正常。", ASRMillis: 120, AgentMillis: 340, TTSMillis: 560, FirstAudioMillis: 1234, GeneratedSegments: 4, PlayedSegments: 1, ToolCalls: []brain.ToolCall{{ID: 1, Name: "get_metrics", Arguments: "{}", Result: "已读取系统指标", Status: "succeeded", Millis: 12}}}
 		a.refresh()
 		nativeClick(t, tt, "语音助手")
-		for _, label := range []string{"语音操作栏", "手动唤醒", "取消对话", "当前语音播放进度"} {
+		for _, label := range []string{"语音操作栏", "手动唤醒", "取消对话"} {
 			r, ok := tt.Find(label)
 			if !ok || r.W <= 0 || r.X < 226 || r.X+r.W > 740 || r.Y < 0 || r.Y+r.H > 557 {
 				t.Fatalf("process UI displaced control dark=%v %s: %+v", dark, label, r)
