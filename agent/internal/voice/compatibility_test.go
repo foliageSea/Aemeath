@@ -43,7 +43,7 @@ func TestDeviceCaptionsFitRXLimitAndPreserveUTF8(t *testing.T) {
 func TestStripOnlyLeadingWakeInvocation(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"你好，小爱，帮我看看CPU", "帮我看看CPU"}, {"  你好小爱！ ", ""}, {"你好，小爱吃什么？", "吃什么？"},
-		{"请解释你好小爱这个词", "请解释你好小爱这个词"}, {"你好，小艾，看看CPU", "你好，小艾，看看CPU"}, {"你好，世界", "你好，世界"},
+		{"请解释你好小爱这个词", "请解释你好小爱这个词"}, {"你好，小艾，看看CPU", "看看CPU"}, {"你好，世界", "你好，世界"},
 	} {
 		if got := stripWakePrefix(tc.in); got != tc.want {
 			t.Fatalf("%q => %q want %q", tc.in, got, tc.want)

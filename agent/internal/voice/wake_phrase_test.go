@@ -25,6 +25,14 @@ func TestCustomWakePhraseConfigAndPrefix(t *testing.T) {
 		{"你好小爱，打开空调", "小智同学", "你好小爱，打开空调"},
 		{"小智同学，打开空调", "你好小爱", "小智同学，打开空调"},
 		{"你好，小爱，打开空调", "", "打开空调"},
+		{"艾米斯，东莞今天的天气。", "爱弥斯", "东莞今天的天气。"},
+		{"艾，米，斯！", "爱弥斯", ""},
+		{"爱弥斯，东莞今天的天气。", "爱弥斯", "东莞今天的天气。"},
+		{"请解释艾米斯的意思", "爱弥斯", "请解释艾米斯的意思"},
+		{"东莞今天的天气。", "爱弥斯", "东莞今天的天气。"},
+		{"艾米，东莞今天的天气。", "爱弥斯", "艾米，东莞今天的天气。"},
+		{"爱丽丝，东莞今天的天气。", "爱弥斯", "爱丽丝，东莞今天的天气。"},
+		{"艾米斯，东莞今天的天气。", "小智同学", "艾米斯，东莞今天的天气。"},
 	} {
 		if got := stripWakePhrasePrefix(tc.in, tc.phrase); got != tc.want {
 			t.Errorf("strip(%q,%q)=%q want=%q", tc.in, tc.phrase, got, tc.want)
@@ -33,10 +41,12 @@ func TestCustomWakePhraseConfigAndPrefix(t *testing.T) {
 }
 
 func TestWorkerUsesCustomWakePhrase(t *testing.T) {
-	for _, tc := range []struct{ asr, phase, text string }{
-		{"小智，同学！", "wake_only", ""},
-		{"小智同学，打开空调", "transcript", "打开空调"},
-		{"你好小爱，打开空调", "transcript", "你好小爱，打开空调"},
+	for _, tc := range []struct{ phrase, asr, phase, text string }{
+		{"小智同学", "小智，同学！", "wake_only", ""},
+		{"小智同学", "小智同学，打开空调", "transcript", "打开空调"},
+		{"小智同学", "你好小爱，打开空调", "transcript", "你好小爱，打开空调"},
+		{"爱弥斯", "艾米斯，东莞今天的天气。", "transcript", "东莞今天的天气。"},
+		{"爱弥斯", "艾米斯！", "wake_only", ""},
 	} {
 		t.Run(tc.asr, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -53,7 +63,7 @@ func TestWorkerUsesCustomWakePhrase(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				worker(ctx, Config{WakePhrase: "小智同学", MiMoAPIKey: "test-key"}, nil, deps, jobs, out)
+				worker(ctx, Config{WakePhrase: tc.phrase, MiMoAPIKey: "test-key"}, nil, deps, jobs, out)
 			}()
 			defer func() { cancel(); <-done }()
 			for {
