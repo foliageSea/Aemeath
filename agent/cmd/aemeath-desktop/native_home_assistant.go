@@ -131,7 +131,7 @@ func (a *nativeUI) sidebarHomeAssistant(c *ui.Context) {
 	ui.Button(c.Key("ha-sidebar-status"), "").Label("HA 连接详情").Tooltip(label).FillWidth().Shrink(0).Height(31).Padding(3, 7).Gap(9).BorderWidth(0).Radius(7).Background(color.Alpha(0.06)).AlignItems(ui.Center).Justify(ui.Start).Children(func() {
 		ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(color)
 		ui.Text(c, label).FontSize(12).TextColor(color).Grow(1).MinWidth(0).SingleLine()
-		ui.Text(c, "›").FontSize(13).TextColor(t.TextMuted)
+		ui.Icon(c, sidebarChevronRight).Size(14, 14).Shrink(0).TextColor(t.TextMuted)
 	}).OnClick(func() { a.page = "设置"; a.settingsTab = 4 })
 }
 

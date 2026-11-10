@@ -21,11 +21,11 @@ func (a *nativeUI) sidebarConnection(c *ui.Context) {
 		ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(color)
 		ui.Text(c, label).FontSize(12).Grow(1).MinWidth(0).SingleLine()
 		if hasError {
-			arrow := "›"
+			arrow := sidebarChevronRight
 			if a.details {
-				arrow = "⌄"
+				arrow = sidebarChevronDown
 			}
-			ui.Text(c, arrow).FontSize(13).TextColor(color)
+			ui.Icon(c, arrow).Size(14, 14).Shrink(0).TextColor(color)
 		}
 	}
 	if hasError {

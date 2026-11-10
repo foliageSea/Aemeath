@@ -21,6 +21,8 @@ var (
 	sidebarDisk          = sidebarSVG("<rect x='3' y='5' width='18' height='14' rx='4'/><path d='M4 13h16M15 16h2'/><circle cx='7' cy='16' r='0.7'/>")
 	sidebarNetwork       = sidebarSVG("<circle cx='12' cy='12' r='9'/><ellipse cx='12' cy='12' rx='4' ry='9'/><path d='M3 12h18M5 6.5c4 2 10 2 14 0M5 17.5c4-2 10-2 14 0'/>")
 	sidebarPower         = sidebarSVG("<path d='M12 2v10M6 5a9 9 0 1 0 12 0'/>")
+	sidebarChevronRight  = sidebarSVG("<path d='M9 6l6 6-6 6'/>")
+	sidebarChevronDown   = sidebarSVG("<path d='M6 9l6 6 6-6'/>")
 )
 
 func sidebarIcon(c *ui.Context, icon *ui.SVG, background ui.Color) {
