@@ -217,11 +217,21 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 		}
 		ui.Column(c.Key("voice-controls")).Label("语音操作栏").FillWidth().Shrink(0).Padding(14, 16).Gap(12).Radius(18).Border(1, t.Border.Alpha(0.5)).Background(t.Surface).Children(func() {
 			a.voiceStatusView(c)
-			holdHint := "按住 F8 说话 · 松开识别并发送 · 最长 30 秒"
+			key := a.voiceGlobalKey
+			if key == "" {
+				key = "F8"
+			}
+			holdHint := fmt.Sprintf("全局 %s · 后台也可按住说话 · 松开发送 · 最长 30 秒", key)
+			if !a.voiceGlobalReady {
+				holdHint = "全局快捷键尚未就绪"
+			}
 			if a.voiceHold {
-				holdHint = "正在按住录音 · 松开 F8 发送 · Esc 取消"
+				holdHint = fmt.Sprintf("正在按住录音 · 松开 %s 发送 · 前台 Esc 取消", key)
 			}
 			ui.Text(c, holdHint).FontSize(12).TextColor(t.Accent).Wrap()
+			if a.voiceGlobalError != "" {
+				ui.Text(c, a.voiceGlobalError).FontSize(12).TextColor(t.Warning).Wrap()
+			}
 			if state.Notice != "" {
 				ui.Text(c, state.Notice).FontSize(12).Wrap().MaxLines(2).Ellipsis("…")
 			}

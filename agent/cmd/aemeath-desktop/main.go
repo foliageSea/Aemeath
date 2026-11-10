@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"aemeath/agent/internal/desktop"
+	"aemeath/agent/internal/holdkey"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -35,6 +36,7 @@ func main() {
 	var quitting bool
 	var cancel context.CancelFunc
 	var cancelVoiceAssets func()
+	var stopVoiceHotkey func()
 	show := func() {
 		if win != nil {
 			win.Show()
@@ -50,6 +52,9 @@ func main() {
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
 		quitting = true
+		if stopVoiceHotkey != nil {
+			stopVoiceHotkey()
+		}
 		if cancelVoiceAssets != nil {
 			cancelVoiceAssets()
 		}
@@ -80,9 +85,11 @@ func main() {
 		cancelVoiceAssets = native.cancelWakeAssets
 		win = mygo.NewWindow(mygo.WindowOptions{Title: "Aemeath", Content: ui.View(native.view), Width: 1100, Height: 800, MinWidth: 760, MinHeight: 600, Hidden: mygo.App.WasOpenedAtLogin(), StateKey: "main-native"})
 		native.update = win.Update
-		win.OnBlur(func() { native.endVoiceHold(true) })
+		stopVoiceHotkey = native.installGlobalVoiceHold(holdkey.Start, holdkey.StartAlternate)
+		if native.voiceGlobalError != "" {
+			log.Print(native.voiceGlobalError)
+		}
 		win.OnClose(func(e *mygo.CloseEvent) {
-			native.endVoiceHold(true)
 			if !quitting {
 				e.PreventDefault()
 				win.Hide()

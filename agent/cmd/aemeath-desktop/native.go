@@ -41,7 +41,10 @@ type nativeUI struct {
 	quotaList            ui.ListState
 	quotaUnsaved         bool
 	voiceHold            bool
-	voiceHoldRepeat      bool
+	voiceKeyDown         bool
+	voiceGlobalReady     bool
+	voiceGlobalKey       string
+	voiceGlobalError     string
 	voiceHoldSession     uint64
 	voiceHoldStartTurn   uint32
 	voicePreview         string
@@ -151,22 +154,19 @@ func (a *nativeUI) view(c *ui.Context) {
 	if a.voiceHold && a.snapshot.Voice.Turn != a.voiceHoldStartTurn && a.snapshot.Voice.Phase != "listening" && a.snapshot.Voice.Phase != "wake" {
 		a.voiceHold = false
 	}
-	if a.voiceHold && (a.page != "语音助手" || !a.snapshot.Voice.Connected || a.snapshot.Voice.Session != a.voiceHoldSession) {
+	if a.voiceHold && (!a.snapshot.Voice.Connected || a.snapshot.Voice.Session != a.voiceHoldSession) {
 		a.endVoiceHold(true)
 	}
-	startHold := a.page == "语音助手" && c.Shortcut(0, ui.KeyF8) && a.startVoiceHold()
 	t := c.Theme()
 	if a.noticePending {
 		c.Toast(a.notice)
 		a.noticePending = false
 	}
-	root := ui.Row(c.Key("app-root")).Fill().AlignItems(ui.Stretch).Background(t.Background).Focusable().TabStop(false).ObserveInput(a.voiceHoldInput)
-	if startHold {
-		root.Focus()
-	}
-	if a.voiceHold && root.FocusLeft() {
+	if a.voiceHold && c.Shortcut(0, ui.KeyEscape) {
+		a.snapshot = a.service.Snapshot()
 		a.endVoiceHold(true)
 	}
+	root := ui.Row(c.Key("app-root")).Fill().AlignItems(ui.Stretch).Background(t.Background)
 	root.Children(func() {
 		a.sidebar(c)
 		ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Padding(20).Gap(14).Children(func() {

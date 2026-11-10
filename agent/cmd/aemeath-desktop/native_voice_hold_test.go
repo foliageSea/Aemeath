@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -21,65 +22,79 @@ func voiceHoldTest(t *testing.T) (*nativeUI, *nativeVoiceFake, *ui.Tester) {
 	return a, f, tt
 }
 
-func TestVoiceHoldF8PressRepeatReleaseAndQuickTap(t *testing.T) {
+func TestGlobalVoiceHoldBackgroundPressRepeatReleaseAndQuickTap(t *testing.T) {
 	a, f, tt := voiceHoldTest(t)
-	tt.KeyDown(ui.KeyF8)
-	if !a.voiceHold || !tt.HasText("正在按住录音 · 松开 F8 发送 · Esc 取消") {
-		t.Fatal("hold did not start")
+	a.page = "概览"
+	tt.SetFocused(false)
+	a.globalVoiceKey(true)
+	a.globalVoiceKey(true)
+	if !a.voiceHold {
+		t.Fatal("background press did not start")
 	}
-	tt.KeyRepeat(0, ui.KeyF8)
-	tt.KeyRepeat(0, ui.KeyF8)
-	tt.KeyUp(ui.KeyF8)
-	if a.voiceHold {
-		t.Fatal("release did not end hold")
+	tt.Frame()
+	if !a.voiceHold {
+		t.Fatal("blur or another page canceled global recording")
 	}
-	tt.Key(0, ui.KeyF8)
+	a.globalVoiceKey(false)
+	a.globalVoiceKey(false)
+	a.globalVoiceKey(true)
+	a.globalVoiceKey(false)
 	want := [][2]string{{"record_start", ""}, {"record_stop", ""}, {"record_start", ""}, {"record_stop", ""}}
-	if !reflect.DeepEqual(f.commands, want) {
-		t.Fatalf("commands %v, want %v", f.commands, want)
+	if a.voiceHold || !reflect.DeepEqual(f.commands, want) {
+		t.Fatalf("commands=%v held=%v", f.commands, a.voiceHold)
 	}
 }
 
-func TestVoiceHoldEscBlurAndNavigationDiscard(t *testing.T) {
-	for _, action := range []string{"escape", "blur", "navigate"} {
-		t.Run(action, func(t *testing.T) {
-			a, f, tt := voiceHoldTest(t)
-			tt.KeyDown(ui.KeyF8)
-			switch action {
-			case "escape":
-				tt.Key(0, ui.KeyEscape)
-			case "blur":
-				tt.SetFocused(false)
-			case "navigate":
-				nativeClick(t, tt, "概览")
-			}
-			tt.Frame()
-			tt.KeyUp(ui.KeyF8)
-			want := [][2]string{{"record_start", ""}, {"record_cancel", ""}}
-			if a.voiceHold || !reflect.DeepEqual(f.commands, want) {
-				t.Fatalf("held=%v commands=%v", a.voiceHold, f.commands)
-			}
-		})
+func TestGlobalVoiceHoldEscapeCancelsWithoutRepeatRestart(t *testing.T) {
+	a, f, tt := voiceHoldTest(t)
+	a.globalVoiceKey(true)
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	a.globalVoiceKey(true)
+	a.globalVoiceKey(false)
+	want := [][2]string{{"record_start", ""}, {"record_cancel", ""}}
+	if a.voiceHold || !reflect.DeepEqual(f.commands, want) {
+		t.Fatalf("canceled hold restarted: %v", f.commands)
+	}
+	a.globalVoiceKey(true)
+	a.globalVoiceKey(false)
+	if len(f.commands) != 4 {
+		t.Fatal("fresh press failed")
 	}
 }
 
-func TestVoiceHoldUnavailableAndStartFailure(t *testing.T) {
-	for _, mode := range []string{"disabled", "disconnected", "wrong-page", "error"} {
+func TestGlobalVoiceHoldUsesFreshSnapshotOnBothEdges(t *testing.T) {
+	a, f, _ := voiceHoldTest(t)
+	f.state.Voice.Connected = false
+	a.globalVoiceKey(true)
+	a.globalVoiceKey(false)
+	if len(f.commands) != 0 {
+		t.Fatal("stale online snapshot started recording")
+	}
+	f.state.Voice.Connected = true
+	a.globalVoiceKey(true)
+	f.state.Voice.Session++
+	a.globalVoiceKey(false)
+	if a.voiceHold || len(f.commands) != 1 {
+		t.Fatalf("release reached replacement session: %v", f.commands)
+	}
+}
+
+func TestGlobalVoiceHoldUnavailableAndStartFailure(t *testing.T) {
+	for _, mode := range []string{"disabled", "disconnected", "error"} {
 		t.Run(mode, func(t *testing.T) {
-			a, f, tt := voiceHoldTest(t)
+			a, f, _ := voiceHoldTest(t)
 			switch mode {
 			case "disabled":
 				f.state.Settings.Voice.Enabled = false
 			case "disconnected":
 				f.state.Voice.Connected = false
-			case "wrong-page":
-				nativeClick(t, tt, "概览")
 			case "error":
 				f.commandError = errors.New("queue full")
 			}
-			a.refresh()
-			tt.Frame()
-			tt.Key(0, ui.KeyF8)
+			a.globalVoiceKey(true)
+			a.globalVoiceKey(true)
+			a.globalVoiceKey(false)
 			if a.voiceHold {
 				t.Fatal("unavailable recording started")
 			}
@@ -94,52 +109,82 @@ func TestVoiceHoldUnavailableAndStartFailure(t *testing.T) {
 	}
 }
 
-func TestVoiceHoldEscapeIgnoresRepeatsUntilFreshPress(t *testing.T) {
+func TestGlobalVoiceHoldBackendCompletionRequiresFreshPress(t *testing.T) {
 	a, f, tt := voiceHoldTest(t)
-	tt.KeyDown(ui.KeyF8)
-	tt.Key(0, ui.KeyEscape)
-	tt.KeyRepeat(0, ui.KeyF8)
-	tt.KeyUp(ui.KeyF8)
-	if a.voiceHold || len(f.commands) != 2 {
-		t.Fatalf("canceled hold restarted: %v", f.commands)
-	}
-	tt.Key(0, ui.KeyF8)
-	if len(f.commands) != 4 || f.commands[2][0] != "record_start" || f.commands[3][0] != "record_stop" {
-		t.Fatalf("fresh press did not recover: %v", f.commands)
-	}
-}
-
-func TestVoiceHoldWorksWithoutFocusedControl(t *testing.T) {
-	a, f, _ := voiceHoldTest(t)
-	tt := ui.NewTester(a.view, 760, 600)
-	tt.Key(0, ui.KeyF8)
-	if a.voiceHold || len(f.commands) != 2 || f.commands[1][0] != "record_stop" {
-		t.Fatalf("unfocused control lost key release: %v", f.commands)
-	}
-}
-
-func TestVoiceHoldBackendCompletionClearsRecordingHint(t *testing.T) {
-	a, f, tt := voiceHoldTest(t)
-	tt.KeyDown(ui.KeyF8)
+	a.globalVoiceKey(true)
 	f.state.Voice.Turn++
 	f.state.Voice.Phase = "recognizing"
 	a.refresh()
 	tt.Frame()
-	tt.KeyRepeat(0, ui.KeyF8)
-	tt.KeyUp(ui.KeyF8)
+	a.globalVoiceKey(true)
+	a.globalVoiceKey(false)
 	if a.voiceHold || len(f.commands) != 1 {
-		t.Fatalf("completed hold restarted or submitted twice: %v", f.commands)
+		t.Fatalf("completed hold restarted: %v", f.commands)
 	}
 }
 
-func TestVoiceHoldReleaseDoesNotAffectReplacementSession(t *testing.T) {
-	a, f, tt := voiceHoldTest(t)
-	tt.KeyDown(ui.KeyF8)
-	f.state.Voice.Session++
-	a.refresh()
+func TestGlobalVoiceHoldRegistrationDispatchAndShutdown(t *testing.T) {
+	a, f, _ := voiceHoldTest(t)
+	pending := make(chan func(), 8)
+	a.update = func(fn func()) { pending <- fn }
+	var emit func(bool)
+	stops := 0
+	stop := a.installGlobalVoiceHold(func(cb func(bool)) (func(), error) {
+		emit = cb
+		return func() { stops++ }, nil
+	}, nil)
+	emit(true)
+	if len(f.commands) != 0 {
+		t.Fatal("native callback mutated UI outside dispatch")
+	}
+	(<-pending)()
+	// Queue a release before stopping: queued callbacks must become inert.
+	emit(false)
+	stop()
+	stop()
+	(<-pending)()
+	emit(true)
+	(<-pending)()
+	want := [][2]string{{"record_start", ""}, {"record_cancel", ""}}
+	if stops != 1 || a.voiceGlobalReady || a.voiceHold || !reflect.DeepEqual(f.commands, want) {
+		t.Fatalf("cleanup stops=%d commands=%v", stops, f.commands)
+	}
+}
+
+func TestGlobalVoiceHoldRegistrationConflictIsVisible(t *testing.T) {
+	a, _, tt := voiceHoldTest(t)
+	stop := a.installGlobalVoiceHold(func(func(bool)) (func(), error) { return nil, errors.New("F8 already registered") }, nil)
+	stop()
 	tt.Frame()
-	tt.KeyUp(ui.KeyF8)
-	if a.voiceHold || len(f.commands) != 1 {
-		t.Fatalf("stale release reached new session: %v", f.commands)
+	if a.voiceGlobalReady || !strings.Contains(a.voiceGlobalError, "already registered") || !tt.HasText(a.voiceGlobalError) {
+		t.Fatal("shortcut conflict not shown")
+	}
+}
+
+func TestGlobalVoiceHoldFallsBackAndDisplaysBinding(t *testing.T) {
+	a, f, tt := voiceHoldTest(t)
+	a.update = func(fn func()) { fn() }
+	var emit func(bool)
+	stop := a.installGlobalVoiceHold(
+		func(func(bool)) (func(), error) { return nil, errors.New("F8 occupied") },
+		func(cb func(bool)) (func(), error) { emit = cb; return func() {}, nil },
+	)
+	defer stop()
+	tt.Frame()
+	if !a.voiceGlobalReady || a.voiceGlobalKey != "Ctrl+Shift+F8" || !tt.HasText("全局 Ctrl+Shift+F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒") {
+		t.Fatal("fallback binding not displayed")
+	}
+	emit(true)
+	emit(false)
+	if len(f.commands) != 2 || f.commands[1][0] != "record_stop" {
+		t.Fatal("fallback did not record and submit")
+	}
+}
+
+func TestLocalF8DoesNotDuplicateGlobalListener(t *testing.T) {
+	_, f, tt := voiceHoldTest(t)
+	tt.Key(0, ui.KeyF8)
+	if len(f.commands) != 0 {
+		t.Fatal("local F8 still owns recording")
 	}
 }
