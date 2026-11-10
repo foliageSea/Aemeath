@@ -290,7 +290,7 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 }
 
 func (s *session) safe(text string) string {
-	for _, secret := range []string{s.cfg.MiMoAPIKey, s.cfg.LLMAPIKey, s.cfg.FishAPIKey} {
+	for _, secret := range []string{s.cfg.MiMoAPIKey, s.cfg.LLMAPIKey, s.cfg.FishAPIKey, s.cfg.TavilyAPIKey} {
 		if secret != "" {
 			text = strings.ReplaceAll(text, secret, "[redacted]")
 		}

@@ -4,6 +4,7 @@
   "llmAPIKey": "",
   "llmModel": "YOUR_TOOL_CALLING_MODEL",
   "llmTools": true,
+  "tavilyAPIKey": "",
   "mimoBaseURL": "https://api.xiaomimimo.com/v1",
   "mimoAPIKey": "",
   "ttsProvider": "mimo",

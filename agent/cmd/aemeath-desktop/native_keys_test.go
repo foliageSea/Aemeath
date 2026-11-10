@@ -8,16 +8,17 @@ import (
 )
 
 func TestNativeAPIKeysCanBeRevealedIndependentlyAndHiddenAfterEditing(t *testing.T) {
-	a, _, _, tt := nativeTest(t)
+	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(760, 2200)
 	a.draft.Voice.TTSProvider = "fish"
 	a.draft.Voice.LLMAPIKey = "fixture-openai-key"
 	a.draft.Voice.MiMoAPIKey = "fixture-mimo-key"
 	a.draft.Voice.FishAPIKey = "fixture-fish-key"
+	a.draft.Voice.TavilyAPIKey = "fixture-tavily-key"
 	before := a.draft.Voice
 	nativeClick(t, tt, "设置")
 	nativeClick(t, tt, "语音")
-	fields := []struct{ section, label, value string }{{"对话服务", "OpenAI API 密钥", before.LLMAPIKey}, {"语音识别", "MiMo API 密钥", before.MiMoAPIKey}, {"语音合成", "Fish API 密钥", before.FishAPIKey}}
+	fields := []struct{ section, label, value string }{{"对话服务", "OpenAI API 密钥", before.LLMAPIKey}, {"语音识别", "MiMo API 密钥", before.MiMoAPIKey}, {"语音合成", "Fish API 密钥", before.FishAPIKey}, {"对话服务", "Tavily API 密钥", before.TavilyAPIKey}}
 	for _, field := range fields {
 		nativeClick(t, tt, field.section)
 		info, ok := tt.AccessByRole(ui.RoleTextField, field.label)
@@ -65,10 +66,39 @@ func TestNativeAPIKeysCanBeRevealedIndependentlyAndHiddenAfterEditing(t *testing
 	if a.draft.Voice.LLMAPIKey != "edited-key" || !a.dirty {
 		t.Fatal("hiding discarded the edited key")
 	}
-	for _, label := range []string{"显示 OpenAI API 密钥", "OpenAI API 密钥"} {
+	nativeClick(t, tt, "保存设置")
+	nativeComplete(t, updates, tt)
+	if len(f.saves) != 1 || f.saves[0].Voice.TavilyAPIKey != before.TavilyAPIKey {
+		t.Fatal("Tavily key not included in saved settings")
+	}
+	if reopened := nativeState(f); reopened.draft.Voice.TavilyAPIKey != before.TavilyAPIKey {
+		t.Fatal("reopened settings lost Tavily key")
+	}
+	for _, label := range []string{"显示 OpenAI API 密钥", "OpenAI API 密钥", "显示 Tavily API 密钥", "Tavily API 密钥"} {
 		r, ok := tt.Find(label)
 		if !ok || r.W <= 0 || r.X < 206 || r.X+r.W > 760 {
 			t.Fatalf("key control exceeds minimum width: %s %+v", label, r)
 		}
+	}
+}
+
+func TestNativeTavilyKeyEditableInCompactSettings(t *testing.T) {
+	a, f, updates, tt := nativeTest(t)
+	tt.SetSize(760, 600)
+	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "语音")
+	nativeClick(t, tt, "对话服务")
+	tt.Scroll(650, 430, 0, 3000)
+	for _, label := range []string{"Tavily API 密钥", "显示 Tavily API 密钥"} {
+		r, ok := tt.Find(label)
+		if !ok || r.W <= 0 || r.X < 370 || r.X+r.W > 740 || r.Y < 126 || r.Y+r.H > 580 {
+			t.Fatalf("Tavily key control cannot scroll into compact view: %s %+v", label, r)
+		}
+	}
+	nativeVoiceEdit(t, tt, "Tavily API 密钥", "compact-tavily-key")
+	nativeClick(t, tt, "保存设置")
+	nativeComplete(t, updates, tt)
+	if a.dirty || len(f.saves) != 1 || f.saves[0].Voice.TavilyAPIKey != "compact-tavily-key" {
+		t.Fatal("compact Tavily input did not save")
 	}
 }

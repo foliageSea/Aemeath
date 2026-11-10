@@ -12,6 +12,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.10
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/yusufpapurcu/wmi v1.2.4
+	golang.org/x/net v0.62.0
 )
 
 require (
@@ -58,7 +59,6 @@ require (
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/image v0.46.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

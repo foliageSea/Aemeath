@@ -22,6 +22,7 @@ import (
 type Config struct {
 	BaseURL, APIKey, Model, Persona string
 	Tools                           bool
+	TavilyAPIKey                    string
 }
 type Host interface {
 	Metrics() string
@@ -50,10 +51,18 @@ type Engine struct {
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
-	return newWithTime(ctx, cfg, host, defaultCurrentTime)
+	return newWithWebSearch(ctx, cfg, host, newTavilySearch(cfg.TavilyAPIKey))
+}
+
+func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSearchFunc) (*Engine, error) {
+	return newWithServices(ctx, cfg, host, search, defaultCurrentTime)
 }
 
 func newWithTime(ctx context.Context, cfg Config, host Host, currentTime currentTimeFunc) (*Engine, error) {
+	return newWithServices(ctx, cfg, host, defaultWebSearch, currentTime)
+}
+
+func newWithServices(ctx context.Context, cfg Config, host Host, search webSearchFunc, currentTime currentTimeFunc) (*Engine, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -89,8 +98,8 @@ func newWithTime(ctx context.Context, cfg Config, host Host, currentTime current
 		if host == nil {
 			return nil, errors.New("brain: device tools require a host")
 		}
-		e.persona += "\n" + currentTimeInstructions
-		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: cm, decision: cm}, ToolsConfig: compose.ToolsNodeConfig{Tools: append(deviceTools(host), currentTimeTool(currentTime)), ExecuteSequentially: true}, MaxStep: maxSteps})
+		e.persona += "\n" + webSearchInstructions + "\n" + currentTimeInstructions
+		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: cm, decision: cm}, ToolsConfig: compose.ToolsNodeConfig{Tools: append(deviceTools(host), webSearchTool(search), currentTimeTool(currentTime)), ExecuteSequentially: true}, MaxStep: maxSteps})
 		if err != nil {
 			return nil, errors.New("brain: cannot initialize Eino ReAct tools")
 		}

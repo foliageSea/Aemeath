@@ -13,6 +13,8 @@ func nativeToolName(name string) string {
 	switch name {
 	case "get_current_time":
 		return "查询当前时间"
+	case "web_search":
+		return "网页搜索"
 	case "get_metrics":
 		return "查询系统指标"
 	case "get_quota":
@@ -162,6 +164,15 @@ func (a *nativeUI) voiceToolCallView(c *ui.Context, index int, call brain.ToolCa
 				}
 			}
 		}
+		if call.Name == "web_search" && !expanded {
+			if report, ok := brain.ParseWebSearchReport(call.Result); ok && report.OK {
+				summary := report.Summary()
+				if len(report.Results) > 0 {
+					summary += " · 展开查看来源"
+				}
+				ui.Text(c, summary).FontSize(11).TextColor(t.TextMuted).Wrap()
+			}
+		}
 		if expanded {
 			ui.Column(c).FillWidth().MinWidth(0).Padding(4, 10, 8).Gap(6).Children(func() {
 				ui.Text(c, call.Name).FontSize(11).TextColor(t.TextMuted)
@@ -182,6 +193,12 @@ func (a *nativeUI) voiceToolCallView(c *ui.Context, index int, call brain.ToolCa
 				if call.Name == "get_current_time" {
 					if report, ok := brain.ParseCurrentTimeReport(result); ok && report.OK {
 						a.voiceCurrentTimeView(c, report)
+					} else {
+						ui.Text(c, result).FontSize(11).Wrap().Selectable()
+					}
+				} else if call.Name == "web_search" {
+					if report, ok := brain.ParseWebSearchReport(result); ok && report.OK {
+						a.voiceWebSearchSourcesView(c, report)
 					} else {
 						ui.Text(c, result).FontSize(11).Wrap().Selectable()
 					}

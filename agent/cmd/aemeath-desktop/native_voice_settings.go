@@ -99,7 +99,9 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 			a.edited()
 		}
 	})
-	ui.Text(c, "支持时间查询、查询系统与额度，以及控制设备和电脑锁屏。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+	ui.Text(c, "支持时间查询、网页搜索、查询系统与额度，以及控制设备和电脑锁屏。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+	a.voiceField(c, "voice-tavily-key", "Tavily API 密钥", "tvly-…", &cfg.TavilyAPIKey, true)
+	ui.Text(c, "网页搜索使用 Tavily。填写密钥并保存后生效；未配置时仍可使用时间查询和设备工具。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 }
 
 func (a *nativeUI) voiceRecognitionSettingsView(c *ui.Context) {

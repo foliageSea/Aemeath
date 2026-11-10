@@ -19,6 +19,7 @@ type Config struct {
 	LLMAPIKey         string  `json:"llmAPIKey"`
 	LLMModel          string  `json:"llmModel"`
 	LLMTools          bool    `json:"llmTools"`
+	TavilyAPIKey      string  `json:"tavilyAPIKey"`
 	MiMoBaseURL       string  `json:"mimoBaseURL"`
 	MiMoAPIKey        string  `json:"mimoAPIKey"`
 	TTSProvider       string  `json:"ttsProvider"`
@@ -77,6 +78,7 @@ func NormalizeConfig(c Config) (Config, error) {
 	c.LLMBaseURL = strings.TrimRight(strings.TrimSpace(c.LLMBaseURL), "/")
 	c.MiMoBaseURL = strings.TrimRight(strings.TrimSpace(c.MiMoBaseURL), "/")
 	c.LLMAPIKey = strings.TrimSpace(c.LLMAPIKey)
+	c.TavilyAPIKey = strings.TrimSpace(c.TavilyAPIKey)
 	c.MiMoAPIKey = strings.TrimSpace(c.MiMoAPIKey)
 	c.LLMModel = strings.TrimSpace(c.LLMModel)
 	c.TTSProvider = strings.ToLower(strings.TrimSpace(c.TTSProvider))
@@ -110,6 +112,7 @@ func NormalizeConfig(c Config) (Config, error) {
 	}{
 		{"Fish model", c.FishModel, 128}, {"Fish reference_id", c.FishReferenceID, 256},
 		{"Fish reference text", c.FishReferenceText, 16384}, {"Fish API key", c.FishAPIKey, 4096},
+		{"Tavily API key", c.TavilyAPIKey, 4096},
 	} {
 		if len(field.value) > field.limit || strings.ContainsAny(field.value, "\r\n") && field.name != "Fish reference text" {
 			return c, fmt.Errorf("invalid %s", field.name)

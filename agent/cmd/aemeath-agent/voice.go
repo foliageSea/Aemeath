@@ -63,7 +63,7 @@ func loadVoiceConfig(path string, enabled bool) (voice.Config, error) {
 		"AEMEATH_TTS_PROVIDER": &cfg.TTSProvider, "FISH_API_KEY": &cfg.FishAPIKey,
 		"FISH_BASE_URL": &cfg.FishBaseURL, "FISH_MODEL": &cfg.FishModel,
 		"FISH_REFERENCE_ID": &cfg.FishReferenceID, "FISH_REFERENCE_TEXT": &cfg.FishReferenceText,
-		"FISH_LATENCY": &cfg.FishLatency,
+		"FISH_LATENCY": &cfg.FishLatency, "TAVILY_API_KEY": &cfg.TavilyAPIKey,
 	} {
 		if value := os.Getenv(name); value != "" {
 			*target = value

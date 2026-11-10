@@ -48,7 +48,7 @@ func productionDependencies() dependencies {
 		newVAD:    func(c Config) (vad, error) { return wake.NewVAD(c.WakeModelDir) },
 		newSpeech: configuredSpeech,
 		newBrain: func(ctx context.Context, c Config, h Host) (brainAPI, error) {
-			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools}, h)
+			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey}, h)
 		},
 		reference: managedReference,
 	}

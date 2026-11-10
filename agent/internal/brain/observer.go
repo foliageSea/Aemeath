@@ -65,6 +65,11 @@ func startTool(ctx context.Context, name, args string) func(string, error) {
 						event.Result = report.Message
 					}
 				}
+				if name == "web_search" {
+					if report, ok := ParseWebSearchReport(result); ok {
+						event.Result = report.Message
+					}
+				}
 				if name == "lock_computer" {
 					event.Result = "锁屏请求未能提交，请检查系统支持和权限；电脑锁屏状态尚未确认"
 				}
@@ -76,6 +81,13 @@ func startTool(ctx context.Context, name, args string) func(string, error) {
 						event.Result = string(data)
 					} else {
 						event.Status, event.Result = "failed", "时间结果无效，请重新查询"
+					}
+				case "web_search":
+					if report, ok := ParseWebSearchReport(result); ok && report.OK {
+						data, _ := json.Marshal(report)
+						event.Result = string(data)
+					} else {
+						event.Status, event.Result = "failed", "搜索结果无效，未获得可引用的来源"
 					}
 				case "get_metrics":
 					event.Result = "已读取系统指标"
@@ -116,6 +128,15 @@ func toolArguments(name, args string) string {
 				data, _ := json.Marshal(input)
 				return string(data)
 			}
+		}
+	case "web_search":
+		var input struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit,omitempty"`
+		}
+		if decodeArgs(args, &input) == nil && input.Query != "" && len(input.Query) <= 1024 && input.Limit >= 0 && input.Limit <= 5 {
+			data, _ := json.Marshal(input)
+			return string(data)
 		}
 	case "lock_computer", "get_metrics", "get_quota":
 		return "{}"
