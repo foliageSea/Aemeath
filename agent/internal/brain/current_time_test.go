@@ -137,7 +137,11 @@ func TestCurrentTimeRealReActReplyAndStream(t *testing.T) {
 					sseChunk(w, map[string]any{"role": "assistant", "content": "北京时间上午九点半，星期二。"}, nil)
 					sseEnd(w)
 				} else {
-					replyJSON(w, "北京时间上午九点半，星期二。")
+					if streaming {
+						replyJSON(w, "READY")
+					} else {
+						replyJSON(w, "北京时间上午九点半，星期二。")
+					}
 				}
 			}))
 			defer server.Close()

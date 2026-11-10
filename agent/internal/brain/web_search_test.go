@@ -159,7 +159,11 @@ func TestWebSearchRealReActAndStreamOnlySpeakFinalAnswer(t *testing.T) {
 					sseChunk(w, map[string]any{"role": "assistant", "content": "根据官方文档[1]，可以查看开发指南。"}, nil)
 					sseEnd(w)
 				} else {
-					replyJSON(w, "根据官方文档[1]，可以查看开发指南。")
+					if streaming {
+						replyJSON(w, "READY")
+					} else {
+						replyJSON(w, "根据官方文档[1]，可以查看开发指南。")
+					}
 				}
 			}))
 			defer server.Close()

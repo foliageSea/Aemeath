@@ -106,7 +106,11 @@ func TestRealReActToolObserverContextAndSpeechSeparation(t *testing.T) {
 						sseChunk(w, map[string]any{"role": "assistant", "content": "最终答复。"}, nil)
 						sseEnd(w)
 					} else {
-						replyJSON(w, "最终答复。")
+						if streaming && tools {
+							replyJSON(w, "READY")
+						} else {
+							replyJSON(w, "最终答复。")
+						}
 					}
 				}))
 				defer server.Close()

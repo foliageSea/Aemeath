@@ -65,7 +65,7 @@ func TestReplyStreamFirstDeltaBeforeCompletion(t *testing.T) {
 					if !found {
 						t.Error("ReAct lost tool result")
 					}
-					replyJSON(w, "decision text must not be spoken")
+					replyJSON(w, "READY")
 					return
 				}
 				if req["stream"] != true || lenOrZero(req["tools"]) != 0 || req["tool_choice"] != "none" {

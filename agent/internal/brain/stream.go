@@ -40,17 +40,30 @@ func (m *finalStreamModel) Stream(ctx context.Context, input []*schema.Message, 
 	// Its instruction is private to this request; final generation receives the
 	// original conversation and exact accumulated tool results instead.
 	selection := append([]*schema.Message(nil), input...)
-	selection = append(selection, schema.SystemMessage("本轮只判断是否还需要调用设备工具。需要时只返回工具调用，不输出解释、旁白或用户回复；已具备回答信息时不调用工具，只输出 READY。不要生成最终回答。"))
+	selection = append(selection, schema.SystemMessage("本轮判断是否还需要调用任何可用工具，包括 get_current_time、web_search、设备工具和 Home Assistant 工具。结合用户的完整请求与本轮已有工具结果逐步执行：例如查询今年年底和明年初的最新安排，应先确认当前日期，再搜索对应年份的资料，拿到结果后才结束。需要工具时必须返回实际工具调用，不能只说“我先查一下”或描述计划；不要输出解释、旁白或用户回复。只有已取得回答所需的信息，或工具已明确失败且需要向用户说明时，才只输出 READY。不要生成最终回答。"))
 	opts = append(opts, model.WithMaxTokens(512))
-	selected, err := m.decision.Generate(ctx, selection, opts...)
-	if err != nil {
-		return nil, safeRequestFailure(err, "tool_decision")
-	}
-	if selected == nil {
-		return nil, &requestFailure{stage: "tool_decision", code: "invalid_decision"}
-	}
-	if selected.ResponseMeta != nil && selected.ResponseMeta.FinishReason == "length" {
-		return nil, &requestFailure{stage: "tool_decision", code: "decision_truncated"}
+	var selected *schema.Message
+	for attempt := 0; attempt < 2; attempt++ {
+		var err error
+		selected, err = m.decision.Generate(ctx, selection, opts...)
+		if err != nil {
+			return nil, safeRequestFailure(err, "tool_decision")
+		}
+		if selected == nil {
+			return nil, &requestFailure{stage: "tool_decision", code: "invalid_decision"}
+		}
+		if selected.ResponseMeta != nil && selected.ResponseMeta.FinishReason == "length" {
+			return nil, &requestFailure{stage: "tool_decision", code: "decision_truncated"}
+		}
+		if len(selected.ToolCalls) > 0 || strings.EqualFold(strings.TrimSpace(selected.Content), "READY") {
+			break
+		}
+		// A plan or ordinary text is not evidence that tool work is complete.
+		// Repair only this invalid decision, never replay the graph or its tools.
+		if attempt == 1 {
+			return nil, &requestFailure{stage: "tool_decision", code: "invalid_decision"}
+		}
+		selection = append(selection, selected, schema.SystemMessage("上一条没有返回有效工具决策。若还需查询时间、搜索或执行操作，现在返回实际工具调用；只有信息已经齐全或工具明确失败时才只返回 READY。计划和承诺不代表任务完成。"))
 	}
 	if len(selected.ToolCalls) > 0 {
 		// Preserve the exact assistant tool-call message for model continuation
