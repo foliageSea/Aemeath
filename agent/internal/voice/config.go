@@ -170,7 +170,7 @@ func NormalizeConfig(c Config) (Config, error) {
 		c.ReferenceAudio = filepath.Join(root, "reference.wav")
 	}
 	if strings.TrimSpace(c.Persona) == "" {
-		c.Persona = "你是爱弥斯，一位温柔、机敏的中文语音助手。回答简短自然，不使用 Markdown。"
+		c.Persona = brain.DefaultPersona
 	}
 	if !c.Enabled {
 		return c, nil
