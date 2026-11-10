@@ -21,30 +21,37 @@ type nativeService interface {
 }
 
 type nativeUI struct {
-	service       nativeService
-	snapshot      desktop.State
-	draft         desktop.Settings
-	page          string
-	notice        string
-	noticePending bool
-	dirty         bool
-	revision      int
-	busy          map[string]bool
-	update        func(func()) // Host must assign win.Update before displaying the view.
-	login         bool
-	loginRead     func() bool
-	loginWrite    func(bool) error
-	history       []nativeSample
-	details       bool
-	quotaList     ui.ListState
-	quotaUnsaved  bool
-	voicePreview  string
+	service        nativeService
+	snapshot       desktop.State
+	draft          desktop.Settings
+	page           string
+	notice         string
+	noticePending  bool
+	dirty          bool
+	revision       int
+	busy           map[string]bool
+	update         func(func()) // Host must assign win.Update before displaying the view.
+	login          bool
+	loginRead      func() bool
+	loginWrite     func(bool) error
+	history        []nativeSample
+	details        bool
+	quotaList      ui.ListState
+	quotaUnsaved   bool
+	voicePreview   string
+	settingsTab    int
+	voiceHistory   []nativeVoiceTurn
+	voiceScroll    ui.ScrollState
+	voiceCleared   bool
+	voiceClearTurn uint32
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
 func nativeState(service nativeService) *nativeUI {
 	state := service.Snapshot()
-	return &nativeUI{service: service, snapshot: state, draft: copySettings(state.Settings), page: "概览", busy: map[string]bool{}, loginRead: mygo.App.OpenAtLogin, loginWrite: mygo.App.SetOpenAtLogin}
+	a := &nativeUI{service: service, snapshot: state, draft: copySettings(state.Settings), page: "概览", busy: map[string]bool{}, loginRead: mygo.App.OpenAtLogin, loginWrite: mygo.App.SetOpenAtLogin}
+	a.recordVoice()
+	return a
 }
 func copySettings(s desktop.Settings) desktop.Settings {
 	s.Subscriptions = append([]desktop.Subscription{}, s.Subscriptions...)
@@ -55,6 +62,7 @@ func copySettings(s desktop.Settings) desktop.Settings {
 func (a *nativeUI) refresh() {
 	a.snapshot = a.service.Snapshot()
 	a.recordMetrics()
+	a.recordVoice()
 	if !a.busy["login"] {
 		a.login = a.loginRead()
 	}
@@ -125,7 +133,7 @@ func (a *nativeUI) view(c *ui.Context) {
 	}
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Background(t.Background).Children(func() {
 		a.sidebar(c)
-		ui.Column(c.Key("main")).Grow(1).MinWidth(0).Padding(20).Gap(14).Children(func() {
+		ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Padding(20).Gap(14).Children(func() {
 			a.header(c)
 			if a.snapshot.Error != "" {
 				ui.Button(c.Key("connection-details"), "连接异常 · 查看详情").TextColor(t.Warning).OnClick(func() { a.details = !a.details })
@@ -137,16 +145,17 @@ func (a *nativeUI) view(c *ui.Context) {
 				a.quotaListView(c)
 				return
 			}
+			if a.page == "设置" {
+				a.settingsView(c)
+				return
+			}
+			if a.page == "语音助手" {
+				a.voiceView(c)
+				return
+			}
 			ui.Scroll(c.Key(a.page)).Grow(1).Children(func() {
 				ui.Column(c).FillWidth().Gap(16).Children(func() {
-					switch a.page {
-					case "设置":
-						a.settingsView(c)
-					case "语音助手":
-						a.voiceView(c)
-					default:
-						a.overview(c)
-					}
+					a.overview(c)
 				})
 			})
 		})
@@ -181,6 +190,31 @@ func nativeProgress(c *ui.Context, v float64) {
 }
 func (a *nativeUI) overview(c *ui.Context) { a.metricGrid(c) }
 func (a *nativeUI) settingsView(c *ui.Context) {
+	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Tabs(c.Key("settings-tabs"), &a.settingsTab, "连接", "通用", "屏幕", "语音").Grow(1)
+		if a.dirty {
+			ui.Text(c, "未保存").FontSize(12).TextColor(c.Theme().Warning)
+		}
+		ui.PrimaryButton(c.Key("save-settings"), "保存设置").Disabled(a.busy["save"]).OnClick(a.save)
+	})
+	ui.Scroll(c.Key(fmt.Sprintf("settings-tab-%d", a.settingsTab))).Grow(1).Children(func() {
+		ui.Column(c).FillWidth().Gap(16).Children(func() {
+			switch a.settingsTab {
+			case 1:
+				a.generalSettingsView(c)
+			case 2:
+				a.screenSettingsView(c)
+			case 3:
+				a.voiceSettingsView(c)
+				a.voicePreviewView(c)
+			default:
+				a.connectionSettingsView(c)
+			}
+		})
+	})
+}
+
+func (a *nativeUI) connectionSettingsView(c *ui.Context) {
 	ui.Column(c.Key("connection-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
 		ui.Text(c, "连接配置").Bold().FontSize(17)
 		ui.Text(c, "设备").Bold()
@@ -191,12 +225,10 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 		if ui.TextInput(c.Key("magpie-url"), &a.draft.MagpieURL).Label("Magpie 网关").Placeholder("http://127.0.0.1:3425").FillWidth().Changed() {
 			a.edited()
 		}
-		ui.PrimaryButton(c.Key("save-settings"), "保存设置").Disabled(a.busy["save"]).OnClick(a.save)
-		if a.dirty {
-			ui.Text(c, "未保存").Wrap()
-		}
-
 	})
+}
+
+func (a *nativeUI) generalSettingsView(c *ui.Context) {
 	ui.Column(c.Key("login-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "开机启动")
@@ -206,6 +238,9 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 			}
 		})
 	})
+}
+
+func (a *nativeUI) screenSettingsView(c *ui.Context) {
 	ui.Column(c.Key("screen-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
 		ui.Text(c, "设备屏幕").Bold().FontSize(17)
 		// Controls wait for the device's own report: it is the source of truth.

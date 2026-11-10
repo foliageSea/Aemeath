@@ -29,7 +29,8 @@ func nativeVoiceEdit(t *testing.T, tt *ui.Tester, label, value string) {
 func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(1100, 2600)
-	nativeClick(t, tt, "语音助手")
+	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "语音")
 	fields := []struct{ label, value string }{
 		{"OpenAI 服务地址", "https://chat.example/v1"},
 		{"OpenAI API 密钥", "private-openai-key"},
@@ -118,8 +119,8 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	if !tt.HasText("离线唤醒：未就绪（模型缺失或不可用）") || !tt.HasText("语音提示：找不到唤醒模型") {
 		t.Fatal("missing models were not diagnosed")
 	}
-	nativeVoiceEdit(t, tt, "试听文本", "你好，爱弥斯。")
-	for _, label := range []string{"手动唤醒", "取消对话", "清空对话", "试听语音", "播放参考音频"} {
+	tt.SetSize(1100, 3200)
+	for _, label := range []string{"手动唤醒", "取消对话", "清空对话"} {
 		info, ok := tt.AccessByRole(ui.RoleButton, label)
 		if !ok || info.Disabled {
 			t.Fatalf("manual diagnosis command disabled without models: %s", label)
@@ -127,6 +128,13 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 		nativeClick(t, tt, label)
 		nativeComplete(t, updates, tt)
 	}
+	nativeClick(t, tt, "语音设置")
+	nativeVoiceEdit(t, tt, "试听文本", "你好，爱弥斯。")
+	for _, label := range []string{"试听语音", "播放参考音频"} {
+		nativeClick(t, tt, label)
+		nativeComplete(t, updates, tt)
+	}
+	nativeClick(t, tt, "语音助手")
 	want := [][2]string{{"wake", ""}, {"cancel", ""}, {"clear", ""}, {"preview", "你好，爱弥斯。"}, {"reference", ""}}
 	f.mu.Lock()
 	got := append([][2]string(nil), f.commands...)
@@ -145,11 +153,18 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	f.state.Voice.GeneratedSegments, f.state.Voice.PlayedSegments = 3, 1
 	a.refresh()
 	tt.Frame()
-	for _, text := range []string{"离线唤醒：已就绪 · 请说「你好小爱」", "语音通道：已连接 · 正在说话", "你说：现在电脑忙吗？", "爱弥斯：我来帮你看看。", "第 3 轮 · 识别 12 ms · 思考 34 ms · 合成累计 56 ms", "首段播放 789 ms · 已合成 3 段 · 播放完成 1 段"} {
+	for _, text := range []string{"离线唤醒：已就绪 · 请说「你好小爱」", "语音通道：已连接 · 正在说话", "现在电脑忙吗？", "我来帮你看看。"} {
 		if !tt.HasText(text) {
 			t.Fatalf("updated voice state not displayed: %s", text)
 		}
 	}
+	nativeClick(t, tt, "语音设置")
+	for _, text := range []string{"第 3 轮 · 识别 12 ms · 思考 34 ms · 合成累计 56 ms", "首段播放 789 ms · 已合成 3 段 · 播放完成 1 段"} {
+		if !tt.HasText(text) {
+			t.Fatalf("missing audio diagnostics: %s", text)
+		}
+	}
+	nativeClick(t, tt, "语音助手")
 	if a.voicePreview != "你好，爱弥斯。" {
 		t.Fatal("state update replaced preview editor")
 	}
@@ -205,7 +220,7 @@ func TestNativeVoiceOfflineAndUnsupportedControls(t *testing.T) {
 	f.state.Settings.Voice.Enabled = true
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
-	for _, label := range []string{"手动唤醒", "取消对话", "清空对话", "试听语音", "播放参考音频"} {
+	for _, label := range []string{"手动唤醒", "取消对话", "清空对话"} {
 		info, ok := tt.AccessByRole(ui.RoleButton, label)
 		if !ok || !info.Disabled {
 			t.Fatalf("unsupported control not disabled: %s", label)
@@ -234,12 +249,13 @@ func TestNativeVoiceMinimumWindowAndScrollableSettings(t *testing.T) {
 	a, _, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
 	nativeClick(t, tt, "语音助手")
-	for _, label := range []string{"语音屏", "手动唤醒", "试听文本", "播放参考音频"} {
+	for _, label := range []string{"语音屏", "手动唤醒", "取消对话", "语音设置"} {
 		r, ok := tt.Find(label)
 		if !ok || r.W <= 0 || r.X < 206 || r.X+r.W > 760 || r.Y+r.H > 600 {
 			t.Fatalf("voice control outside minimum window: %s %+v", label, r)
 		}
 	}
+	nativeClick(t, tt, "语音设置")
 	tt.Scroll(600, 400, 0, 4000)
 	info, ok := tt.AccessByRole(ui.RoleTextField, "角色设定")
 	if !ok || info.Bounds.W <= 0 || info.Bounds.X < 206 || info.Bounds.X+info.Bounds.W > 760 || info.Bounds.Y+info.Bounds.H > 600 {

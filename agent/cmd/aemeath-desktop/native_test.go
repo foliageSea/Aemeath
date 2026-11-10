@@ -250,6 +250,7 @@ func TestNativeScreenControl(t *testing.T) {
 		t.Fatal("header toggle did not turn the screen back on")
 	}
 	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "屏幕")
 	nativeClick(t, tt, "亮屏") // the screen-on switch, labeled statically like the login switch
 	nativeComplete(t, updates, tt)
 	f.mu.Lock()
@@ -331,6 +332,7 @@ func TestNativeLoginIsAsynchronousAndDispatched(t *testing.T) {
 	release := make(chan struct{})
 	a.loginWrite = func(value bool) error { started <- value; <-release; return nil }
 	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "通用")
 	nativeClick(t, tt, "登录系统时启动")
 	select {
 	case value := <-started:

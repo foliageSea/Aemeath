@@ -10,7 +10,8 @@ import (
 func TestNativeFishReferenceIDMaskedKeyAndDraftPersistence(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(1100, 3200)
-	nativeClick(t, tt, "语音助手")
+	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "语音")
 	nativeClick(t, tt, "Fish")
 	if a.draft.Voice.TTSProvider != "fish" || !a.dirty {
 		t.Fatal("Fish selection not bound to draft")
