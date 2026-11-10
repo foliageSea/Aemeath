@@ -102,6 +102,58 @@ func TestNativeVoiceSkippedToolCompletionDoesNotStayRunning(t *testing.T) {
 	}
 }
 
+func TestNativeVoiceFailureRemainsInHistoricalExecutionCard(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	tt.SetSize(1100, 1800)
+	f.state.Voice = voice.State{Session: 1, Turn: 1, Phase: "error", ErrorStage: "synthesizing", Error: "语音服务暂时不可用 [http_error] HTTP 503", Transcript: "第一问", Response: "第一答", AgentMillis: 120, TTSMillis: 250}
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	for _, text := range []string{"语音处理失败", "失败阶段：语音合成", "失败原因：" + f.state.Voice.Error, "第一答", "250 ms"} {
+		if !tt.HasText(text) {
+			t.Fatalf("missing voice failure diagnostics: %s", text)
+		}
+	}
+	f.state.Voice = voice.State{Session: 1, Turn: 2, Phase: "thinking", Transcript: "第二问"}
+	a.refresh()
+	tt.Frame()
+	if len(a.voiceHistory) != 2 || a.voiceHistory[0].state.ErrorStage != "synthesizing" || !tt.HasText("失败阶段：语音合成") || !tt.HasText("失败原因：语音服务暂时不可用 [http_error] HTTP 503") {
+		t.Fatal("new turn lost historical failure details")
+	}
+}
+
+func TestNativeVoiceFailureUnknownStageAndMissingMessage(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	f.state.Voice = voice.State{Turn: 1, Phase: "error", Transcript: "测试"}
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	if !tt.HasText("失败阶段：未知阶段") || !tt.HasText("失败原因：未收到具体错误信息。") {
+		t.Fatal("missing explicit fallback failure diagnostics")
+	}
+	for _, stage := range []string{"", "private_backend_value"} {
+		if got := nativeVoiceStage(stage); got != "未知阶段" {
+			t.Fatalf("stage %q = %q", stage, got)
+		}
+	}
+	for stage, want := range map[string]string{"recognizing": "语音识别", "thinking": "思考 / 工具调用", "synthesizing": "语音合成", "speaking": "语音播放", "listening": "录音", "wake": "唤醒", "connecting": "语音连接"} {
+		if got := nativeVoiceStage(stage); got != want {
+			t.Fatalf("stage %q = %q, want %q", stage, got, want)
+		}
+	}
+	if got := nativeVoiceActivity(voice.State{Phase: "error", ToolCalls: []brain.ToolCall{{Name: "get_metrics", Status: "running"}}}); got != "语音处理失败" {
+		t.Fatalf("stale tool hides current failure: %s", got)
+	}
+}
+
+func TestNativeVoiceWakeDiagnosticIsNotTurnFailure(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	f.state.Voice = voice.State{Turn: 1, Phase: "speaking", Transcript: "测试", Response: "回复", Error: "Offline wake unavailable"}
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	if tt.HasText("失败阶段：未知阶段") || tt.HasText("失败原因：Offline wake unavailable") {
+		t.Fatal("nonfatal wake diagnostic became a turn failure")
+	}
+}
+
 func TestNativeVoiceProcessSmallWindowKeepsControlsVisible(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		a, f, _, tt := nativeTest(t)

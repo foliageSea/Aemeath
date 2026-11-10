@@ -121,7 +121,10 @@ func (a *nativeUI) sidebarHomeAssistant(c *ui.Context) {
 	}
 	label, color := "HA · 待连接", t.TextMuted
 	if status.Connected {
-		label, color = "HA · 最近可用", t.Success
+		label, color = fmt.Sprintf("HA · %d 个可用工具", status.ToolCount), t.Success
+		if status.ToolCount == 0 {
+			color = t.Warning
+		}
 	} else if status.Error != "" {
 		label, color = "HA · 连接异常", t.Warning
 	}
@@ -161,16 +164,19 @@ func (a *nativeUI) homeAssistantStatusView(c *ui.Context) {
 	case state.checked:
 		label = "配置已更改，请重新测试连接"
 	}
+	if status.Connected && status.ToolCount == 0 {
+		label, color = "已连接 · 0 个可用工具", t.Warning
+	}
 	ui.Column(c.Key("ha-status")).Label("HA 连接状态").FillWidth().MinWidth(0).Padding(12).Gap(8).Radius(9).Border(1, color.Alpha(0.3)).Background(color.Alpha(0.04)).Children(func() {
 		ui.Text(c, label).FontSize(12).TextColor(color).Wrap()
 		if status.Error != "" {
 			ui.Text(c, status.Error).FontSize(11).TextColor(t.TextMuted).Wrap().Selectable()
 		}
+		if status.Connected && status.ToolCount == 0 {
+			ui.Text(c, "尚无可用工具，暂不能通过 HA 控制设备。请检查 MCP 工具集配置及权限。").FontSize(11).TextColor(t.Warning).Wrap()
+		}
 		if validProbe && (!validRuntime || runtime == state.runtimeAtCheck) && !a.busy["ha-probe"] {
 			ui.Text(c, "最近检查 · "+state.checkedAt.Format("15:04:05")).FontSize(10).TextColor(t.TextMuted)
-			if status.Connected && len(state.tools) == 0 {
-				ui.Text(c, "未发现工具，请检查 HA 的 MCP 工具集配置。").FontSize(11).TextColor(t.TextMuted).Wrap()
-			}
 			for i, tool := range state.tools {
 				title := tool.Title
 				if strings.TrimSpace(title) == "" {

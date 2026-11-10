@@ -25,13 +25,14 @@ type finalStreamModel struct {
 func (m *finalStreamModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
 	bound, err := m.base.WithTools(tools)
 	if err != nil {
-		return nil, err
+		return nil, safeRequestFailure(err, "tool_decision")
 	}
 	return &finalStreamModel{base: m.base, decision: bound}, nil
 }
 
 func (m *finalStreamModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	return m.decision.Generate(ctx, input, opts...)
+	out, err := m.decision.Generate(ctx, input, opts...)
+	return out, safeRequestFailure(err, "tool_decision")
 }
 
 func (m *finalStreamModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
@@ -43,13 +44,13 @@ func (m *finalStreamModel) Stream(ctx context.Context, input []*schema.Message, 
 	opts = append(opts, model.WithMaxTokens(512))
 	selected, err := m.decision.Generate(ctx, selection, opts...)
 	if err != nil {
-		return nil, err
+		return nil, safeRequestFailure(err, "tool_decision")
 	}
 	if selected == nil {
-		return nil, errors.New("missing tool decision")
+		return nil, &requestFailure{stage: "tool_decision", code: "invalid_decision"}
 	}
 	if selected.ResponseMeta != nil && selected.ResponseMeta.FinishReason == "length" {
-		return nil, errors.New("incomplete tool decision")
+		return nil, &requestFailure{stage: "tool_decision", code: "decision_truncated"}
 	}
 	if len(selected.ToolCalls) > 0 {
 		// Preserve the exact assistant tool-call message for model continuation
@@ -58,19 +59,19 @@ func (m *finalStreamModel) Stream(ctx context.Context, input []*schema.Message, 
 		return schema.StreamReaderFromArray([]*schema.Message{selected}), nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, safeRequestFailure(err, "final_reply")
 	}
 	// Use the unbound base model and explicitly forbid tool calls. In particular,
 	// this is never a retry of the ReAct graph when streaming is unsupported.
 	sr, err := m.base.Stream(ctx, input, model.WithToolChoice(schema.ToolChoiceForbidden))
 	if err != nil {
-		return nil, err
+		return nil, safeRequestFailure(err, "final_reply")
 	}
 	return schema.StreamReaderWithConvert(sr, func(chunk *schema.Message) (*schema.Message, error) {
 		// Reject a provider violating tool_choice BEFORE ReAct can route it to
 		// the tools node. The final request may never execute another tool.
 		if chunk != nil && (len(chunk.ToolCalls) > 0 || chunk.ToolCallID != "" || (chunk.Role != "" && chunk.Role != schema.Assistant)) {
-			return nil, errors.New("unexpected tool in final answer stream")
+			return nil, &requestFailure{stage: "final_reply", code: "stream_protocol"}
 		}
 		return chunk, nil
 	}), nil
@@ -90,34 +91,34 @@ func (e *Engine) streamReply(ctx context.Context, input []*schema.Message, onDel
 		sr, err = e.model.Stream(ctx, input, model.WithToolChoice(schema.ToolChoiceForbidden))
 	}
 	if err != nil {
-		return nil, err
+		return nil, safeRequestFailure(err, "final_reply")
 	}
 	defer sr.Close()
 	var content strings.Builder
 	finished := false
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, safeRequestFailure(err, "final_reply")
 		}
 		chunk, err := sr.Recv()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, safeRequestFailure(err, "final_reply")
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, safeRequestFailure(err, "final_reply")
 		}
 		if chunk == nil {
 			continue
 		}
 		if (chunk.Role != "" && chunk.Role != schema.Assistant) || len(chunk.ToolCalls) > 0 || chunk.ToolCallID != "" {
-			return nil, errors.New("unexpected non-final assistant stream")
+			return nil, &requestFailure{stage: "final_reply", code: "stream_protocol"}
 		}
 		if chunk.ResponseMeta != nil && chunk.ResponseMeta.FinishReason != "" {
 			if chunk.ResponseMeta.FinishReason != "stop" {
-				return nil, errors.New("incomplete assistant stream")
+				return nil, &requestFailure{stage: "final_reply", code: "stream_protocol"}
 			}
 			finished = true
 		}
@@ -126,7 +127,7 @@ func (e *Engine) streamReply(ctx context.Context, input []*schema.Message, onDel
 			continue
 		}
 		if content.Len()+len(chunk.Content) > maxTextBytes {
-			return nil, errors.New("reply exceeds limit")
+			return nil, &requestFailure{stage: "final_reply", code: "response_limit"}
 		}
 		content.WriteString(chunk.Content)
 		if onDelta != nil {
@@ -136,7 +137,7 @@ func (e *Engine) streamReply(ctx context.Context, input []*schema.Message, onDel
 		}
 	}
 	if !finished {
-		return nil, errors.New("assistant stream ended without stop")
+		return nil, &requestFailure{stage: "final_reply", code: "stream_protocol"}
 	}
 	return schema.AssistantMessage(content.String(), nil), nil
 }
@@ -156,7 +157,7 @@ func (b *boundedStreamBody) Read(p []byte) (int, error) {
 		var probe [1]byte
 		n, err := b.ReadCloser.Read(probe[:])
 		if n > 0 {
-			return 0, errors.New("model stream exceeds limit")
+			return 0, &requestFailure{code: "response_limit"}
 		}
 		return 0, err
 	}

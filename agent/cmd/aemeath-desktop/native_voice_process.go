@@ -46,7 +46,31 @@ func nativeToolLabel(call brain.ToolCall) string {
 	return nativeToolName(call.Name)
 }
 
+func nativeVoiceStage(phase string) string {
+	switch phase {
+	case "wake":
+		return "唤醒"
+	case "listening":
+		return "录音"
+	case "recognizing":
+		return "语音识别"
+	case "thinking":
+		return "思考 / 工具调用"
+	case "synthesizing":
+		return "语音合成"
+	case "speaking":
+		return "语音播放"
+	case "connecting":
+		return "语音连接"
+	default:
+		return "未知阶段"
+	}
+}
+
 func nativeVoiceActivity(state voice.State) string {
+	if state.Phase == "error" {
+		return nativeVoicePhase(state.Phase)
+	}
 	for _, call := range state.ToolCalls {
 		if call.Status == "running" {
 			return "正在调用：" + nativeToolLabel(call)
@@ -115,6 +139,14 @@ func (a *nativeUI) voiceTurnProcessView(c *ui.Context, index int) {
 				ui.Text(c, fmt.Sprintf("%d 次工具调用", len(state.ToolCalls))).FontSize(11).TextColor(t.TextMuted)
 			}
 		})
+		if state.Phase == "error" {
+			ui.Text(c, "失败阶段："+nativeVoiceStage(state.ErrorStage)).FontSize(11).TextColor(t.Warning).Wrap()
+			message := strings.TrimSpace(state.Error)
+			if message == "" {
+				message = "未收到具体错误信息。"
+			}
+			ui.Text(c, "失败原因："+message).FontSize(12).TextColor(t.Warning).Wrap().Selectable()
+		}
 		for _, call := range state.ToolCalls {
 			a.voiceToolCallView(c, index, call)
 		}

@@ -197,17 +197,22 @@ func TestSessionToolEventsLifecycleAndOwnership(t *testing.T) {
 		t.Fatal("old turn inserted into new turn")
 	}
 	event(2, 2, 1, "running")
+	// Final model generation can fail while an earlier sentence is synthesizing.
+	s.state.Phase = "synthesizing"
 	if err := s.fail("thinking", errors.New("test failure")); err != nil {
 		t.Fatal(err)
 	}
 	if s.state.ToolCalls[0].Status != "failed" {
 		t.Fatal("failure did not settle tools")
 	}
+	if s.state.ErrorStage != "thinking" || s.state.Phase != "error" {
+		t.Fatalf("failure stage lost: %+v", s.state)
+	}
 	if err := s.command(Command{Kind: "clear"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.state.ToolCalls) != 0 || s.generation != 3 {
-		t.Fatal("clear did not reset tools and generation")
+	if len(s.state.ToolCalls) != 0 || s.generation != 3 || s.state.ErrorStage != "" {
+		t.Fatal("clear did not reset tools, failure stage and generation")
 	}
 	s.active = true
 	event(2, 2, 1, "running")

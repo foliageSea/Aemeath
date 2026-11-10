@@ -348,6 +348,11 @@ func TestReplyStreamToolDecisionLimits(t *testing.T) {
 			if err == nil || len(e.history) != 0 {
 				t.Fatalf("err=%v history=%d", err, len(e.history))
 			}
+			if mode == "truncated" {
+				assertFailure(t, err, "tool_decision", "decision_truncated", 0)
+			} else {
+				assertFailure(t, err, "agent", "step_limit", 0)
+			}
 			if mode == "loop" && (requests.Load() < 2 || requests.Load() > maxSteps) {
 				t.Fatalf("unbounded model calls: %d", requests.Load())
 			}

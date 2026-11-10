@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -83,6 +84,65 @@ func TestNativeHAProbeIgnoresEditsDuringRequestAndReportsFailure(t *testing.T) {
 	nativeComplete(t, updates, tt)
 	if !tt.HasText("连接失败") || tt.HasText("连接成功") {
 		t.Fatal("failed HA probe displayed success")
+	}
+}
+
+func TestNativeHASidebarToolCountAndZeroToolWarning(t *testing.T) {
+	for _, probe := range []bool{false, true} {
+		for _, count := range []int{0, 2} {
+			name := fmt.Sprintf("probe=%t/tools=%d", probe, count)
+			t.Run(name, func(t *testing.T) {
+				a, f, _, tt := nativeTest(t)
+				tt.SetSize(760, 900)
+				f.state.Settings.Voice.HAMCPEnabled = true
+				f.state.Settings.Voice.HAMCPURL = "http://ha.local:8123"
+				a.draft.Voice = f.state.Settings.Voice
+				status := hamcp.Status{Connected: true, ToolCount: count}
+				if !probe {
+					f.state.Voice.HomeAssistant = status
+				}
+				a.refresh()
+				if probe {
+					a.homeAssistant = nativeHAState{checked: true, config: nativeHAConfig(a.draft.Voice), status: status, runtimeAtCheck: a.snapshot.Voice.HomeAssistant}
+				}
+				tt.Frame()
+				label := fmt.Sprintf("HA · %d 个可用工具", count)
+				if !tt.HasText(label) || tt.HasText("HA · 最近可用") {
+					t.Fatalf("missing accurate HA sidebar tool count: %s", label)
+				}
+				nativeClick(t, tt, "HA 连接详情")
+				if count == 0 {
+					for _, text := range []string{"已连接 · 0 个可用工具", "尚无可用工具，暂不能通过 HA 控制设备。请检查 MCP 工具集配置及权限。"} {
+						if !tt.HasText(text) {
+							t.Fatalf("zero-tool connection missing warning: %s", text)
+						}
+					}
+					if tt.HasText("连接成功") || tt.HasText("最近连接可用") {
+						t.Fatal("zero-tool connection misleadingly reports readiness")
+					}
+				} else if tt.HasText("尚无可用工具") {
+					t.Fatal("usable tools incorrectly reported unavailable")
+				}
+			})
+		}
+	}
+}
+
+func TestNativeHASidebarRuntimeFailureSupersedesProbeCount(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	f.state.Settings.Voice.HAMCPEnabled = true
+	a.draft.Voice = f.state.Settings.Voice
+	a.refresh()
+	a.homeAssistant = nativeHAState{checked: true, config: nativeHAConfig(a.draft.Voice), status: hamcp.Status{Connected: true, ToolCount: 2}, runtimeAtCheck: a.snapshot.Voice.HomeAssistant}
+	tt.Frame()
+	if !tt.HasText("HA · 2 个可用工具") {
+		t.Fatal("probe tool count not displayed")
+	}
+	f.state.Voice.HomeAssistant = hamcp.Status{Error: "连接已中断"}
+	a.refresh()
+	tt.Frame()
+	if !tt.HasText("HA · 连接异常") || tt.HasText("HA · 2 个可用工具") {
+		t.Fatal("stale probe count hides runtime failure")
 	}
 }
 

@@ -32,7 +32,7 @@ func nativeVoicePhase(phase string) string {
 	case "speaking":
 		return "正在说话"
 	case "error":
-		return "需要处理"
+		return "语音处理失败"
 	case "connecting":
 		return "正在连接"
 	case "disabled":

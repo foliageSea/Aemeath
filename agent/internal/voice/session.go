@@ -173,6 +173,7 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	s.state.Connected = true
 	s.state.WakeReady = s.detector != nil && s.vad != nil
 	s.state.Error = s.diagnostic
+	s.state.ErrorStage = ""
 	if err = s.phase("idle"); err != nil {
 		return err
 	}
@@ -465,6 +466,7 @@ func (s *session) begin() error {
 	s.state.AgentMillis = 0
 	s.state.TTSMillis = 0
 	s.state.Error = s.diagnostic
+	s.state.ErrorStage = ""
 	s.active = true
 	s.deadline = time.Now().Add(cloudWorkBudget + stageGrace)
 	return nil
@@ -505,6 +507,7 @@ func (s *session) command(c Command) error {
 			return err
 		}
 		s.state.Error = s.diagnostic
+		s.state.ErrorStage = ""
 		return s.phase("idle")
 	case "clear":
 		if err := s.abort(true); err != nil {
@@ -515,6 +518,7 @@ func (s *session) command(c Command) error {
 		s.state.Transcript = ""
 		s.state.Response = ""
 		s.state.Error = s.diagnostic
+		s.state.ErrorStage = ""
 		s.submit("clear", "", nil)
 		return s.phase("idle")
 	case "preview", "reference":
@@ -531,6 +535,26 @@ func (s *session) command(c Command) error {
 		return nil
 	}
 }
+
+// Worker stages take precedence over the visible phase: thinking and speech
+// synthesis can overlap, so the UI phase alone cannot identify the failure.
+func failureStage(code, phase string) string {
+	switch code {
+	case "recognizing", "thinking", "synthesizing", "wake":
+		return code
+	case "playback", "stream_start", "stream_audio", "stream_end", "bad_credit", "bad_played", "audio_size":
+		return "speaking"
+	case "bad_audio", "mic_gap", "vad":
+		return "listening"
+	}
+	switch phase {
+	case "connecting", "wake", "listening", "recognizing", "thinking", "synthesizing", "speaking":
+		return phase
+	default:
+		return "unknown"
+	}
+}
+
 func (s *session) fail(code string, err error) error {
 	s.finishTools("failed")
 	if phaseBudget(s.state.Phase) > 0 && !s.stageStarted.IsZero() {
@@ -540,6 +564,7 @@ func (s *session) fail(code string, err error) error {
 		return e
 	}
 	s.state.Error = s.safe(err.Error())
+	s.state.ErrorStage = failureStage(code, s.state.Phase)
 	if e := s.send(message{Type: "error", Turn: s.state.Turn, Code: code, Message: s.state.Error}); e != nil {
 		return e
 	}
@@ -656,6 +681,7 @@ func (s *session) control(b []byte) error {
 				return err
 			}
 			s.state.Error = s.diagnostic
+			s.state.ErrorStage = ""
 			return s.phase("idle")
 		}
 	case "credit":
@@ -698,6 +724,7 @@ func (s *session) finishNoQuestion() error {
 		return err
 	}
 	s.state.Error = s.diagnostic
+	s.state.ErrorStage = ""
 	return s.phase("idle", "没有听到问题，请重新唤醒后说出问题")
 }
 
@@ -717,6 +744,7 @@ func (s *session) continueAfterWakeOnly(millis int64) error {
 	s.capture = &capture{}
 	s.manualFixed = s.vad == nil
 	s.state.Error = s.diagnostic
+	s.state.ErrorStage = ""
 	s.deadline = time.Now().Add(40 * time.Second)
 	return s.phase("listening", "我在听，请继续说出问题")
 }

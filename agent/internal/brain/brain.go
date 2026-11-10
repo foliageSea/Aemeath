@@ -228,14 +228,18 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		if errors.As(err, &callbackErr) {
 			return "", callbackErr.err
 		}
-		return "", errors.New("brain: model or tool request failed (check connection, model and tool step limit)")
+		stage := "model"
+		if e.agent != nil {
+			stage = "agent"
+		}
+		return "", safeRequestFailure(err, stage)
 	}
 	if out == nil || len(out.ToolCalls) > 0 || strings.TrimSpace(out.Content) == "" {
-		return "", errors.New("brain: model did not return a final text reply")
+		return "", &requestFailure{stage: "final_reply", code: "empty_response"}
 	}
 	reply := strings.TrimSpace(out.Content)
 	if len(reply) > maxTextBytes {
-		return "", errors.New("brain: model reply exceeds 16384 bytes")
+		return "", &requestFailure{stage: "final_reply", code: "response_limit"}
 	}
 	e.mu.Lock()
 	if err := ctx.Err(); err != nil {
@@ -258,6 +262,11 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 
 func (e *Engine) rebuildAgent(ctx context.Context, extra []tool.BaseTool) error {
 	all := append(append([]tool.BaseTool(nil), e.baseTools...), extra...)
+	for i, candidate := range all {
+		if invokable, ok := candidate.(tool.InvokableTool); ok {
+			all[i] = diagnosticTool{InvokableTool: invokable}
+		}
+	}
 	agent, err := react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: e.model, decision: e.model}, ToolsConfig: compose.ToolsNodeConfig{Tools: all, ExecuteSequentially: true}, MaxStep: maxSteps})
 	if err == nil {
 		e.agent = agent
@@ -305,7 +314,18 @@ type boundedTransport struct{}
 func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	res, err := http.DefaultTransport.RoundTrip(req)
 	if err != nil {
-		return nil, errors.New("model transport failed")
+		failure := safeRequestFailure(err, "")
+		var classified *requestFailure
+		if errors.As(failure, &classified) && classified.code == "invalid_response" {
+			failure = &requestFailure{code: "connection"}
+		}
+		return nil, failure
+	}
+	// Classify from the status before the SDK parses an untrusted error body.
+	// Do not retain the body, URL, status text or headers in diagnostics.
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		res.Body.Close()
+		return nil, httpFailure(res.StatusCode)
 	}
 	const limit = 1 << 20
 	if res.StatusCode >= 200 && res.StatusCode < 300 && strings.HasPrefix(strings.ToLower(res.Header.Get("Content-Type")), "text/event-stream") {
@@ -315,8 +335,11 @@ func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
 	res.Body.Close()
-	if err != nil || len(data) > limit {
-		return nil, errors.New("model response exceeds limit or cannot be read")
+	if err != nil {
+		return nil, safeRequestFailure(err, "")
+	}
+	if len(data) > limit {
+		return nil, &requestFailure{code: "response_limit"}
 	}
 	// Bound tool fan-out before Eino creates any tool execution tasks.
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
@@ -330,7 +353,7 @@ func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if json.Unmarshal(data, &envelope) == nil {
 			for _, choice := range envelope.Choices {
 				if len(choice.Message.ToolCalls) > 8 {
-					return nil, errors.New("model returned too many tool calls")
+					return nil, &requestFailure{code: "tool_call_limit"}
 				}
 			}
 		}
