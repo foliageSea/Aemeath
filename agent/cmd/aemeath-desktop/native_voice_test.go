@@ -31,6 +31,7 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 	tt.SetSize(1100, 2600)
 	nativeClick(t, tt, "设置")
 	nativeClick(t, tt, "语音")
+	nativeClick(t, tt, "模型目录与高级选项")
 	fields := []struct{ label, value string }{
 		{"OpenAI 服务地址", "https://chat.example/v1"},
 		{"OpenAI API 密钥", "private-openai-key"},

@@ -44,6 +44,9 @@ type nativeUI struct {
 	voiceScroll    ui.ScrollState
 	voiceCleared   bool
 	voiceClearTurn uint32
+	wakeAssets     nativeWakeAssets
+	wakeAssetOps   nativeWakeAssetOps
+	wakeAdvanced   bool
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }

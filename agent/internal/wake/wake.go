@@ -1,5 +1,5 @@
 // Package wake provides offline Chinese keyword spotting and Silero VAD.
-// Models are installed only by the explicit aemeath-voice-assets command.
+// Models are installed explicitly through InstallWakeModels or the setup CLI.
 package wake
 
 import (

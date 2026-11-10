@@ -1,0 +1,208 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"aemeath/agent/internal/wake"
+	"github.com/egoist/mygo/ui"
+)
+
+type nativeWakeAssetOps struct {
+	verify  func(string) error
+	install func(context.Context, string, func(wake.InstallProgress)) error
+}
+
+type nativeWakeAssets struct {
+	initialCheck bool
+	path         string
+	checked      bool
+	ready        bool
+	installing   bool
+	canceled     bool
+	err          error
+	progress     wake.InstallProgress
+	cancel       context.CancelFunc
+	generation   uint64
+}
+
+type nativeWakeReloader interface{ ReloadWakeModels(string) error }
+
+func (a *nativeUI) wakeModelPath() string {
+	path := strings.TrimSpace(a.draft.Voice.WakeModelDir)
+	if path == "" {
+		return wake.DefaultModelDir()
+	}
+	return filepath.Clean(path)
+}
+
+// All state changes, including download progress, are dispatched to the UI thread.
+func (a *nativeUI) startWakeAssets(install bool) {
+	if a.busy["wake-assets"] {
+		return
+	}
+	dispatch := a.update
+	if dispatch == nil {
+		a.notify("窗口尚未就绪，请稍后重试。")
+		return
+	}
+	target := a.wakeModelPath()
+	verify, installer := a.wakeAssetOps.verify, a.wakeAssetOps.install
+	if verify == nil {
+		verify = wake.VerifyWakeModels
+	}
+	if installer == nil {
+		installer = wake.InstallWakeModels
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	generation := a.wakeAssets.generation + 1
+	a.wakeAssets = nativeWakeAssets{initialCheck: true, path: target, installing: install, cancel: cancel, generation: generation, progress: wake.InstallProgress{Stage: "checking"}}
+	a.busy["wake-assets"] = true
+	go func() {
+		defer cancel()
+		var err error
+		if install {
+			err = installer(ctx, target, func(progress wake.InstallProgress) {
+				dispatch(func() {
+					if a.wakeAssets.generation == generation && a.busy["wake-assets"] {
+						a.wakeAssets.progress = progress
+					}
+				})
+			})
+		} else {
+			err = verify(target)
+		}
+		dispatch(func() {
+			if a.wakeAssets.generation != generation {
+				return
+			}
+			a.busy["wake-assets"] = false
+			a.wakeAssets.cancel = nil
+			a.wakeAssets.checked, a.wakeAssets.ready = true, err == nil
+			a.wakeAssets.canceled = errors.Is(err, context.Canceled)
+			a.wakeAssets.err = err
+			if !install {
+				return
+			}
+			if err != nil {
+				if !a.wakeAssets.canceled {
+					a.notify("唤醒模型安装失败，请检查网络或目录后重试。")
+				}
+				return
+			}
+			a.notify("唤醒模型已安装。")
+			// Reload only the saved model directory; never save or overwrite a draft.
+			saved := strings.TrimSpace(a.snapshot.Settings.Voice.WakeModelDir)
+			if saved == "" {
+				saved = wake.DefaultModelDir()
+			}
+			if service, ok := a.service.(nativeWakeReloader); ok && filepath.Clean(saved) == target && a.snapshot.Settings.Voice.Enabled && a.snapshot.Running {
+				a.run("wake-reload", func() error { return service.ReloadWakeModels(target) }, func() { a.notify("唤醒模型已安装，语音连接将重新加载模型。") })
+			}
+		})
+	}()
+}
+
+func (a *nativeUI) cancelWakeAssets() {
+	if a.wakeAssets.cancel != nil {
+		a.wakeAssets.cancel()
+	}
+}
+
+func nativeWakeStage(stage string) string {
+	switch stage {
+	case "downloading-model":
+		return "正在下载唤醒模型"
+	case "extracting":
+		return "正在解压唤醒模型"
+	case "downloading-vad":
+		return "正在下载语音检测模型"
+	case "verifying":
+		return "正在校验模型"
+	case "complete":
+		return "安装完成"
+	default:
+		return "正在检查本地模型"
+	}
+}
+
+func (a *nativeUI) wakeModelsView(c *ui.Context) {
+	t := c.Theme()
+	target := a.wakeModelPath()
+	if !a.wakeAssets.initialCheck && a.update != nil {
+		a.startWakeAssets(false)
+	}
+	state, busy := a.wakeAssets, a.busy["wake-assets"]
+	current := state.path == target
+	title, color := "尚未检查", t.TextMuted
+	if busy {
+		title = nativeWakeStage(state.progress.Stage)
+	} else if current && state.checked {
+		switch {
+		case state.ready:
+			title, color = "已安装 · 你好小爱", t.Success
+		case state.canceled:
+			title = "安装已取消，可重新安装"
+		case errors.Is(state.err, os.ErrNotExist):
+			title = "未安装"
+		default:
+			title, color = "模型校验或安装失败", t.Warning
+		}
+	}
+	ui.Column(c.Key("wake-model-card")).FillWidth().Padding(16).Gap(10).Radius(12).Border(1, t.Border).Children(func() {
+		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
+				ui.Text(c, "离线唤醒模型").Bold()
+				ui.Text(c, title).FontSize(12).TextColor(color).Wrap()
+			})
+			if busy && state.installing {
+				ui.Button(c.Key("wake-install-cancel"), "取消安装").OnClick(a.cancelWakeAssets)
+			} else {
+				label := "安装唤醒模型"
+				if current && state.checked && !state.ready && !errors.Is(state.err, os.ErrNotExist) {
+					label = "重试安装"
+				}
+				ui.PrimaryButton(c.Key("wake-install"), label).Disabled(busy || current && state.ready).OnClick(func() { a.startWakeAssets(true) })
+				ui.Button(c.Key("wake-check"), "检查模型").Disabled(busy).OnClick(func() { a.startWakeAssets(false) })
+			}
+		})
+		if busy && state.installing {
+			if state.progress.Total > 0 {
+				p := state.progress
+				ui.Progress(c, float64(p.Downloaded)/float64(p.Total)).FillWidth()
+				ui.Text(c, fmt.Sprintf("%.1f / %.1f MB", float64(p.Downloaded)/(1<<20), float64(p.Total)/(1<<20))).FontSize(11).TextColor(t.TextMuted)
+			} else {
+				ui.Text(c, "请稍候…").FontSize(11).TextColor(t.TextMuted)
+			}
+		} else if current && state.err != nil && !state.canceled && !errors.Is(state.err, os.ErrNotExist) {
+			ui.Text(c, state.err.Error()).FontSize(11).TextColor(t.Warning).Wrap().MaxLines(3).Ellipsis("…").Tooltip(state.err.Error()).Selectable()
+		}
+		ui.Text(c, "首次下载约 33 MB，包含唤醒与语音检测模型。安装完成后可离线使用。").FontSize(11).TextColor(t.TextMuted).Wrap()
+		if current && state.ready && filepath.Clean(a.snapshot.Settings.Voice.WakeModelDir) != target {
+			ui.Text(c, "保存设置后使用此模型目录。").FontSize(11).TextColor(t.TextMuted)
+		}
+		label := "模型目录与高级选项"
+		if a.wakeAdvanced {
+			label = "收起模型目录"
+		}
+		ui.Button(c.Key("wake-advanced"), label).FontSize(11).OnClick(func() { a.wakeAdvanced = !a.wakeAdvanced })
+		if a.wakeAdvanced {
+			ui.Field(c.Key("voice-wake-dir"), "唤醒模型目录", func() {
+				if ui.TextInput(c, &a.draft.Voice.WakeModelDir).Label("唤醒模型目录").Placeholder(wake.DefaultModelDir()).FillWidth().Disabled(busy).Changed() {
+					a.edited()
+				}
+			}).FillWidth()
+			ui.Button(c.Key("wake-default-dir"), "使用默认模型目录").Disabled(busy).OnClick(func() {
+				if a.draft.Voice.WakeModelDir != wake.DefaultModelDir() {
+					a.draft.Voice.WakeModelDir = wake.DefaultModelDir()
+					a.edited()
+				}
+			})
+			ui.Text(c, "安装到当前目录；已有文件校验失败时，请检查文件或更换新的目录。").FontSize(11).TextColor(t.TextMuted).Wrap()
+		}
+	})
+}

@@ -2,11 +2,9 @@ package wake
 
 import (
 	"archive/tar"
-	"compress/bzip2"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,12 +47,23 @@ var archiveFiles = map[string]string{
 }
 
 func verifyFile(name string, a asset) error {
+	return verifyFileContext(context.Background(), name, a)
+}
+
+func verifyFileContext(ctx context.Context, name string, a asset) error {
+	st, err := os.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", a.Name)
+	}
 	f, err := os.Open(name)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	st, err := f.Stat()
+	st, err = f.Stat()
 	if err != nil {
 		return err
 	}
@@ -62,7 +71,7 @@ func verifyFile(name string, a asset) error {
 		return fmt.Errorf("%s has unexpected type or size", a.Name)
 	}
 	h := sha256.New()
-	if _, err = io.Copy(h, io.LimitReader(f, a.Size+1)); err != nil {
+	if _, err = io.Copy(h, io.LimitReader(contextReader{ctx, f}, a.Size+1)); err != nil {
 		return err
 	}
 	if hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
@@ -88,10 +97,7 @@ func VerifyAssets(dir string, referenceOnly bool) error {
 		dir = DefaultAssetDir()
 	}
 	if !referenceOnly {
-		if err := verifyModels(filepath.Join(dir, "models")); err != nil {
-			return err
-		}
-		if err := verifyFile(filepath.Join(dir, "models", vadAsset.Name), vadAsset); err != nil {
+		if err := VerifyWakeModels(filepath.Join(dir, "models")); err != nil {
 			return err
 		}
 	}
@@ -115,49 +121,8 @@ func InstallAssets(ctx context.Context, dir string, referenceOnly bool) error {
 	defer os.RemoveAll(stage)
 	client := &http.Client{Timeout: 3 * time.Minute}
 	if !referenceOnly {
-		dst := filepath.Join(dir, "models")
-		if _, err := os.Lstat(dst); os.IsNotExist(err) {
-			models := filepath.Join(stage, "models")
-			if err = os.Mkdir(models, 0700); err != nil {
-				return err
-			}
-			archive := filepath.Join(stage, "model.tar.bz2")
-			if err = download(ctx, client, modelURL, archive, asset{"archive", archiveSHA, 32654866}); err != nil {
-				return err
-			}
-			f, err := os.Open(archive)
-			if err != nil {
-				return err
-			}
-			err = extractModels(bzip2.NewReader(f), models)
-			f.Close()
-			if err != nil {
-				return err
-			}
-			if err = download(ctx, client, vadURL, filepath.Join(models, vadAsset.Name), vadAsset); err != nil {
-				return err
-			}
-			if err = os.WriteFile(filepath.Join(models, "keywords.txt"), []byte(KeywordTokens), 0600); err != nil {
-				return err
-			}
-			if err = verifyModels(models); err != nil {
-				return err
-			}
-			manifest := struct{ Model, Binding, ArchiveSHA256, VADSHA256, Keywords string }{ModelVersion, BindingVersion, archiveSHA, vadAsset.SHA256, KeywordTokens}
-			b, _ := json.MarshalIndent(manifest, "", "  ")
-			if err = os.WriteFile(filepath.Join(models, "manifest.json"), b, 0600); err != nil {
-				return err
-			}
-			if err = os.Rename(models, dst); err != nil {
-				return fmt.Errorf("atomic model install: %w", err)
-			}
-		} else {
-			if err = verifyModels(dst); err != nil {
-				return fmt.Errorf("existing models are damaged; choose a fresh -dir: %w", err)
-			}
-			if err = verifyFile(filepath.Join(dst, vadAsset.Name), vadAsset); err != nil {
-				return err
-			}
+		if err := InstallWakeModels(ctx, filepath.Join(dir, "models"), nil); err != nil {
+			return err
 		}
 	}
 	if err = installReference(ctx, client, dir, stage); err != nil {
@@ -166,6 +131,18 @@ func InstallAssets(ctx context.Context, dir string, referenceOnly bool) error {
 	return VerifyAssets(dir, referenceOnly)
 }
 func download(ctx context.Context, c *http.Client, url, dst string, a asset) error {
+	return downloadProgress(ctx, c, url, dst, a, nil)
+}
+
+func downloadProgress(ctx context.Context, c *http.Client, url, dst string, a asset, progress *installReporter) (err error) {
+	var n int64
+	if progress != nil {
+		progress.report(0, a.Size, true)
+		defer func() { progress.report(n, a.Size, true) }()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -185,7 +162,13 @@ func download(ctx context.Context, c *http.Client, url, dst string, a asset) err
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(f, io.LimitReader(resp.Body, a.Size+1))
+	defer func() {
+		if err != nil {
+			_ = os.Remove(dst)
+		}
+	}()
+	reader := &downloadReader{Reader: contextReader{ctx, resp.Body}, n: &n, total: a.Size, progress: progress}
+	_, err = io.Copy(f, io.LimitReader(reader, a.Size+1))
 	if err == nil {
 		err = f.Sync()
 	}
@@ -199,7 +182,7 @@ func download(ctx context.Context, c *http.Client, url, dst string, a asset) err
 	if n != a.Size {
 		return fmt.Errorf("download %s size mismatch", a.Name)
 	}
-	return verifyFile(dst, a)
+	return verifyFileContext(ctx, dst, a)
 }
 
 // extractModels bounds the entire decompressed stream, entry count and entry

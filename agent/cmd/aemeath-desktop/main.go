@@ -34,6 +34,7 @@ func main() {
 	var win *mygo.Window
 	var quitting bool
 	var cancel context.CancelFunc
+	var cancelVoiceAssets func()
 	show := func() {
 		if win != nil {
 			win.Show()
@@ -49,6 +50,9 @@ func main() {
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
 		quitting = true
+		if cancelVoiceAssets != nil {
+			cancelVoiceAssets()
+		}
 		if cancel != nil {
 			cancel()
 		}
@@ -73,6 +77,7 @@ func main() {
 		}
 		mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 		native := newNativeUI(service)
+		cancelVoiceAssets = native.cancelWakeAssets
 		win = mygo.NewWindow(mygo.WindowOptions{Title: "Aemeath", Content: ui.View(native.view), Width: 1100, Height: 800, MinWidth: 760, MinHeight: 600, Hidden: mygo.App.WasOpenedAtLogin(), StateKey: "main-native"})
 		native.update = win.Update
 		win.OnClose(func(e *mygo.CloseEvent) {

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"aemeath/agent/internal/sessionlock"
 	"aemeath/agent/internal/voice"
+	"aemeath/agent/internal/wake"
 )
 
 // startVoice joins the audio session to this exact telemetry connection attempt.
@@ -113,6 +116,24 @@ func (s *Service) VoiceCommand(kind, text string) error {
 	default:
 		return errors.New("voice assistant is busy; try again shortly")
 	}
+}
+
+// ReloadWakeModels reconnects the saved voice configuration after an explicit
+// model install. Draft directories never replace or save the running settings.
+func (s *Service) ReloadWakeModels(modelDir string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return ErrClosed
+	}
+	saved := strings.TrimSpace(s.state.Settings.Voice.WakeModelDir)
+	if saved == "" {
+		saved = wake.DefaultModelDir()
+	}
+	if filepath.Clean(saved) == filepath.Clean(modelDir) && s.state.Settings.Voice.Enabled && s.attemptCancel != nil {
+		s.attemptCancel()
+	}
+	return nil
 }
 
 type voiceHost struct{ service *Service }

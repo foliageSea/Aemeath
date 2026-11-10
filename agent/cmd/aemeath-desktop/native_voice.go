@@ -286,9 +286,7 @@ func (a *nativeUI) voiceSettingsView(c *ui.Context) {
 		}
 		a.voiceField(c, "voice-reference-path", "参考音频路径", "参考声音的 WAV 文件完整路径", &cfg.ReferenceAudio, false)
 		ui.Text(c, "离线唤醒与声音").Bold()
-		a.voiceField(c, "voice-wake-dir", "唤醒模型目录", "包含唤醒模型的完整目录路径", &cfg.WakeModelDir, false)
-		ui.Text(c, "首次使用：在终端运行 aemeath-voice-assets 安装唤醒模型和参考音频；源码运行时，在 agent 目录执行 go run ./cmd/aemeath-voice-assets。完成后保存设置重试。").FontSize(12).TextColor(t.TextMuted).Wrap().Selectable()
-		ui.Text(c, "使用默认安装位置可保留自动填写的路径；自定义位置使用 -dir，并填写对应的 models 目录与 reference.wav 路径。").FontSize(12).TextColor(t.TextMuted).Wrap().Selectable()
+		a.wakeModelsView(c)
 		ui.Field(c.Key("voice-wake-threshold"), "唤醒阈值", func() {
 			if ui.NumberInput(c, &cfg.WakeThreshold, 0.01, 1, 0.05).FillWidth().Changed() {
 				a.edited()
