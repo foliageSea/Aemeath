@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/link"
 	"aemeath/agent/internal/sessionlock"
 	"aemeath/agent/internal/voice"
@@ -187,7 +188,10 @@ type cliVoiceHost struct {
 	mu             sync.RWMutex
 	conn           *link.Conn
 	metrics, quota string
+	memory         *brain.Memory
 }
+
+func (h *cliVoiceHost) ConversationMemory() *brain.Memory { return h.memory }
 
 func (h *cliVoiceHost) LockComputer(ctx context.Context) error { return sessionlock.Lock(ctx) }
 

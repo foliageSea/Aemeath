@@ -26,6 +26,8 @@ type Config struct {
 	Tools                           bool
 	TavilyAPIKey                    string
 	HomeAssistant                   hamcp.Config
+	// Memory shares the conversation across Engines; nil keeps it per Engine.
+	Memory *Memory
 }
 type Host interface {
 	Metrics() string
@@ -58,6 +60,8 @@ type Engine struct {
 	generation   uint64
 	streamCancel context.CancelFunc
 	history      []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
+	lastActive   time.Time         // last committed turn; history expires after MemoryTTL
+	memory       *Memory
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
@@ -104,7 +108,10 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 		return nil, errors.New("brain: cannot initialize OpenAI model")
 	}
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
-	e := &Engine{model: cm, persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory}
+	e := &Engine{model: cm, persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory}
+	if e.memory != nil {
+		e.history, e.lastActive = e.memory.snapshot()
+	}
 	if cfg.Tools && cfg.HomeAssistant.Enabled {
 		e.haConfig = cfg.HomeAssistant
 	}
@@ -175,6 +182,12 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	}
 	e.mu.Lock()
 	generation := e.generation
+	if len(e.history) > 0 && !e.lastActive.IsZero() && time.Since(e.lastActive) > MemoryTTL {
+		e.history = nil
+		if e.memory != nil {
+			e.memory.Clear()
+		}
+	}
 	hist := append([]*schema.Message(nil), e.history...)
 	e.mu.Unlock()
 	haPrompt := ""
@@ -234,6 +247,10 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		if len(e.history) > 2*maxTurns {
 			e.history = append([]*schema.Message(nil), e.history[len(e.history)-2*maxTurns:]...)
 		}
+		e.lastActive = time.Now()
+		if e.memory != nil {
+			e.memory.store(e.history, e.lastActive)
+		}
 	}
 	e.mu.Unlock()
 	return reply, nil
@@ -270,6 +287,10 @@ func (e *Engine) Close() error {
 func (e *Engine) Clear() {
 	e.mu.Lock()
 	e.history = nil
+	e.lastActive = time.Time{}
+	if e.memory != nil {
+		e.memory.Clear()
+	}
 	e.generation++
 	if e.streamCancel != nil {
 		e.streamCancel()

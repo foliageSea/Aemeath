@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/collect"
 	"aemeath/agent/internal/discover"
 	"aemeath/agent/internal/link"
@@ -63,6 +66,8 @@ type Service struct {
 	updates       chan struct{}
 	quotaWake     chan struct{}
 	voiceCommands chan voice.Command
+	memory        *brain.Memory // voice conversation; outlives each device connection
+	voiceSession  atomic.Uint64 // numbers voice connections; see voice.State.Session
 }
 
 // New loads preferences and starts local sampling (1s) and quota polling (30s).
@@ -109,6 +114,11 @@ func New(configPath string) (*Service, error) {
 func newService(path string, settings Settings, deps dependencies) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1)}
+	memoryPath := ""
+	if path != "" {
+		memoryPath = filepath.Join(filepath.Dir(path), "voice_history.json")
+	}
+	s.memory = brain.OpenMemory(memoryPath)
 	s.wg.Add(2)
 	go s.sampleLoop()
 	go s.quotaLoop()

@@ -50,6 +50,7 @@ type nativeUI struct {
 	voiceScroll          ui.ScrollState
 	voiceCleared         bool
 	voiceClearTurn       uint32
+	voiceClearSession    uint64
 	wakeAssets           nativeWakeAssets
 	wakeAssetOps         nativeWakeAssetOps
 	wakeAdvanced         bool
@@ -61,6 +62,7 @@ func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(servic
 func nativeState(service nativeService) *nativeUI {
 	state := service.Snapshot()
 	a := &nativeUI{service: service, snapshot: state, draft: copySettings(state.Settings), page: "概览", busy: map[string]bool{}, loginRead: mygo.App.OpenAtLogin, loginWrite: mygo.App.SetOpenAtLogin}
+	a.restoreVoiceHistory()
 	a.recordVoice()
 	return a
 }

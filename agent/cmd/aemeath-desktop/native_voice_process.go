@@ -10,6 +10,11 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+var (
+	voiceToolCollapsedIcon = sidebarSVG("<path d='m9 6 6 6-6 6'/>")
+	voiceToolExpandedIcon  = sidebarSVG("<path d='m6 9 6 6 6-6'/>")
+)
+
 func nativeToolName(name string) string {
 	switch name {
 	case "get_current_time":
@@ -150,11 +155,13 @@ func (a *nativeUI) voiceToolCallView(c *ui.Context, index int, call brain.ToolCa
 	ui.Column(c.Key(fmt.Sprintf("voice-tool-%d", call.ID))).FillWidth().MinWidth(0).Gap(8).Children(func() {
 		button := ui.ButtonBase(c.Key("toggle")).Label(fmt.Sprintf("第 %d 轮工具详情 %s #%d", turn.turn, nativeToolLabel(call), call.ID)).Expanded(expanded).FillWidth().Gap(8).AlignItems(ui.Center).Justify(ui.Start).Padding(9, 10).Radius(8).Background(color.Alpha(0.08)).Border(1, color.Alpha(0.15))
 		button.Children(func() {
-			arrow := "›"
+			// SVG icons center geometrically; text glyphs like "›" sit on the
+			// font baseline and drift below the label's visual center.
+			arrow := voiceToolCollapsedIcon
 			if expanded {
-				arrow = "⌄"
+				arrow = voiceToolExpandedIcon
 			}
-			ui.Text(c, arrow).FontSize(14).TextColor(color)
+			ui.Icon(c, arrow).Size(14, 14).Shrink(0).TextColor(color)
 			ui.Text(c, nativeToolLabel(call)).FontSize(12).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
 			ui.Text(c, nativeToolStatus(call.Status)).FontSize(11).TextColor(color)
 			if call.Millis > 0 {

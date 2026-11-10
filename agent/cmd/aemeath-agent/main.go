@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"time"
 
+	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/collect"
 	"aemeath/agent/internal/discover"
 	"aemeath/agent/internal/link"
@@ -57,6 +58,8 @@ func main() {
 		go control.console(ctx, os.Stdin)
 	}
 	backoff := time.Second
+	// CLI keeps the conversation across reconnects, in process memory only.
+	memory := brain.OpenMemory("")
 	for ctx.Err() == nil {
 		target := *addr
 		if target == "" {
@@ -77,7 +80,7 @@ func main() {
 		log.Printf("connected to %s", target)
 		backoff = time.Second
 		attempt, cancel := context.WithCancel(ctx)
-		host := &cliVoiceHost{conn: conn}
+		host := &cliVoiceHost{conn: conn, memory: memory}
 		voiceDone := control.start(attempt, target, vcfg, host)
 		err = stream(attempt, c, mp, conn, *interval, *verbose, host)
 		cancel()

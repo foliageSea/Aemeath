@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 
+	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/voice"
 
 	"github.com/egoist/mygo/ui"
@@ -51,6 +52,7 @@ func (a *nativeUI) voiceCommand(kind, text string) {
 		if kind == "clear" {
 			a.voiceHistory = nil
 			a.voiceCleared, a.voiceClearTurn = true, a.snapshot.Voice.Turn
+			a.voiceClearSession = a.snapshot.Voice.Session
 		}
 		a.notify("语音指令已发送。")
 	})
@@ -62,13 +64,44 @@ type nativeVoiceTurn struct {
 	transcript, response string
 	state                voice.State
 	toolDetails          map[uint64]bool
+	restored             bool
+}
+
+// Persisted exchanges have no runtime turn/tool metadata. Keep them separate
+// from live turns instead of manufacturing timings or playback state.
+func (a *nativeUI) restoreVoiceHistory() {
+	service, ok := a.service.(interface{ VoiceConversation() []brain.MemoryTurn })
+	if !ok {
+		return
+	}
+	turns := service.VoiceConversation()
+	for i, turn := range turns {
+		// Opening a window during an active session can expose the same final
+		// exchange in both memory and the live snapshot. Let recordVoice add
+		// that exchange with its actual runtime diagnostics, exactly once.
+		s := a.snapshot.Voice
+		if i == len(turns)-1 && s.Transcript == turn.User && s.Response == turn.Assistant {
+			continue
+		}
+		a.voiceNextID++
+		a.voiceHistory = append(a.voiceHistory, nativeVoiceTurn{
+			id: a.voiceNextID, transcript: turn.User, response: turn.Assistant, restored: true,
+		})
+	}
+	if len(a.voiceHistory) > 0 {
+		a.voiceScroll.Y = math.MaxFloat32
+	}
+}
+
+func sameVoiceTurn(turn nativeVoiceTurn, state voice.State) bool {
+	return !turn.restored && turn.turn == state.Turn && turn.state.Session == state.Session
 }
 
 // Keep a bounded, in-memory transcript of turns observed by this window.
 func (a *nativeUI) recordVoice() {
 	s := a.snapshot.Voice
 	if a.voiceCleared {
-		if s.Turn == a.voiceClearTurn {
+		if s.Turn == a.voiceClearTurn && s.Session == a.voiceClearSession {
 			return
 		}
 		a.voiceCleared = false
@@ -83,7 +116,7 @@ func (a *nativeUI) recordVoice() {
 		return
 	}
 	follow := a.voiceScroll.Y >= a.voiceScroll.MaxY-8
-	if n > 0 && a.voiceHistory[n-1].turn == s.Turn {
+	if n > 0 && sameVoiceTurn(a.voiceHistory[n-1], s) {
 		next.id = a.voiceHistory[n-1].id
 		next.toolDetails = a.voiceHistory[n-1].toolDetails
 		a.voiceHistory[n-1] = next
@@ -154,10 +187,14 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 					for i, turn := range a.voiceHistory {
 						ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().Gap(12).Children(func() {
 							a.voiceBubble(c, "你", turn.transcript, true)
-							a.voiceTurnProcessView(c, i)
+							if turn.restored {
+								ui.Text(c, "历史对话 · 仅恢复问答文字").FontSize(11).TextColor(t.TextMuted)
+							} else {
+								a.voiceTurnProcessView(c, i)
+							}
 							if turn.response != "" {
 								a.voiceBubble(c, "爱弥斯", turn.response, false)
-							} else if turn.turn == state.Turn && (state.Phase == "thinking" || state.Phase == "recognizing") {
+							} else if sameVoiceTurn(turn, state) && (state.Phase == "thinking" || state.Phase == "recognizing") {
 								a.voiceBubble(c, "爱弥斯", "正在思考…", false)
 							}
 						})
@@ -173,7 +210,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 					ui.Text(c, nativeVoiceActivity(state)).FontSize(12).Bold().Wrap()
-					if state.Turn > 0 && !(a.voiceCleared && state.Turn == a.voiceClearTurn) {
+					if state.Turn > 0 && !(a.voiceCleared && state.Turn == a.voiceClearTurn && state.Session == a.voiceClearSession) {
 						a.voiceLiveProgressView(c)
 					} else {
 						ui.Text(c, "通过设备麦克风与你对话").FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")

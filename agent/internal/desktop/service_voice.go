@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/sessionlock"
 	"aemeath/agent/internal/voice"
 	"aemeath/agent/internal/wake"
@@ -36,7 +37,9 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	if run == nil {
 		run = voice.Run
 	}
+	var session uint64
 	emit := func(state voice.State) {
+		state.Session = session
 		s.mu.Lock()
 		report := false
 		if s.conn == conn && ctx.Err() == nil {
@@ -61,6 +64,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 			s.mu.Unlock()
 		}()
 		for ctx.Err() == nil {
+			session = s.voiceSession.Add(1)
 			err := run(ctx, address, cfg, voiceHost{s}, commands, emit)
 			if ctx.Err() != nil {
 				return
@@ -88,6 +92,10 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	}()
 	return done
 }
+
+// VoiceConversation is the remembered conversation the assistant will
+// continue, for redisplay after an app restart.
+func (s *Service) VoiceConversation() []brain.MemoryTurn { return s.memory.Turns() }
 
 // VoiceCommand queues user actions without blocking a UI or background sampler.
 func (s *Service) VoiceCommand(kind, text string) error {
@@ -137,6 +145,8 @@ func (s *Service) ReloadWakeModels(modelDir string) error {
 }
 
 type voiceHost struct{ service *Service }
+
+func (h voiceHost) ConversationMemory() *brain.Memory { return h.service.memory }
 
 func (h voiceHost) LockComputer(ctx context.Context) error { return sessionlock.Lock(ctx) }
 

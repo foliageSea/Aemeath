@@ -57,6 +57,10 @@ type State struct {
 	FirstAudioMillis  int64            `json:"firstAudioMillis"`
 	GeneratedSegments int              `json:"generatedSegments"`
 	PlayedSegments    int              `json:"playedSegments"`
+	// Session identifies the voice connection. Turn numbers restart on every
+	// connection, so (Session, Turn) is what identifies a turn. Assigned by the
+	// host; always 0 inside this package.
+	Session uint64 `json:"session"`
 }
 
 // Clone returns a snapshot with an independent tool event slice.
@@ -75,6 +79,12 @@ type Host interface {
 	SetPage(context.Context, string) error
 	SetScreen(context.Context, bool, int) error
 	LockComputer(context.Context) error
+}
+
+// MemoryHost is optionally implemented by a Host whose conversation should
+// survive individual voice connections (device reconnects, app restarts).
+type MemoryHost interface {
+	ConversationMemory() *brain.Memory
 }
 
 // NormalizeConfig applies local defaults. Credentials and installed assets are

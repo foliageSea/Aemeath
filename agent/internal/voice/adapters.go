@@ -49,7 +49,11 @@ func productionDependencies() dependencies {
 		newVAD:    func(c Config) (vad, error) { return wake.NewVAD(c.WakeModelDir) },
 		newSpeech: configuredSpeech,
 		newBrain: func(ctx context.Context, c Config, h Host) (brainAPI, error) {
-			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey, HomeAssistant: hamcp.Config{Enabled: c.HAMCPEnabled, Endpoint: c.HAMCPURL, Token: c.HAAccessToken}}, h)
+			var memory *brain.Memory
+			if m, ok := h.(MemoryHost); ok {
+				memory = m.ConversationMemory()
+			}
+			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey, HomeAssistant: hamcp.Config{Enabled: c.HAMCPEnabled, Endpoint: c.HAMCPURL, Token: c.HAAccessToken}, Memory: memory}, h)
 		},
 		reference: managedReference,
 	}
@@ -114,6 +118,12 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 		if generation != w.generation {
 			if engine != nil {
 				engine.Clear()
+			} else if h, ok := host.(MemoryHost); ok {
+				// After a restart the model is lazy-created. Clear must still
+				// delete restored memory before the first model request.
+				if memory := h.ConversationMemory(); memory != nil {
+					memory.Clear()
+				}
 			}
 			generation = w.generation
 		}
