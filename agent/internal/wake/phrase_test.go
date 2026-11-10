@@ -19,7 +19,7 @@ func TestNativeWakePhrase(t *testing.T) {
 	if dir == "" {
 		dir = DefaultModelDir()
 	}
-	d, err := New(Config{ModelDir: dir})
+	d, err := New(Config{ModelDir: dir, Phrase: os.Getenv("AEMEATH_WAKE_PHRASE")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestNativeWakePhrase(t *testing.T) {
 					hits++
 					m := d.LastMatch()
 					t.Logf("match=%s start=%.3fs end=%.3fs", m.Keyword, float64(m.StartSample)/SampleRate, float64(m.EndSample)/SampleRate)
-					if m.StartSample < 0 || m.EndSample <= m.StartSample || m.EndSample > int64(end) {
+					if m.Keyword != d.phrase || m.StartSample < 0 || m.EndSample <= m.StartSample || m.EndSample > int64(end) {
 						t.Fatal("invalid keyword endpoint")
 					}
 				}

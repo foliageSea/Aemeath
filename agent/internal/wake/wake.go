@@ -24,6 +24,7 @@ var ErrClosed = errors.New("offline audio detector is closed")
 type Config struct {
 	ModelDir  string
 	Threshold float64
+	Phrase    string
 }
 
 // Match uses cumulative 16 kHz samples since Reset. EndSample is exclusive.
@@ -43,6 +44,11 @@ func DefaultAssetDir() string {
 }
 func DefaultModelDir() string { return filepath.Join(DefaultAssetDir(), "models") }
 func normalize(c Config) (Config, error) {
+	var err error
+	c.Phrase, err = NormalizePhrase(c.Phrase)
+	if err != nil {
+		return c, err
+	}
 	if c.ModelDir == "" {
 		c.ModelDir = DefaultModelDir()
 	}

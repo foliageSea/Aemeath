@@ -195,8 +195,8 @@ void voice_page_create(lv_obj_t *parent)
         lv_obj_set_pos(s_bars[i], 396 + i * 5, 220);
         lv_obj_add_flag(s_bars[i], LV_OBJ_FLAG_HIDDEN);
     }
-    s_text = label(parent, "说“你好小爱”，或轻触唤醒", C_DIM);
-    copy_text(s_caption, "说“你好小爱”，或轻触唤醒");
+    s_text = label(parent, "语音唤醒，或轻触唤醒", C_DIM);
+    copy_text(s_caption, "语音唤醒，或轻触唤醒");
     lv_obj_set_pos(s_text, 22, 362);
     lv_obj_set_size(s_text, 436, 48);
     lv_obj_set_style_text_align(s_text, LV_TEXT_ALIGN_CENTER, 0);
@@ -238,7 +238,7 @@ void voice_page_tick(void)
             lv_obj_set_style_text_color(s_status, lv_color_hex(s_phase == PH_ERROR ? C_ERROR : C_ACCENT), 0);
         }
         set_caption(snapshot.text[0] ? snapshot.text :
-            (s_phase == PH_IDLE ? "说“你好小爱”，或轻触唤醒" : status_for(s_phase)));
+            (s_phase == PH_IDLE ? "语音唤醒，或轻触唤醒" : status_for(s_phase)));
     }
     if (snapshot.wake_serial != s_wake_seen) {
         s_wake_seen = snapshot.wake_serial;

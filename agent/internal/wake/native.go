@@ -17,6 +17,7 @@ type Detector struct {
 	total, base int64
 	last        Match
 	recent      []float32
+	phrase      string
 }
 
 func New(c Config) (*Detector, error) {
@@ -27,16 +28,20 @@ func New(c Config) (*Detector, error) {
 	if err = verifyModels(c.ModelDir); err != nil {
 		return nil, fmt.Errorf("wake models unavailable: %w; run aemeath-voice-assets", err)
 	}
+	keywords, err := TokensForPhrase(c.Phrase)
+	if err != nil {
+		return nil, err
+	}
 	cfg := sherpa.KeywordSpotterConfig{
 		FeatConfig:     sherpa.FeatureConfig{SampleRate: SampleRate, FeatureDim: 80},
 		ModelConfig:    sherpa.OnlineModelConfig{Transducer: sherpa.OnlineTransducerModelConfig{Encoder: filepath.Join(c.ModelDir, "encoder.onnx"), Decoder: filepath.Join(c.ModelDir, "decoder.onnx"), Joiner: filepath.Join(c.ModelDir, "joiner.onnx")}, Tokens: filepath.Join(c.ModelDir, "tokens.txt"), NumThreads: 1, Provider: "cpu", ModelType: "zipformer2"},
-		MaxActivePaths: 4, KeywordsScore: 1, KeywordsThreshold: float32(c.Threshold), KeywordsBuf: KeywordTokens, KeywordsBufSize: len(KeywordTokens),
+		MaxActivePaths: 4, KeywordsScore: 1, KeywordsThreshold: float32(c.Threshold), KeywordsBuf: keywords, KeywordsBufSize: len(keywords),
 	}
 	s := sherpa.NewKeywordSpotter(&cfg)
 	if s == nil {
 		return nil, fmt.Errorf("sherpa-onnx could not load Chinese wake model")
 	}
-	d := &Detector{spotter: s}
+	d := &Detector{spotter: s, phrase: c.Phrase}
 	d.stream = sherpa.NewKeywordStream(s)
 	if !validNativeStream(d.stream) {
 		d.Close()
@@ -95,7 +100,7 @@ func (d *Detector) Feed(pcm []int16) (bool, error) {
 			return false, err
 		}
 		if r.Keyword != "" {
-			if r.Keyword == Keyword && len(r.Timestamps) > 0 {
+			if r.Keyword == d.phrase && len(r.Timestamps) > 0 {
 				start := d.base + int64(math.Round((r.StartTime+r.Timestamps[0])*SampleRate))
 				end := d.base + int64(math.Round((r.StartTime+r.Timestamps[len(r.Timestamps)-1]+.04)*SampleRate))
 				if end > d.total {
@@ -108,7 +113,7 @@ func (d *Detector) Feed(pcm []int16) (bool, error) {
 					end = start
 				}
 				if end > d.last.EndSample {
-					d.last = Match{Keyword: Keyword, StartSample: start, EndSample: end}
+					d.last = Match{Keyword: d.phrase, StartSample: start, EndSample: end}
 					hit = true
 				}
 			}

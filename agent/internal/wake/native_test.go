@@ -19,6 +19,26 @@ func TestNativeSmoke(t *testing.T) {
 	if dir == "" {
 		dir = DefaultModelDir()
 	}
+	// Custom phrases share the installed model and do not rewrite keywords.txt.
+	before, err := os.ReadFile(filepath.Join(dir, "keywords.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom, err := New(Config{ModelDir: dir, Phrase: "小智同学"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if custom.phrase != "小智同学" {
+		t.Fatal("custom phrase not installed in detector")
+	}
+	if hit, err := custom.Feed(make([]int16, SampleRate)); err != nil || hit {
+		t.Fatalf("custom silence hit=%v err=%v", hit, err)
+	}
+	custom.Close()
+	after, err := os.ReadFile(filepath.Join(dir, "keywords.txt"))
+	if err != nil || string(before) != string(after) {
+		t.Fatal("custom phrase changed installed model assets")
+	}
 	d, err := New(Config{ModelDir: dir})
 	if err != nil {
 		t.Fatal(err)

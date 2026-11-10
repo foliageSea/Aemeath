@@ -5,9 +5,11 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strings"
 
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/voice"
+	"aemeath/agent/internal/wake"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -151,6 +153,14 @@ func (a *nativeUI) voiceDisabled() bool {
 	return !supported || !a.snapshot.Settings.Voice.Enabled || !a.snapshot.Voice.Connected || a.busy["voice-command"]
 }
 
+func (a *nativeUI) savedWakePhrase() string {
+	phrase := strings.TrimSpace(a.snapshot.Settings.Voice.WakePhrase)
+	if phrase == "" {
+		return wake.Keyword
+	}
+	return phrase
+}
+
 func (a *nativeUI) voiceView(c *ui.Context) {
 	t := c.Theme()
 	state := a.snapshot.Voice
@@ -178,7 +188,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 						ui.Icon(c, sidebarVoice).Size(30, 30).TextColor(t.Accent)
 					})
 					ui.Text(c, "和爱弥斯聊一聊").FontSize(22).Bold().TextAlign(ui.Center)
-					ui.Text(c, "说出「你好小爱」，或点击手动唤醒开始对话。").FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
+					ui.Text(c, fmt.Sprintf("说出「%s」，或点击手动唤醒开始对话。", a.savedWakePhrase())).FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
 				})
 			})
 		} else {
@@ -249,7 +259,7 @@ func (a *nativeUI) voiceStatusView(c *ui.Context) {
 	if !a.snapshot.Settings.Voice.Enabled {
 		wake, color = "语音助手尚未启用，填写设置后保存即可开始。", t.TextMuted
 	} else if state.WakeReady {
-		wake, color = "离线唤醒：已就绪 · 请说「你好小爱」", t.Success
+		wake, color = fmt.Sprintf("离线唤醒：已就绪 · 请说「%s」", a.savedWakePhrase()), t.Success
 	}
 	ui.Text(c, wake).FontSize(12).TextColor(color).Wrap()
 	if state.Error != "" {

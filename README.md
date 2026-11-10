@@ -3,7 +3,7 @@
 Go 采集端（macOS / Windows）通过 Wi‑Fi WebSocket 把 CPU、内存、磁盘、网络、温度、GPU 推送到
 Waveshare **ESP32‑S3‑Touch‑LCD‑4B**（480×480 ST7701 + GT911），在 LVGL 多页仪表盘上显示。
 
-新增**爱弥斯语音助手**：监控台采集/播放音频，电脑离线检测“你好，小爱”，通过 MiMo ASR → CloudWeGo Eino / OpenAI 兼容模型 → `mimo-v2.5-tts-voiceclone` 完成对话。唤醒后显示爱弥斯 Q 版动画，按聆听、思考、播报状态切换。
+新增**爱弥斯语音助手**：监控台采集/播放音频，电脑离线检测唤醒词（默认“你好小爱”，可在语音设置中自定义），通过 MiMo ASR → CloudWeGo Eino / OpenAI 兼容模型 → `mimo-v2.5-tts-voiceclone` 完成对话。唤醒后显示爱弥斯 Q 版动画，按聆听、思考、播报状态切换。
 
 → [语音助手安装、配置与运行](docs/voice-agent.md) · [协议约定](docs/voice-contract.md) · [验证记录与限制](docs/voice-validation.md)
 

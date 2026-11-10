@@ -44,7 +44,7 @@ type dependencies struct {
 func productionDependencies() dependencies {
 	return dependencies{
 		newDetector: func(c Config) (detector, error) {
-			return wake.New(wake.Config{ModelDir: c.WakeModelDir, Threshold: c.WakeThreshold})
+			return wake.New(wake.Config{ModelDir: c.WakeModelDir, Threshold: c.WakeThreshold, Phrase: c.WakePhrase})
 		},
 		newVAD:    func(c Config) (vad, error) { return wake.NewVAD(c.WakeModelDir) },
 		newSpeech: configuredSpeech,
@@ -170,7 +170,7 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 					return
 				}
 				rawTranscript := strings.TrimSpace(transcript)
-				transcript = stripWakePrefix(rawTranscript)
+				transcript = stripWakePhrasePrefix(rawTranscript, cfg.WakePhrase)
 				if transcript == "" {
 					if rawTranscript != "" {
 						// Hearing only the wake invocation is a normal invitation to listen,

@@ -12,6 +12,7 @@ import (
 
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/hamcp"
+	"aemeath/agent/internal/wake"
 )
 
 type Config struct {
@@ -34,6 +35,7 @@ type Config struct {
 	FishReferenceText string  `json:"fishReferenceText"`
 	FishLatency       string  `json:"fishLatency"`
 	ReferenceAudio    string  `json:"referenceAudio"`
+	WakePhrase        string  `json:"wakePhrase"`
 	WakeModelDir      string  `json:"wakeModelDir"`
 	WakeThreshold     float64 `json:"wakeThreshold"`
 	Volume            int     `json:"volume"`
@@ -91,6 +93,11 @@ type MemoryHost interface {
 // NormalizeConfig applies local defaults. Credentials and installed assets are
 // checked only when an operation needs them, keeping audio diagnostics usable.
 func NormalizeConfig(c Config) (Config, error) {
+	var phraseErr error
+	c.WakePhrase, phraseErr = wake.NormalizePhrase(c.WakePhrase)
+	if phraseErr != nil {
+		return c, phraseErr
+	}
 	c.LLMBaseURL = strings.TrimRight(strings.TrimSpace(c.LLMBaseURL), "/")
 	c.MiMoBaseURL = strings.TrimRight(strings.TrimSpace(c.MiMoBaseURL), "/")
 	c.LLMAPIKey = strings.TrimSpace(c.LLMAPIKey)

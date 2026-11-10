@@ -100,7 +100,7 @@ func TestNativeWakeInstallProgressAndDraftSurviveNavigation(t *testing.T) {
 	}
 	nativeClick(t, tt, "语音")
 	nativeClick(t, tt, "离线唤醒")
-	if !tt.HasText("已安装 · 你好小爱") || !tt.HasText("保存设置后使用此模型目录。") {
+	if !tt.HasText("已安装 · 中文离线唤醒模型") || !tt.HasText("保存设置后使用此模型目录。") {
 		t.Fatal("missing install result or unapplied path guidance")
 	}
 }

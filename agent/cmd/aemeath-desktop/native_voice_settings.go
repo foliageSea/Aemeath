@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 
+	"aemeath/agent/internal/wake"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -149,6 +151,8 @@ func (a *nativeUI) voiceSynthesisSettingsView(c *ui.Context) {
 }
 
 func (a *nativeUI) voiceWakeSettingsView(c *ui.Context) {
+	a.voiceField(c, "voice-wake-phrase", "唤醒词", wake.Keyword, &a.draft.Voice.WakePhrase, false)
+	ui.Text(c, "留空使用默认唤醒词「你好小爱」。支持 2–12 个模型支持的中文汉字，自动生成拼音；多音字采用默认读音。保存后会重新连接并应用。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 	a.wakeModelsView(c)
 	ui.Field(c.Key("voice-wake-threshold"), "唤醒阈值", func() {
 		if ui.NumberInput(c, &a.draft.Voice.WakeThreshold, 0.01, 1, 0.05).FillWidth().Changed() {

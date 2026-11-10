@@ -151,14 +151,18 @@ func TestVoiceConfigurationRestartJoinsPreviousSession(t *testing.T) {
 		t.Fatal("initial voice session missing")
 	}
 	cfg := s.Snapshot().Settings
-	cfg.Voice.Persona = "新的角色设定"
+	cfg.Voice.WakePhrase = "小智同学"
 	if err := s.SaveSettings(cfg); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case got := <-calls:
-		if got.Persona != cfg.Voice.Persona {
-			t.Fatal("reconnect used old settings")
+		if got.WakePhrase != cfg.Voice.WakePhrase {
+			t.Fatal("reconnect used old wake phrase")
+		}
+		stored, err := loadSettings(s.path)
+		if err != nil || stored.Voice.WakePhrase != cfg.Voice.WakePhrase {
+			t.Fatalf("wake phrase not persisted: %+v, %v", stored.Voice, err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("settings did not restart voice session")

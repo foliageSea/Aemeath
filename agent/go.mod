@@ -12,6 +12,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/k2-fsa/sherpa-onnx-go/v2 v2.0.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/mozillazg/go-pinyin v0.21.0
 	github.com/shirou/gopsutil/v4 v4.26.10
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/yusufpapurcu/wmi v1.2.4

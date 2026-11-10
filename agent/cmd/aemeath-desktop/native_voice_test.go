@@ -23,7 +23,7 @@ func nativeVoiceNavigate(t *testing.T, tt *ui.Tester, label string) {
 		section = "语音识别"
 	case "MiMo", "Fish", "Fish 服务地址", "Fish API 密钥", "Fish 模型", "Fish reference_id", "Fish 参考音频转写", "参考音频路径", "低延迟":
 		section = "语音合成"
-	case "唤醒模型目录", "唤醒阈值", "模型目录与高级选项", "安装唤醒模型":
+	case "唤醒词", "唤醒模型目录", "唤醒阈值", "模型目录与高级选项", "安装唤醒模型":
 		section = "离线唤醒"
 	case "播放音量", "试听文本", "试听语音", "播放参考音频":
 		section = "声音试听"
@@ -73,6 +73,7 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 		{"参考音频路径", "/tmp/voice/reference.wav"},
 		{"唤醒模型目录", "/tmp/voice/models"},
 		{"角色设定", "温柔、简短地回答。"},
+		{"唤醒词", "你好爱弥斯"},
 	}
 	for _, field := range fields {
 		nativeVoiceEdit(t, tt, field.label, field.value)
@@ -96,7 +97,7 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 		}
 	}
 	before := a.draft.Voice
-	gotFields := []string{before.LLMBaseURL, before.LLMAPIKey, before.LLMModel, before.MiMoBaseURL, before.MiMoAPIKey, before.ReferenceAudio, before.WakeModelDir, before.Persona}
+	gotFields := []string{before.LLMBaseURL, before.LLMAPIKey, before.LLMModel, before.MiMoBaseURL, before.MiMoAPIKey, before.ReferenceAudio, before.WakeModelDir, before.Persona, before.WakePhrase}
 	for i, field := range fields {
 		if gotFields[i] != field.value {
 			t.Fatalf("%s input was not bound", field.label)
@@ -126,6 +127,55 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 	nativeComplete(t, updates, tt)
 	if a.dirty {
 		t.Fatal("latest voice draft remained dirty after save")
+	}
+}
+
+func TestNativeWakePhraseEditMarksDirtyAndPersists(t *testing.T) {
+	a, f, updates, tt := nativeTest(t)
+	tt.SetSize(1100, 1000)
+	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "语音")
+	nativeVoiceEdit(t, tt, "唤醒词", "你好爱弥斯")
+	if !a.dirty || a.draft.Voice.WakePhrase != "你好爱弥斯" {
+		t.Fatal("wake phrase edit did not update the draft and dirty state")
+	}
+	nativeClick(t, tt, "保存设置")
+	nativeComplete(t, updates, tt)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.saves) != 1 || f.saves[0].Voice.WakePhrase != "你好爱弥斯" || a.dirty {
+		t.Fatal("wake phrase was not saved through the usual settings path")
+	}
+}
+
+func TestNativeVoiceWakeHintsUseSavedPhrase(t *testing.T) {
+	for _, test := range []struct {
+		name, saved, want string
+	}{
+		{"custom", "你好爱弥斯", "你好爱弥斯"},
+		{"trimmed", " 你好爱弥斯 ", "你好爱弥斯"},
+		{"empty default", "", "你好小爱"},
+		{"blank default", " \t ", "你好小爱"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, f, _, tt := nativeTest(t)
+			a.service = &nativeVoiceFake{nativeFake: f}
+			f.state.Settings.Voice.Enabled = true
+			f.state.Settings.Voice.WakePhrase = test.saved
+			f.state.Voice.Connected, f.state.Voice.WakeReady = true, true
+			a.refresh()
+			a.draft.Voice.WakePhrase = "尚未保存"
+			a.edited()
+			nativeClick(t, tt, "语音助手")
+			for _, text := range []string{
+				"说出「" + test.want + "」，或点击手动唤醒开始对话。",
+				"离线唤醒：已就绪 · 请说「" + test.want + "」",
+			} {
+				if !tt.HasText(text) {
+					t.Fatalf("missing saved wake phrase hint: %s", text)
+				}
+			}
+		})
 	}
 }
 

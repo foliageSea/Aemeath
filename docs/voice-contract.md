@@ -43,6 +43,7 @@ type Config struct {
  FishLatency string `json:"fishLatency"`
  ReferenceAudio string `json:"referenceAudio"`
  WakeModelDir string `json:"wakeModelDir"`
+ WakePhrase string `json:"wakePhrase"` // empty defaults to 你好小爱; trimmed, 2–12 supported Han characters
  WakeThreshold float64 `json:"wakeThreshold"`
  Volume int `json:"volume"`
  Persona string `json:"persona"`
@@ -124,10 +125,11 @@ Engine keeps <=10 complete conversation turns, bounded tool steps, context cance
 
 `internal/wake` owns official sherpa-onnx Go/cgo bindings and model setup:
 ```go
-type Config struct {ModelDir string; Threshold float64}
+type Config struct {ModelDir string; Threshold float64; Phrase string}
 type Detector struct{}
+func NormalizePhrase(phrase string)(string,error) // trim/default; 2–12 supported Han characters
 func New(Config)(*Detector,error)
-func (d *Detector) Feed(pcm []int16)(bool,error) // streaming16k, true iff你好小爱
+func (d *Detector) Feed(pcm []int16)(bool,error) // streaming16k, true on configured phrase
 func (d *Detector) Reset()
 func (d *Detector) Close()
 type VAD struct{}

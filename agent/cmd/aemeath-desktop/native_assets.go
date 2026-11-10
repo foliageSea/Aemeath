@@ -144,7 +144,7 @@ func (a *nativeUI) wakeModelsView(c *ui.Context) {
 	} else if current && state.checked {
 		switch {
 		case state.ready:
-			title, color = "已安装 · 你好小爱", t.Success
+			title, color = "已安装 · 中文离线唤醒模型", t.Success
 		case state.canceled:
 			title = "安装已取消，可重新安装"
 		case errors.Is(state.err, os.ErrNotExist):
