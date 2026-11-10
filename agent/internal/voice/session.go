@@ -47,6 +47,7 @@ type session struct {
 	kwsSamples                 int64
 	capture                    *capture
 	manualFixed                bool
+	recording                  bool
 	muted                      bool
 	nextMic                    uint32
 	jobs                       chan work
@@ -247,6 +248,9 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 				return errors.New("voice ping timeout")
 			}
 		case <-tick.C:
+			if err = s.recordingTimeout(time.Now()); err != nil {
+				return err
+			}
 			if s.active && !s.generationDone && !s.workDeadline.IsZero() && time.Now().After(s.workDeadline.Add(stageGrace)) {
 				if err = s.fail("timeout", errors.New("voice generation exceeded turn deadline")); err != nil {
 					return err
@@ -358,6 +362,8 @@ func (s *session) phase(phase string, notice ...string) error {
 }
 func (s *session) resetCapture() {
 	s.capture = nil
+	s.manualFixed = false
+	s.recording = false
 	s.ring.reset()
 	s.kwsSamples = 0
 	if s.detector != nil {
@@ -485,6 +491,29 @@ func (s *session) submit(kind, text string, pcm []int16) {
 }
 func (s *session) command(c Command) error {
 	switch c.Kind {
+	case "record_start":
+		if s.muted || s.recording {
+			return nil
+		}
+		if err := s.begin(); err != nil {
+			return err
+		}
+		s.capture = &capture{}
+		s.recording = true
+		// A wake-only transcript must not reopen capture after the user releases.
+		s.reprompted = true
+		s.deadline = time.Now().Add(30 * time.Second)
+		return s.phase("listening")
+	case "record_stop":
+		if !s.recording {
+			return nil
+		}
+		return s.stopRecording()
+	case "record_cancel":
+		if !s.recording {
+			return nil
+		}
+		return s.command(Command{Kind: "cancel"})
 	case "wake":
 		if s.muted {
 			return nil
@@ -593,6 +622,15 @@ func (s *session) microphone(b []byte) error {
 	if s.muted {
 		return nil
 	}
+	// Hold recording deliberately bypasses both keyword spotting and VAD.
+	if s.recording {
+		remaining := maxUtteranceSamples - len(s.capture.pcm)
+		s.capture.pcm = append(s.capture.pcm, f.PCM[:min(remaining, len(f.PCM))]...)
+		if len(s.capture.pcm) >= maxUtteranceSamples {
+			return s.stopRecording()
+		}
+		return nil
+	}
 	// Keep keyword spotting live during recording, cloud work and playback.
 	// A second invocation cancels the turn; it must not start a new capture or
 	// send the cancellation keyword to ASR. Idle spotting below still wakes.
@@ -672,6 +710,28 @@ func (s *session) microphone(b []byte) error {
 	}
 	return nil
 }
+
+// stopRecording consumes the capture before submitting so repeated release events
+// cannot queue the same utterance twice. Empty holds never initialize cloud work.
+func (s *session) stopRecording() error {
+	pcm := s.capture.pcm
+	s.capture = nil
+	s.recording = false
+	if len(pcm) == 0 {
+		return s.finishNoQuestion()
+	}
+	s.deadline = time.Now().Add(cloudWorkBudget + stageGrace)
+	s.submit("utterance", "", pcm)
+	return s.phase("recognizing")
+}
+
+func (s *session) recordingTimeout(now time.Time) error {
+	if s.recording && !now.Before(s.deadline) {
+		return s.stopRecording()
+	}
+	return nil
+}
+
 func (s *session) control(b []byte) error {
 	m, err := decodeMessage(b)
 	if err != nil {

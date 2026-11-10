@@ -62,6 +62,65 @@ func TestCanceledVoiceToolDoesNotDropTelemetry(t *testing.T) {
 	}
 }
 
+func TestVoiceCommandRecordingAllowlist(t *testing.T) {
+	s := testService(t, testDeps())
+	s.mu.Lock()
+	s.state.Settings.Voice.Enabled = true
+	s.state.Voice.Connected = true
+	s.voiceCommands = make(chan voice.Command, 8)
+	s.mu.Unlock()
+	for _, kind := range []string{"record_start", "record_stop", "record_cancel"} {
+		if err := s.VoiceCommand(kind, ""); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if got := <-s.voiceCommands; got.Kind != kind || got.Text != "" {
+			t.Fatalf("queued %+v", got)
+		}
+	}
+	for _, kind := range []string{"record", "record_end", "Record_Start", ""} {
+		if err := s.VoiceCommand(kind, ""); err == nil {
+			t.Fatalf("accepted unknown command %q", kind)
+		}
+	}
+	if len(s.voiceCommands) != 0 {
+		t.Fatal("unknown command was queued")
+	}
+}
+
+func TestVoiceRecordingCommandsRespectServiceAvailability(t *testing.T) {
+	for _, kind := range []string{"record_start", "record_stop", "record_cancel"} {
+		t.Run(kind, func(t *testing.T) {
+			s := testService(t, testDeps())
+			if err := s.VoiceCommand(kind, ""); err == nil {
+				t.Fatal("accepted while disabled")
+			}
+			s.mu.Lock()
+			s.state.Settings.Voice.Enabled = true
+			s.mu.Unlock()
+			if err := s.VoiceCommand(kind, ""); !errors.Is(err, ErrOffline) {
+				t.Fatalf("offline: %v", err)
+			}
+			s.mu.Lock()
+			s.state.Voice.Connected = true
+			s.voiceCommands = make(chan voice.Command, 1)
+			s.voiceCommands <- voice.Command{Kind: "wake"}
+			s.mu.Unlock()
+			if err := s.VoiceCommand(kind, ""); err == nil {
+				t.Fatal("accepted with full queue")
+			}
+			s.mu.Lock()
+			s.closed = true
+			s.mu.Unlock()
+			if err := s.VoiceCommand(kind, ""); !errors.Is(err, ErrClosed) {
+				t.Fatalf("closed: %v", err)
+			}
+			s.mu.Lock()
+			s.closed = false
+			s.mu.Unlock()
+		})
+	}
+}
+
 func enableTestVoice(t *testing.T, s *Service) {
 	t.Helper()
 	settings := s.Snapshot().Settings

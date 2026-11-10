@@ -100,7 +100,7 @@ func (s *Service) VoiceConversation() []brain.MemoryTurn { return s.memory.Turns
 // VoiceCommand queues user actions without blocking a UI or background sampler.
 func (s *Service) VoiceCommand(kind, text string) error {
 	switch kind {
-	case "wake", "cancel", "clear", "preview", "reference":
+	case "wake", "cancel", "clear", "preview", "reference", "record_start", "record_stop", "record_cancel":
 	default:
 		return fmt.Errorf("unknown voice command %q", kind)
 	}

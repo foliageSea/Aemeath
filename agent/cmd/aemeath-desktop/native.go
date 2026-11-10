@@ -40,6 +40,10 @@ type nativeUI struct {
 	details              bool
 	quotaList            ui.ListState
 	quotaUnsaved         bool
+	voiceHold            bool
+	voiceHoldRepeat      bool
+	voiceHoldSession     uint64
+	voiceHoldStartTurn   uint32
 	voicePreview         string
 	visibleKeys          map[string]bool
 	settingsTab          int
@@ -142,12 +146,28 @@ func (a *nativeUI) subscriptions() []desktop.Subscription {
 	return list
 }
 func (a *nativeUI) view(c *ui.Context) {
+	// Once the new turn leaves listening, the backend has already ended the
+	// hold (limit, mute, cancellation or error). Do not keep showing recording.
+	if a.voiceHold && a.snapshot.Voice.Turn != a.voiceHoldStartTurn && a.snapshot.Voice.Phase != "listening" && a.snapshot.Voice.Phase != "wake" {
+		a.voiceHold = false
+	}
+	if a.voiceHold && (a.page != "语音助手" || !a.snapshot.Voice.Connected || a.snapshot.Voice.Session != a.voiceHoldSession) {
+		a.endVoiceHold(true)
+	}
+	startHold := a.page == "语音助手" && c.Shortcut(0, ui.KeyF8) && a.startVoiceHold()
 	t := c.Theme()
 	if a.noticePending {
 		c.Toast(a.notice)
 		a.noticePending = false
 	}
-	ui.Row(c).Fill().AlignItems(ui.Stretch).Background(t.Background).Children(func() {
+	root := ui.Row(c.Key("app-root")).Fill().AlignItems(ui.Stretch).Background(t.Background).Focusable().TabStop(false).ObserveInput(a.voiceHoldInput)
+	if startHold {
+		root.Focus()
+	}
+	if a.voiceHold && root.FocusLeft() {
+		a.endVoiceHold(true)
+	}
+	root.Children(func() {
 		a.sidebar(c)
 		ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Padding(20).Gap(14).Children(func() {
 			a.header(c)

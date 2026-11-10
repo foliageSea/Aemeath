@@ -45,6 +45,9 @@ func nativeVoicePhase(phase string) string {
 }
 
 func (a *nativeUI) voiceCommand(kind, text string) {
+	if a.voiceHold {
+		a.endVoiceHold(true)
+	}
 	service, ok := a.service.(nativeVoiceService)
 	if !ok {
 		a.notify("当前服务不支持语音操作，请更新桌面应用。")
@@ -214,6 +217,11 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 		}
 		ui.Column(c.Key("voice-controls")).Label("语音操作栏").FillWidth().Shrink(0).Padding(14, 16).Gap(12).Radius(18).Border(1, t.Border.Alpha(0.5)).Background(t.Surface).Children(func() {
 			a.voiceStatusView(c)
+			holdHint := "按住 F8 说话 · 松开识别并发送 · 最长 30 秒"
+			if a.voiceHold {
+				holdHint = "正在按住录音 · 松开 F8 发送 · Esc 取消"
+			}
+			ui.Text(c, holdHint).FontSize(12).TextColor(t.Accent).Wrap()
 			if state.Notice != "" {
 				ui.Text(c, state.Notice).FontSize(12).Wrap().MaxLines(2).Ellipsis("…")
 			}

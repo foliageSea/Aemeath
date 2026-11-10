@@ -80,7 +80,9 @@ func main() {
 		cancelVoiceAssets = native.cancelWakeAssets
 		win = mygo.NewWindow(mygo.WindowOptions{Title: "Aemeath", Content: ui.View(native.view), Width: 1100, Height: 800, MinWidth: 760, MinHeight: 600, Hidden: mygo.App.WasOpenedAtLogin(), StateKey: "main-native"})
 		native.update = win.Update
+		win.OnBlur(func() { native.endVoiceHold(true) })
 		win.OnClose(func(e *mygo.CloseEvent) {
+			native.endVoiceHold(true)
 			if !quitting {
 				e.PreventDefault()
 				win.Hide()
