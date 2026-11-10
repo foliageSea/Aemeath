@@ -11,6 +11,8 @@ import (
 
 func nativeToolName(name string) string {
 	switch name {
+	case "get_current_time":
+		return "查询当前时间"
 	case "get_metrics":
 		return "查询系统指标"
 	case "get_quota":
@@ -152,6 +154,14 @@ func (a *nativeUI) voiceToolCallView(c *ui.Context, index int, call brain.ToolCa
 			}
 			entry.toolDetails[call.ID] = !entry.toolDetails[call.ID]
 		})
+		if call.Name == "get_current_time" && !expanded {
+			if report, ok := brain.ParseCurrentTimeReport(call.Result); ok && report.OK {
+				ui.Text(c, report.Summary()).FontSize(11).TextColor(t.TextMuted).Wrap()
+				if report.Info.Source == "system_fallback" {
+					ui.Text(c, "电脑系统时间 · 外部时间暂不可用").FontSize(11).TextColor(t.Warning).Wrap()
+				}
+			}
+		}
 		if expanded {
 			ui.Column(c).FillWidth().MinWidth(0).Padding(4, 10, 8).Gap(6).Children(func() {
 				ui.Text(c, call.Name).FontSize(11).TextColor(t.TextMuted)
@@ -169,7 +179,15 @@ func (a *nativeUI) voiceToolCallView(c *ui.Context, index int, call brain.ToolCa
 						result = "等待工具返回…"
 					}
 				}
-				ui.Text(c, result).FontSize(11).Wrap().Selectable()
+				if call.Name == "get_current_time" {
+					if report, ok := brain.ParseCurrentTimeReport(result); ok && report.OK {
+						a.voiceCurrentTimeView(c, report)
+					} else {
+						ui.Text(c, result).FontSize(11).Wrap().Selectable()
+					}
+				} else {
+					ui.Text(c, result).FontSize(11).Wrap().Selectable()
+				}
 			})
 		}
 	})

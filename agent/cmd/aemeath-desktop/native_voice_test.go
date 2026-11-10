@@ -17,7 +17,7 @@ func nativeVoiceNavigate(t *testing.T, tt *ui.Tester, label string) {
 	switch label {
 	case "启用语音助手", "角色设定":
 		section = "基础设置"
-	case "OpenAI 服务地址", "OpenAI API 密钥", "对话模型", "允许查询监控与控制设备":
+	case "OpenAI 服务地址", "OpenAI API 密钥", "对话模型", "启用 Agent 工具":
 		section = "对话服务"
 	case "MiMo 服务地址", "MiMo API 密钥":
 		section = "语音识别"
@@ -78,7 +78,7 @@ func TestNativeVoiceSettingsMaskedAndSavedWithoutLosingNewEdits(t *testing.T) {
 		nativeVoiceEdit(t, tt, field.label, field.value)
 	}
 	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "启用语音助手")
-	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "允许查询监控与控制设备")
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "启用 Agent 工具")
 	nativeClick(t, tt, "离线唤醒")
 	nativeClick(t, tt, "唤醒阈值")
 	tt.Key(ui.Cmd, ui.KeyA)

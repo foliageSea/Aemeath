@@ -94,11 +94,12 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 	a.voiceField(c, "voice-llm-key", "OpenAI API 密钥", "输入 API 密钥", &cfg.LLMAPIKey, true)
 	a.voiceField(c, "voice-llm-model", "对话模型", "填写服务提供的模型名称", &cfg.LLMModel, false)
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "允许查询监控与控制设备").Grow(1).MinWidth(0).Wrap()
-		if ui.Switch(c.Key("voice-tools"), &cfg.LLMTools).Label("允许查询监控与控制设备").Changed() {
+		ui.Text(c, "启用 Agent 工具").Grow(1).MinWidth(0).Wrap()
+		if ui.Switch(c.Key("voice-tools"), &cfg.LLMTools).Label("启用 Agent 工具").Changed() {
 			a.edited()
 		}
 	})
+	ui.Text(c, "支持时间查询、查询系统与额度，以及控制设备和电脑锁屏。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 }
 
 func (a *nativeUI) voiceRecognitionSettingsView(c *ui.Context) {

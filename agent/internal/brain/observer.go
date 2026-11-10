@@ -60,11 +60,23 @@ func startTool(ctx context.Context, name, args string) func(string, error) {
 			}
 			if json.Unmarshal([]byte(result), &outcome) == nil && outcome.OK != nil && !*outcome.OK {
 				event.Status, event.Result = "failed", "操作未成功，请检查系统支持和权限"
+				if name == "get_current_time" {
+					if report, ok := ParseCurrentTimeReport(result); ok {
+						event.Result = report.Message
+					}
+				}
 				if name == "lock_computer" {
 					event.Result = "锁屏请求未能提交，请检查系统支持和权限；电脑锁屏状态尚未确认"
 				}
 			} else {
 				switch name {
+				case "get_current_time":
+					if report, ok := ParseCurrentTimeReport(result); ok && report.OK {
+						data, _ := json.Marshal(report)
+						event.Result = string(data)
+					} else {
+						event.Status, event.Result = "failed", "时间结果无效，请重新查询"
+					}
 				case "get_metrics":
 					event.Result = "已读取系统指标"
 				case "get_quota":
@@ -91,6 +103,20 @@ func toolArguments(name, args string) string {
 		return ""
 	}
 	switch name {
+	case "get_current_time":
+		var input struct {
+			Timezone string `json:"timezone,omitempty"`
+		}
+		if decodeArgs(args, &input) == nil && len(input.Timezone) <= 128 {
+			input.Timezone = normalizeTimeZone(input.Timezone)
+			if input.Timezone == "" || input.Timezone == "Local" {
+				return "{}"
+			}
+			if _, err := time.LoadLocation(input.Timezone); err == nil {
+				data, _ := json.Marshal(input)
+				return string(data)
+			}
+		}
 	case "lock_computer", "get_metrics", "get_quota":
 		return "{}"
 	case "set_page":

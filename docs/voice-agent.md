@@ -94,7 +94,9 @@ CGO_ENABLED=1 go run ./cmd/aemeath-agent -voice-config voice.local.json -addr ae
 - 结束后角色页停留 3 秒再恢复原页面。临时亮屏不覆盖持久亮度设置；手动切页或屏幕操作优先于自动恢复。
 - 只保留最近 10 轮完整文字上下文，清空或重启会话后不保留历史录音。
 
-Agent 工具包括 `get_metrics`、`get_quota`、`set_page`、`set_screen` 和 `lock_computer`；不包含任意 shell 或文件执行。启用“允许查询监控与控制设备”后，可以说“你好小爱，帮我锁屏”或“锁定这台电脑”。`lock_computer` 无参数，作用于运行 Agent 的电脑当前登录会话；`set_screen` 仍控制 ESP32 监控台屏幕。锁屏工具仅在用户明确要求电脑锁屏时使用，返回结构化的请求提交成功/失败结果，不把请求提交当作已验证最终锁屏状态。macOS 使用系统原生锁屏接口（旧系统可用 CGSession），Windows 使用 LockWorkStation；其他平台明确返回不支持。开启工具时先用独立的短工具选择请求完成 ReAct 工具调用，再以禁止工具的流式请求生成最终正文；选择过程、推理内容和工具参数不会朗读。这会比无工具模式多一次选择请求；无工具模式直接使用单次 SSE。切页协议没有设备页面 ACK，工具会说明指令已发送，而非声称已确认切页。
+Agent 工具包括 `get_metrics`、`get_quota`、`set_page`、`set_screen`、`lock_computer` 和 `get_current_time`；不包含任意 shell 或文件执行。在“设置 → 语音 → 对话服务”启用“启用 Agent 工具”并保存后，可以说“你好小爱，帮我锁屏”或“锁定这台电脑”。`lock_computer` 无参数，作用于运行 Agent 的电脑当前登录会话；`set_screen` 仍控制 ESP32 监控台屏幕。锁屏工具仅在用户明确要求电脑锁屏时使用，返回结构化的请求提交成功/失败结果，不把请求提交当作已验证最终锁屏状态。macOS 使用系统原生锁屏接口（旧系统可用 CGSession），Windows 使用 LockWorkStation；其他平台明确返回不支持。开启工具时先用独立的短工具选择请求完成 ReAct 工具调用，再以禁止工具的流式请求生成最终正文；选择过程、推理内容和工具参数不会朗读。这会比无工具模式多一次选择请求；无工具模式直接使用单次 SSE。切页协议没有设备页面 ACK，工具会说明指令已发送，而非声称已确认切页。
+
+时间感知可说“你好小爱，现在北京时间几点？”或“纽约现在是星期几？”。`get_current_time` 接受可选的 `timezone`（IANA 时区，如 `Asia/Shanghai`、`Asia/Tokyo`、`America/New_York`，省略使用电脑本机时区；也支持北京时间等常用别名）。每次查询从固定的 timeapi.io HTTPS 服务读取 UTC 时刻，再按指定时区转换，返回日期、中文星期、UTC 偏移、夏令时状态和 Unix 时间。网络请求最多等待 4 秒，失败时明确回退电脑系统时间；取消对话会取消查询，不会把取消当作正常回退。工具卡片显示查询当时的时间与来源，历史记录不会随时钟刷新，也不会调整电脑时钟或创建定时任务。无需额外 API 密钥。
 
 ## 6. MiMo 和参考音频
 

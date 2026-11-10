@@ -80,6 +80,8 @@ Snapshots may carry `Notice` (`json:"notice,omitempty"`) for ordinary listening 
 
 The `lock_computer` Function Call has an empty argument object and calls Host.LockComputer for the machine running the Agent. Structured `{ok,message}` results reflect OS request submission, not visual verification of a completed lock screen. Cancelled/invalid calls do not invoke the OS; normal system refusal is returned as ok:false so the final assistant can explain failure. macOS/Windows use native session-lock operations; unsupported platforms report failure without display-sleep substitutes or arbitrary command text.
 
+The `get_current_time` Function Call accepts optional `timezone` (IANA or supported city alias; omitted/Local selects the host timezone). Every call obtains a fresh UTC observation over a fixed timeapi.io HTTPS endpoint with a four-second request budget, then projects it using bundled IANA timezone data. `{ok,info,message?}` exposes dateTime/utc/unix/timezone/utcOffset/weekday/date/time/isDST/source/provider/notice. Source is `network` or explicit `system_fallback`; failures of the external service fall back to the local clock with a notice, while parent cancellation/deadline propagates without fallback. ToolCall.Result retains the bounded report for time/source cards. The tool does not set the clock or create scheduled tasks.
+
 `internal/voiceapi` owns MiMo, WAV and resampling:
 ```go
 type Client struct {}

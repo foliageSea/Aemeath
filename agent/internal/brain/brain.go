@@ -50,6 +50,10 @@ type Engine struct {
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
+	return newWithTime(ctx, cfg, host, defaultCurrentTime)
+}
+
+func newWithTime(ctx context.Context, cfg Config, host Host, currentTime currentTimeFunc) (*Engine, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -85,7 +89,8 @@ func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
 		if host == nil {
 			return nil, errors.New("brain: device tools require a host")
 		}
-		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: cm, decision: cm}, ToolsConfig: compose.ToolsNodeConfig{Tools: deviceTools(host), ExecuteSequentially: true}, MaxStep: maxSteps})
+		e.persona += "\n" + currentTimeInstructions
+		e.agent, err = react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: cm, decision: cm}, ToolsConfig: compose.ToolsNodeConfig{Tools: append(deviceTools(host), currentTimeTool(currentTime)), ExecuteSequentially: true}, MaxStep: maxSteps})
 		if err != nil {
 			return nil, errors.New("brain: cannot initialize Eino ReAct tools")
 		}
@@ -142,7 +147,11 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		hist = hist[len(hist)-2*(maxTurns-1):]
 	}
 	input := make([]*schema.Message, 0, len(hist)+2)
-	input = append(input, schema.SystemMessage(e.persona))
+	persona := e.persona
+	if e.agent != nil {
+		persona += "\n本机日期提示（未进行外部校时）：" + time.Now().Format("2006-01-02")
+	}
+	input = append(input, schema.SystemMessage(persona))
 	input = append(input, hist...)
 	input = append(input, schema.UserMessage(text))
 	var out *schema.Message
