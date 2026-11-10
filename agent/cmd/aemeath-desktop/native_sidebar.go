@@ -81,26 +81,29 @@ func (a *nativeUI) sidebarValues() [5]string {
 func (a *nativeUI) sidebar(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c.Key("sidebar")).Width(206).Shrink(0).Padding(12, 10).Gap(3).Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(0.5)).Children(func() {
-		a.sidebarItem(c, "nav-overview", "概览", sidebarOverview, "")
-		count := ""
-		if n := len(a.subscriptions()); n > 0 {
-			count = fmt.Sprint(n)
-		}
-		a.sidebarItem(c, "nav-subscriptions", "订阅", sidebarSubscriptions, count)
-		a.sidebarItem(c, "nav-voice", "语音助手", sidebarVoice, "")
-		ui.Text(c, "系统").FontSize(11).TextColor(t.TextMuted).Padding(15, 7, 5)
-		a.sidebarItem(c, "nav-settings", "设置", sidebarSettings, "")
-		ui.Text(c, "硬件").FontSize(11).TextColor(t.TextMuted).Padding(15, 7, 5)
-		values := a.sidebarValues()
-		icons := []*ui.SVG{sidebarCPU, sidebarMemory, sidebarGPU, sidebarDisk, sidebarNetwork}
-		for i, label := range []string{"CPU", "内存", "GPU", "磁盘", "网络"} {
-			ui.Row(c.Key("sidebar-metric-"+label)).FillWidth().Height(31).Padding(3, 7).Gap(9).AlignItems(ui.Center).Children(func() {
-				sidebarIcon(c, icons[i], metricColor(i))
-				ui.Text(c, label).FontSize(13).Grow(1).MinWidth(0).SingleLine()
-				ui.Text(c, values[i]).FontSize(12).TextColor(t.TextMuted).SingleLine()
+		ui.Scroll(c.Key("sidebar-navigation")).Grow(1).MinHeight(0).Children(func() {
+			ui.Column(c).FillWidth().Gap(3).Children(func() {
+				a.sidebarItem(c, "nav-overview", "概览", sidebarOverview, "")
+				count := ""
+				if n := len(a.subscriptions()); n > 0 {
+					count = fmt.Sprint(n)
+				}
+				a.sidebarItem(c, "nav-subscriptions", "订阅", sidebarSubscriptions, count)
+				a.sidebarItem(c, "nav-voice", "语音助手", sidebarVoice, "")
+				ui.Text(c, "系统").FontSize(11).TextColor(t.TextMuted).Padding(15, 7, 5)
+				a.sidebarItem(c, "nav-settings", "设置", sidebarSettings, "")
+				ui.Text(c, "硬件").FontSize(11).TextColor(t.TextMuted).Padding(15, 7, 5)
+				values := a.sidebarValues()
+				icons := []*ui.SVG{sidebarCPU, sidebarMemory, sidebarGPU, sidebarDisk, sidebarNetwork}
+				for i, label := range []string{"CPU", "内存", "GPU", "磁盘", "网络"} {
+					ui.Row(c.Key("sidebar-metric-"+label)).FillWidth().Height(31).Padding(3, 7).Gap(9).AlignItems(ui.Center).Children(func() {
+						sidebarIcon(c, icons[i], metricColor(i))
+						ui.Text(c, label).FontSize(13).Grow(1).MinWidth(0).SingleLine()
+						ui.Text(c, values[i]).FontSize(12).TextColor(t.TextMuted).SingleLine()
+					})
+				}
 			})
-		}
-		ui.Box(c).Grow(1)
+		})
 		host, detail := "本机", ""
 		if m := a.snapshot.Metrics; m != nil {
 			if m.Host != "" {
@@ -114,30 +117,24 @@ func (a *nativeUI) sidebar(c *ui.Context) {
 				detail += fmt.Sprintf(" · %dh", *m.Uptime/3600)
 			}
 		}
-		ui.Column(c).FillWidth().Padding(7, 7).Gap(4).Children(func() {
+		ui.Column(c).FillWidth().Shrink(0).Padding(7, 7).Gap(4).Children(func() {
 			ui.Text(c, host).FontSize(12).Bold().MaxLines(1).Ellipsis("…")
 			if detail != "" {
 				ui.Text(c, detail).FontSize(11).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 			}
 		})
+		a.sidebarConnection(c)
 		label := "启动服务"
 		if a.snapshot.Running {
 			label = "停止服务"
 		}
-		button := ui.Button(c.Key("service-toggle"), "").Label(label).Tooltip(nativeStatus(a.snapshot.Status)).BorderWidth(0).Background(ui.Color{}).FillWidth().Height(31).Padding(3, 7).Gap(9).Radius(7).AlignItems(ui.Center).Justify(ui.Start).Disabled(a.busy["service"])
+		button := ui.Button(c.Key("service-toggle"), "").Label(label).BorderWidth(0).Background(ui.Color{}).FillWidth().Shrink(0).Height(31).Padding(3, 7).Gap(9).Radius(7).AlignItems(ui.Center).Justify(ui.Start).Disabled(a.busy["service"])
 		if button.Hovered() {
 			button.Background(t.SurfaceHover)
 		}
 		button.Children(func() {
 			ui.Icon(c, sidebarPower).Size(20, 20).TextColor(t.TextMuted)
 			ui.Text(c, label).FontSize(12).Grow(1).SingleLine()
-			color := t.TextMuted
-			if a.snapshot.Connected {
-				color = metricColor(1)
-			} else if a.snapshot.Running {
-				color = t.Warning
-			}
-			ui.Box(c).Size(6, 6).Radius(3).Background(color)
 		}).OnClick(func() {
 			work := a.service.Start
 			if a.snapshot.Running {

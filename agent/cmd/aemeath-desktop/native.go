@@ -68,6 +68,9 @@ func copySettings(s desktop.Settings) desktop.Settings {
 // refresh runs on the UI thread and never replaces the user's draft.
 func (a *nativeUI) refresh() {
 	a.snapshot = a.service.Snapshot()
+	if a.snapshot.Error == "" {
+		a.details = false
+	}
 	a.recordMetrics()
 	a.recordVoice()
 	if !a.busy["login"] {
@@ -142,12 +145,6 @@ func (a *nativeUI) view(c *ui.Context) {
 		a.sidebar(c)
 		ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Padding(20).Gap(14).Children(func() {
 			a.header(c)
-			if a.snapshot.Error != "" {
-				ui.Button(c.Key("connection-details"), "连接异常 · 查看详情").TextColor(t.Warning).OnClick(func() { a.details = !a.details })
-				if a.details {
-					ui.Text(c, "设备连接："+a.snapshot.Error).FontSize(12).TextColor(t.TextMuted).Wrap()
-				}
-			}
 			if a.page == "订阅" {
 				a.quotaListView(c)
 				return

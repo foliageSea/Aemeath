@@ -63,11 +63,6 @@ func (a *nativeUI) header(c *ui.Context) {
 			}
 			ui.Text(c, host).FontSize(12).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		})
-		state, color := "离线", t.TextMuted
-		if a.snapshot.Connected {
-			state, color = "已连接", t.Success
-		}
-		ui.Text(c, "● "+state).FontSize(11).TextColor(color).Background(color.Alpha(0.1)).Padding(5, 9).Radius(12)
 		pageIndex := 0
 		for i, page := range nativePageNames {
 			if a.snapshot.Page == page {
