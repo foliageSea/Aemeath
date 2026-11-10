@@ -62,6 +62,8 @@ type work struct {
 	pcm        []int16
 }
 type result struct {
+	generation  uint64
+	toolCall    *brain.ToolCall
 	turn        uint32
 	phase, text string
 	pcm         []int16
@@ -82,6 +84,7 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 			return false
 		}
 		r.turn = w.turn
+		r.generation = w.generation
 		select {
 		case out <- r:
 			return true

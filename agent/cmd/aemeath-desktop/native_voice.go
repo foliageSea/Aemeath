@@ -3,6 +3,10 @@ package main
 import (
 	"fmt"
 	"math"
+	"reflect"
+	"slices"
+
+	"aemeath/agent/internal/voice"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -53,8 +57,11 @@ func (a *nativeUI) voiceCommand(kind, text string) {
 }
 
 type nativeVoiceTurn struct {
+	id                   uint64
 	turn                 uint32
 	transcript, response string
+	state                voice.State
+	toolDetails          map[uint64]bool
 }
 
 // Keep a bounded, in-memory transcript of turns observed by this window.
@@ -69,15 +76,31 @@ func (a *nativeUI) recordVoice() {
 	if s.Transcript == "" {
 		return
 	}
-	next := nativeVoiceTurn{s.Turn, s.Transcript, s.Response}
+	s.ToolCalls = slices.Clone(s.ToolCalls)
+	next := nativeVoiceTurn{turn: s.Turn, transcript: s.Transcript, response: s.Response, state: s}
 	n := len(a.voiceHistory)
-	if n > 0 && a.voiceHistory[n-1] == next {
+	if n > 0 && reflect.DeepEqual(a.voiceHistory[n-1].state, next.state) {
 		return
 	}
 	follow := a.voiceScroll.Y >= a.voiceScroll.MaxY-8
 	if n > 0 && a.voiceHistory[n-1].turn == s.Turn {
+		next.id = a.voiceHistory[n-1].id
+		next.toolDetails = a.voiceHistory[n-1].toolDetails
 		a.voiceHistory[n-1] = next
 	} else {
+		// A snapshot may skip a terminal tool event when the next turn starts quickly.
+		// Archive it as unknown, rather than claiming it is still running or succeeded.
+		if n > 0 {
+			for i := range a.voiceHistory[n-1].state.ToolCalls {
+				call := &a.voiceHistory[n-1].state.ToolCalls[i]
+				if call.Status == "running" {
+					call.Status, call.Result = "unknown", "本轮已结束，未收到工具的最终结果。"
+				}
+			}
+		}
+		a.voiceNextID++
+		next.id = a.voiceNextID
+		next.toolDetails = map[uint64]bool{}
 		a.voiceHistory = append(a.voiceHistory, next)
 		if len(a.voiceHistory) > 100 {
 			a.voiceHistory = a.voiceHistory[1:]
@@ -129,8 +152,9 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 			ui.Scroll(c.Key("voice-messages")).Label("对话记录").FillWidth().Grow(1).MinHeight(0).TrackScroll(&a.voiceScroll).Children(func() {
 				ui.Column(c).FillWidth().Padding(4, 8, 12).Gap(18).Children(func() {
 					for i, turn := range a.voiceHistory {
-						ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", i))).FillWidth().Gap(12).Children(func() {
+						ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().Gap(12).Children(func() {
 							a.voiceBubble(c, "你", turn.transcript, true)
+							a.voiceTurnProcessView(c, i)
 							if turn.response != "" {
 								a.voiceBubble(c, "爱弥斯", turn.response, false)
 							} else if turn.turn == state.Turn && (state.Phase == "thinking" || state.Phase == "recognizing") {
@@ -148,8 +172,12 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 			}
 			ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
-					ui.Text(c, nativeVoicePhase(state.Phase)).FontSize(12).Bold()
-					ui.Text(c, "通过设备麦克风与你对话").FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+					ui.Text(c, nativeVoiceActivity(state)).FontSize(12).Bold().Wrap()
+					if state.Turn > 0 && !(a.voiceCleared && state.Turn == a.voiceClearTurn) {
+						a.voiceLiveProgressView(c)
+					} else {
+						ui.Text(c, "通过设备麦克风与你对话").FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+					}
 				})
 				ui.Button(c.Key("voice-cancel"), "取消对话").Height(36).FontSize(12).Disabled(disabled).OnClick(func() { a.voiceCommand("cancel", "") })
 				ui.PrimaryButton(c.Key("voice-wake"), "手动唤醒").Height(36).Padding(8, 18).FontSize(13).Disabled(disabled).OnClick(func() { a.voiceCommand("wake", "") })

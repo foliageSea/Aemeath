@@ -26,6 +26,15 @@ type State struct {
 	LastSent    int64 `json:"lastSent"`
 }
 
+// Clone returns a snapshot with independently owned nested values.
+func (s State) Clone() State {
+	s.Settings.Subscriptions = append([]Subscription{}, s.Settings.Subscriptions...)
+	s.Metrics = cloneMetrics(s.Metrics)
+	s.Quota = cloneQuota(s.Quota)
+	s.Voice = s.Voice.Clone()
+	return s
+}
+
 func copyPtr[T any](p *T) *T {
 	if p == nil {
 		return nil

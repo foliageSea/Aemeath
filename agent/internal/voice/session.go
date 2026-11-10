@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"aemeath/agent/internal/brain"
+
 	"github.com/coder/websocket"
 )
 
@@ -51,6 +53,7 @@ type session struct {
 	results                    chan result
 	cancelTurn                 context.CancelFunc
 	generation                 uint64
+	toolStarted                map[uint64]time.Time
 	active                     bool
 	play                       *playback
 	deadline                   time.Time
@@ -90,13 +93,18 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	}
 	s := &session{cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16)}
 	defer func() {
+		status := "canceled"
+		if retErr != nil && !errors.Is(retErr, context.Canceled) {
+			status = "failed"
+		}
+		s.finishTools(status)
 		s.state.Connected = false
 		s.state.WakeReady = false
 		if retErr != nil && !errors.Is(retErr, context.Canceled) {
 			s.state.Error = s.safe(retErr.Error())
 			s.state.Phase = "error"
 		}
-		s.emit(s.state)
+		s.emitState()
 	}()
 	if !cfg.Enabled {
 		s.state.Phase = "disabled"
@@ -344,7 +352,7 @@ func (s *session) phase(phase string, notice ...string) error {
 		s.stageStarted = time.Now()
 		s.deadline = s.stageStarted.Add(budget + stageGrace)
 	}
-	s.emit(s.state)
+	s.emitState()
 	return s.send(message{Type: "state", Turn: s.state.Turn, State: phase, Text: s.state.Notice})
 }
 func (s *session) resetCapture() {
@@ -358,7 +366,65 @@ func (s *session) resetCapture() {
 		s.vad.Reset()
 	}
 }
+
+// emitState transfers an owned snapshot to consumers on other goroutines.
+func (s *session) emitState() {
+	s.emit(s.state.Clone())
+}
+
+func (s *session) finishTools(status string) {
+	for i := range s.state.ToolCalls {
+		call := &s.state.ToolCalls[i]
+		if call.Status == "running" {
+			call.Status = status
+			call.Millis = max(1, call.Millis)
+			if status == "failed" {
+				call.Result = "工具调用失败"
+			} else {
+				call.Result = "工具调用已取消"
+			}
+			if started, ok := s.toolStarted[call.ID]; ok {
+				call.Millis = max(1, call.Millis, time.Since(started).Milliseconds())
+			}
+		}
+	}
+	s.toolStarted = nil
+}
+
+func (s *session) updateTool(call brain.ToolCall) {
+	if call.ID == 0 {
+		return
+	}
+	for i := range s.state.ToolCalls {
+		if s.state.ToolCalls[i].ID == call.ID {
+			if s.state.ToolCalls[i].Status != "running" {
+				return
+			}
+			s.state.ToolCalls[i] = call
+			if call.Status != "running" {
+				delete(s.toolStarted, call.ID)
+			}
+			s.emitState()
+			return
+		}
+	}
+	// Keep the first 32 calls so later completion events cannot reinsert an
+	// evicted call or lose an earlier running entry.
+	if len(s.state.ToolCalls) >= 32 {
+		return
+	}
+	s.state.ToolCalls = append(s.state.ToolCalls, call)
+	if call.Status == "running" {
+		if s.toolStarted == nil {
+			s.toolStarted = make(map[uint64]time.Time)
+		}
+		s.toolStarted[call.ID] = time.Now()
+	}
+	s.emitState()
+}
+
 func (s *session) abort(notify bool) error {
+	s.finishTools("canceled")
 	if s.cancelTurn != nil {
 		s.cancelTurn()
 		s.cancelTurn = nil
@@ -380,6 +446,7 @@ func (s *session) begin() error {
 	if err := s.abort(true); err != nil {
 		return err
 	}
+	s.state.ToolCalls = nil
 	s.state.Turn++
 	if s.state.Turn == 0 {
 		s.state.Turn = 1
@@ -444,6 +511,7 @@ func (s *session) command(c Command) error {
 			return err
 		}
 		s.generation++
+		s.state.ToolCalls = nil
 		s.state.Transcript = ""
 		s.state.Response = ""
 		s.state.Error = s.diagnostic
@@ -464,6 +532,7 @@ func (s *session) command(c Command) error {
 	}
 }
 func (s *session) fail(code string, err error) error {
+	s.finishTools("failed")
 	if phaseBudget(s.state.Phase) > 0 && !s.stageStarted.IsZero() {
 		s.recordStageMillis(s.state.Phase, max(1, time.Since(s.stageStarted).Milliseconds()))
 	}
@@ -664,7 +733,11 @@ func (s *session) recordStageMillis(stage string, millis int64) {
 }
 
 func (s *session) result(r result) error {
-	if !s.active || r.turn != s.state.Turn {
+	if !s.active || r.turn != s.state.Turn || r.generation != s.generation {
+		return nil
+	}
+	if r.toolCall != nil {
+		s.updateTool(*r.toolCall)
 		return nil
 	}
 	if r.err != nil {
@@ -677,12 +750,12 @@ func (s *session) result(r result) error {
 	case "transcript":
 		s.state.Transcript = r.text
 		s.state.ASRMillis = r.millis
-		s.emit(s.state)
+		s.emitState()
 		return s.send(message{Type: "transcript", Turn: r.turn, Text: r.text})
 	case "response":
 		s.state.Response = r.text
 		s.state.AgentMillis = r.millis
-		s.emit(s.state)
+		s.emitState()
 		return s.send(message{Type: "response", Turn: r.turn, Text: r.text})
 	case "audio_stream_start":
 		return s.startAudioStream()
@@ -700,7 +773,7 @@ func (s *session) result(r result) error {
 		s.state.TTSMillis = r.millis
 		s.state.GeneratedSegments++
 		s.queuedAudio = append(s.queuedAudio, speechClip{pcm: r.pcm, text: r.text})
-		s.emit(s.state)
+		s.emitState()
 		return s.nextSegment(false)
 	case "audio":
 		s.generationDone = true

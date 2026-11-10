@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"aemeath/agent/internal/brain"
 )
 
 type streamingBrain interface {
@@ -23,7 +25,12 @@ func (e *pipelineFailure) Unwrap() error { return e.err }
 // playback. Eight text slots cover the full segment budget without holding an
 // LLM stream open waiting for a slow TTS. PCM is capped across the entire reply.
 func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, text, reference string, emit func(context.Context, result) bool) error {
+	// Tool events use the same bounded, cancellation-aware channel as the other
+	// worker results. They never enter the sentence splitter or speech input.
 	ctx, cancel := context.WithCancelCause(parent)
+	ctx = brain.WithToolObserver(ctx, func(call brain.ToolCall) {
+		emit(ctx, result{toolCall: &call})
+	})
 	defer cancel(nil)
 	agentCtx, stopAgent := context.WithTimeout(ctx, agentBudget)
 	defer stopAgent()

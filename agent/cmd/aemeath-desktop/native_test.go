@@ -29,6 +29,7 @@ func (f *nativeFake) Snapshot() desktop.State {
 	defer f.mu.Unlock()
 	s := f.state
 	s.Settings = copySettings(s.Settings)
+	s.Voice = s.Voice.Clone()
 	return s
 }
 func (f *nativeFake) Start() error {

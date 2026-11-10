@@ -41,6 +41,7 @@ type nativeUI struct {
 	voicePreview   string
 	settingsTab    int
 	voiceHistory   []nativeVoiceTurn
+	voiceNextID    uint64
 	voiceScroll    ui.ScrollState
 	voiceCleared   bool
 	voiceClearTurn uint32

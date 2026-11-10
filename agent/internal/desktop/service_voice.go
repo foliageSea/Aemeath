@@ -42,7 +42,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 		if s.conn == conn && ctx.Err() == nil {
 			previous := s.state.Voice
 			report = state.Error != "" && (state.Error != previous.Error || state.Turn != previous.Turn || state.Phase != previous.Phase)
-			s.state.Voice = state
+			s.state.Voice = state.Clone()
 		}
 		s.mu.Unlock()
 		if report {
@@ -69,7 +69,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 				err = errors.New("voice connection ended")
 			}
 			s.mu.RLock()
-			state := s.state.Voice
+			state := s.state.Voice.Clone()
 			s.mu.RUnlock()
 			state.Connected, state.WakeReady, state.Phase, state.Error = false, false, "error", err.Error()
 			emit(state)

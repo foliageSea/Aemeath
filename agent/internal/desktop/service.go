@@ -118,11 +118,7 @@ func newService(path string, settings Settings, deps dependencies) *Service {
 func (s *Service) Snapshot() State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := s.state
-	out.Settings.Subscriptions = append([]Subscription{}, s.state.Settings.Subscriptions...)
-	out.Metrics = cloneMetrics(out.Metrics)
-	out.Quota = cloneQuota(out.Quota)
-	return out
+	return s.state.Clone()
 }
 
 // Start is idempotent and starts asynchronous discovery, connection and retry.
