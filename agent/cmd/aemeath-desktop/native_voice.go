@@ -223,7 +223,6 @@ func (a *nativeUI) voiceStatusView(c *ui.Context) {
 func (a *nativeUI) voicePreviewView(c *ui.Context) {
 	t, state := c.Theme(), a.snapshot.Voice
 	disabled := a.voiceDisabled()
-	ui.Text(c, "操作使用已保存的设置；修改后请先保存。").FontSize(12).TextColor(t.TextMuted).Wrap()
 	ui.TextInput(c.Key("voice-preview-text"), &a.voicePreview).Label("试听文本").Placeholder("输入试听文本，留空使用默认问候语").FillWidth()
 	ui.Row(c).Gap(8).Children(func() {
 		ui.Button(c.Key("voice-preview"), "试听语音").Disabled(disabled).OnClick(func() { a.voiceCommand("preview", a.voicePreview) })

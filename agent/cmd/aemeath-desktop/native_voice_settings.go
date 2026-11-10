@@ -7,17 +7,17 @@ import (
 )
 
 type nativeVoiceSettingsGroup struct {
-	key, title, description string
-	icon                    *ui.SVG
+	key, title string
+	icon       *ui.SVG
 }
 
 var nativeVoiceSettingsGroups = []nativeVoiceSettingsGroup{
-	{"general", "基础设置", "启用语音助手并设置爱弥斯的角色与回答偏好。", sidebarSettings},
-	{"conversation", "对话服务", "配置对话模型，以及查询和控制设备的工具权限。", sidebarSVG("<path d='M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-3 3V11.5A8.5 8.5 0 0 1 9.5 3h3A8.5 8.5 0 0 1 21 11.5Z'/><path d='M6 9h10M6 13h7'/>")},
-	{"recognition", "语音识别", "配置 MiMo 服务，将设备录到的语音转换为文字。", sidebarSVG("<path d='M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4'/>")},
-	{"synthesis", "语音合成", "选择合成服务，配置音色和参考音频。", sidebarSVG("<path d='m11 5-6 4H2v6h3l6 4V5ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14'/>")},
-	{"wake", "离线唤醒", "安装本地唤醒模型并调整唤醒灵敏度。", sidebarVoice},
-	{"preview", "声音试听", "调整播放音量，试听声音并检查播放状态。", sidebarSVG("<circle cx='12' cy='12' r='9'/><path d='m10 8 6 4-6 4V8Z'/>")},
+	{"general", "基础设置", sidebarSettings},
+	{"conversation", "对话服务", sidebarSVG("<path d='M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-3 3V11.5A8.5 8.5 0 0 1 9.5 3h3A8.5 8.5 0 0 1 21 11.5Z'/><path d='M6 9h10M6 13h7'/>")},
+	{"recognition", "语音识别", sidebarSVG("<path d='M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4'/>")},
+	{"synthesis", "语音合成", sidebarSVG("<path d='m11 5-6 4H2v6h3l6 4V5ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14'/>")},
+	{"wake", "离线唤醒", sidebarVoice},
+	{"preview", "声音试听", sidebarSVG("<circle cx='12' cy='12' r='9'/><path d='m10 8 6 4-6 4V8Z'/>")},
 }
 
 func (a *nativeUI) voiceSettingsView(c *ui.Context) {
@@ -47,10 +47,7 @@ func (a *nativeUI) voiceSettingsView(c *ui.Context) {
 		group := nativeVoiceSettingsGroups[a.voiceSettingsSection]
 		ui.Scroll(c.Key("voice-settings-" + group.key)).Label(group.title + "设置内容").Grow(1).MinWidth(0).MinHeight(0).TrackScroll(&a.voiceSettingsScroll[a.voiceSettingsSection]).Children(func() {
 			ui.Column(c).FillWidth().MinWidth(0).Gap(14).Children(func() {
-				ui.Column(c).FillWidth().MinWidth(0).Gap(5).Children(func() {
-					ui.Text(c, group.title).FontSize(18).Bold()
-					ui.Text(c, group.description).FontSize(11).TextColor(t.TextMuted).Wrap()
-				})
+				ui.Text(c, group.title).FontSize(18).Bold()
 				ui.Column(c.Key(group.key + "-form")).FillWidth().MinWidth(0).Padding(18).Gap(12).Radius(14).Background(t.Surface).Children(func() {
 					switch a.voiceSettingsSection {
 					case 1:
@@ -101,7 +98,6 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 	})
 	ui.Text(c, "支持时间查询、网页搜索、查询系统与额度，以及控制设备和电脑锁屏。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 	a.voiceField(c, "voice-tavily-key", "Tavily API 密钥", "tvly-…", &cfg.TavilyAPIKey, true)
-	ui.Text(c, "网页搜索使用 Tavily。填写密钥并保存后生效；未配置时仍可使用时间查询和设备工具。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 }
 
 func (a *nativeUI) voiceRecognitionSettingsView(c *ui.Context) {
@@ -109,7 +105,6 @@ func (a *nativeUI) voiceRecognitionSettingsView(c *ui.Context) {
 	ui.Text(c, "MiMo").Bold()
 	a.voiceField(c, "voice-mimo-url", "MiMo 服务地址", "填写 MiMo 服务地址", &cfg.MiMoBaseURL, false)
 	a.voiceField(c, "voice-mimo-key", "MiMo API 密钥", "输入 API 密钥", &cfg.MiMoAPIKey, true)
-	ui.Text(c, "此配置同时用于语音识别和 MiMo 语音合成。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 }
 
 func (a *nativeUI) voiceSynthesisSettingsView(c *ui.Context) {
