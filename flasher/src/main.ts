@@ -340,7 +340,7 @@ async function loadManifest() {
   el.badge.textContent = "固件 v" + m.version;
   const total = m.parts.reduce((n, p) => n + p.size, 0);
   fillInfo(el.releaseMeta, [
-    ["版本", m.version + (m.projectVersion ? `（${m.projectVersion}）` : "")],
+    ["版本", m.version + (m.projectVersion && m.projectVersion !== m.version ? `（${m.projectVersion}）` : "")],
     ["构建时间", new Date(m.builtAt).toLocaleString()],
     ["ESP-IDF", m.idfVersion ?? "未知"],
     ["Flash 参数", `${m.flash.mode} / ${m.flash.size} / ${m.flash.freq}`],
