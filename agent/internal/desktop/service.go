@@ -16,6 +16,7 @@ import (
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/collect"
 	"aemeath/agent/internal/discover"
+	"aemeath/agent/internal/hamcp"
 	"aemeath/agent/internal/link"
 	"aemeath/agent/internal/magpie"
 	"aemeath/agent/internal/proto"
@@ -35,6 +36,8 @@ type connection interface {
 	Close()
 }
 type dependencies struct {
+	haClient                            func(hamcp.Config) (haConnection, error)
+	haEvery                             time.Duration
 	sample                              func(context.Context) proto.Frame
 	close                               func()
 	find                                func(context.Context) (string, error)
@@ -65,6 +68,8 @@ type Service struct {
 	connCtx       context.Context
 	updates       chan struct{}
 	quotaWake     chan struct{}
+	haWake        chan struct{}
+	haCancel      context.CancelFunc
 	voiceCommands chan voice.Command
 	memory        *brain.Memory // voice conversation; outlives each device connection
 	catalog       *brain.ModelCatalog
@@ -124,7 +129,9 @@ func newService(path string, settings Settings, deps dependencies) *Service {
 	s.memory = brain.OpenMemory(memoryPath)
 	s.catalog = brain.NewModelCatalog(catalogPath)
 	s.refreshModelCatalog(settings.Voice)
-	s.wg.Add(3)
+	s.haWake = make(chan struct{}, 1)
+	s.wg.Add(4)
+	go s.homeAssistantLoop()
 	go s.sampleLoop()
 	go s.quotaLoop()
 	go s.modelCatalogLoop()
@@ -223,6 +230,13 @@ func (s *Service) SaveSettings(settings Settings) error {
 	s.mu.Lock()
 	old := s.state.Settings
 	s.state.Settings = normalized
+	haChanged := homeAssistantConfig(old.Voice) != homeAssistantConfig(normalized.Voice)
+	if haChanged {
+		s.state.Voice.HomeAssistant = hamcp.Status{}
+		if s.haCancel != nil {
+			s.haCancel()
+		}
+	}
 	if (old.Address != normalized.Address || old.Voice != normalized.Voice) && s.attemptCancel != nil {
 		s.attemptCancel()
 	}
@@ -230,6 +244,9 @@ func (s *Service) SaveSettings(settings Settings) error {
 		s.state.Quota, s.state.QuotaError = nil, ""
 	}
 	s.mu.Unlock()
+	if haChanged {
+		signal(s.haWake)
+	}
 	s.refreshModelCatalog(normalized.Voice)
 	signal(s.updates)
 	if old.MagpieURL != normalized.MagpieURL {

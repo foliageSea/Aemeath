@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"aemeath/agent/internal/brain"
+	"aemeath/agent/internal/hamcp"
 	"aemeath/agent/internal/sessionlock"
 	"aemeath/agent/internal/voice"
 	"aemeath/agent/internal/wake"
@@ -23,7 +24,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	s.mu.Lock()
 	cfg := s.state.Settings.Voice
 	if !cfg.Enabled {
-		s.state.Voice = voice.State{Phase: "disabled"}
+		s.state.Voice = voice.State{Phase: "disabled", HomeAssistant: s.state.Voice.HomeAssistant}
 		s.voiceCommands = nil
 		s.mu.Unlock()
 		close(done)
@@ -31,13 +32,14 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	}
 	commands := make(chan voice.Command, 8)
 	s.voiceCommands = commands
-	s.state.Voice = voice.State{Phase: "connecting"}
+	s.state.Voice = voice.State{Phase: "connecting", HomeAssistant: s.state.Voice.HomeAssistant}
 	s.mu.Unlock()
 	run := s.deps.voiceRun
 	if run == nil {
 		run = voice.Run
 	}
 	var session uint64
+	var lastHA hamcp.Status
 	emit := func(state voice.State) {
 		state.Session = session
 		s.mu.Lock()
@@ -45,6 +47,11 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 		if s.conn == conn && ctx.Err() == nil {
 			previous := s.state.Voice
 			report = state.Error != "" && (state.Error != previous.Error || state.Turn != previous.Turn || state.Phase != previous.Phase)
+			if state.HomeAssistant == lastHA {
+				state.HomeAssistant = previous.HomeAssistant
+			} else {
+				lastHA = state.HomeAssistant
+			}
 			s.state.Voice = state.Clone()
 		}
 		s.mu.Unlock()
@@ -65,6 +72,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 		}()
 		for ctx.Err() == nil {
 			session = s.voiceSession.Add(1)
+			lastHA = hamcp.Status{}
 			err := run(ctx, address, cfg, voiceHost{s}, commands, emit)
 			if ctx.Err() != nil {
 				return
