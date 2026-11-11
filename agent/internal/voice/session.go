@@ -491,6 +491,20 @@ func (s *session) submit(kind, text string, pcm []int16) {
 }
 func (s *session) command(c Command) error {
 	switch c.Kind {
+	case "text":
+		text := strings.TrimSpace(c.Text)
+		if text == "" || len(c.Text) > 4096 {
+			return nil
+		}
+		if err := s.begin(); err != nil {
+			return err
+		}
+		s.state.Transcript = text
+		if err := s.send(message{Type: "transcript", Turn: s.state.Turn, Text: text}); err != nil {
+			return err
+		}
+		s.submit("text", text, nil)
+		return s.phase("thinking")
 	case "record_start":
 		if s.muted || s.recording {
 			return nil
@@ -823,7 +837,7 @@ func (s *session) recordStageMillis(stage string, millis int64) {
 }
 
 func (s *session) result(r result) error {
-	if r.turn != s.state.Turn || r.generation != s.generation {
+	if r.turn != s.state.Turn || r.generation != s.generation || (!s.active && r.phase != "context") {
 		return nil
 	}
 	if r.context != nil {

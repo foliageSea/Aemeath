@@ -57,6 +57,9 @@ type nativeUI struct {
 	voiceHoldSession         uint64
 	voiceHoldStartTurn       uint32
 	voicePreview             string
+	voiceText                string
+	voiceTextRevision        uint64
+	voiceTextSubmit          bool
 	visibleKeys              map[string]bool
 	settingsTab              int
 	assistantSettingsSection int

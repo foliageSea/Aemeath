@@ -107,7 +107,8 @@ func TestNativeVoiceSkippedToolCompletionDoesNotStayRunning(t *testing.T) {
 func TestNativeVoiceFailureRemainsInHistoricalExecutionCard(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(1100, 1800)
-	f.state.Voice = voice.State{Session: 1, Turn: 1, Phase: "error", ErrorStage: "synthesizing", Error: "语音服务暂时不可用 [http_error] HTTP 503", Transcript: "第一问", Response: "第一答", AgentMillis: 120, TTSMillis: 250}
+	f.state.Settings.Voice.Enabled = true
+	f.state.Voice = voice.State{Connected: true, Session: 1, Turn: 1, Phase: "error", ErrorStage: "synthesizing", Error: "语音服务暂时不可用 [http_error] HTTP 503", Transcript: "第一问", Response: "第一答", AgentMillis: 120, TTSMillis: 250}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
 	for _, text := range []string{"语音处理失败", "失败阶段：语音合成", "失败原因：" + f.state.Voice.Error, "第一答", "250 ms"} {

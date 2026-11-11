@@ -100,12 +100,18 @@ func (s *Service) VoiceConversation() []brain.MemoryTurn { return s.memory.Turns
 // VoiceCommand queues user actions without blocking a UI or background sampler.
 func (s *Service) VoiceCommand(kind, text string) error {
 	switch kind {
-	case "wake", "cancel", "clear", "preview", "reference", "record_start", "record_stop", "record_cancel":
+	case "wake", "cancel", "clear", "preview", "reference", "record_start", "record_stop", "record_cancel", "text":
 	default:
 		return fmt.Errorf("unknown voice command %q", kind)
 	}
 	if len(text) > 4096 {
-		return errors.New("voice preview text is too long")
+		return errors.New("voice command text is too long (maximum 4096 bytes)")
+	}
+	if kind == "text" {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return errors.New("voice command text must not be empty")
+		}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()

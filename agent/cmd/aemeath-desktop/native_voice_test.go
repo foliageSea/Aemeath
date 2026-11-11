@@ -226,8 +226,13 @@ func TestNativeVoiceCompactHeaderKeepsTwoRows(t *testing.T) {
 						count++
 					}
 				}
-				if count != 1 {
-					t.Fatalf("wake status rendered %d times, want once", count)
+				wantCount := 1
+				if !state.enabled {
+					// Both the wake header and composer footer explain the disabled assistant.
+					wantCount = 2
+				}
+				if count != wantCount {
+					t.Fatalf("wake status rendered %d times, want %d", count, wantCount)
 				}
 			}
 		}
@@ -360,6 +365,11 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	}
 	tt.SetSize(1100, 3200)
 	for _, label := range []string{"手动唤醒", "取消对话", "清空对话"} {
+		if label == "取消对话" {
+			f.state.Voice.Phase = "listening"
+			a.refresh()
+			tt.Frame()
+		}
 		info, ok := tt.AccessByRole(ui.RoleButton, label)
 		if !ok || info.Disabled {
 			t.Fatalf("manual diagnosis command disabled without models: %s", label)
@@ -422,6 +432,24 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	}
 }
 
+func TestNativeVoiceCancelVisibilityFollowsPhase(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	a.service = &nativeVoiceFake{nativeFake: f}
+	f.state.Settings.Voice.Enabled = true
+	f.state.Voice.Connected = true
+	nativeClick(t, tt, "语音助手")
+	for _, phase := range []string{"", "idle", "wake", "listening", "recognizing", "thinking", "synthesizing", "speaking", "error", "idle"} {
+		f.state.Voice.Phase = phase
+		a.refresh()
+		tt.Frame()
+		want := phase != "" && phase != "idle" && phase != "error"
+		button, found := tt.AccessByRole(ui.RoleButton, "取消对话")
+		if found != want || (found && button.Disabled) {
+			t.Fatalf("phase %q cancel visibility/enabled = %v/%v, want visible=%v", phase, found, !button.Disabled, want)
+		}
+	}
+}
+
 func TestNativeRetryOnlySynthesizesSavedReply(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	voiceService := &nativeVoiceFake{nativeFake: f}
@@ -432,6 +460,9 @@ func TestNativeRetryOnlySynthesizesSavedReply(t *testing.T) {
 	f.state.Voice.Response = "这条回复已经完成，只重新合成声音。"
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
+	if _, ok := tt.AccessByRole(ui.RoleButton, "取消对话"); ok {
+		t.Fatal("error composer exposes cancel alongside retry")
+	}
 	nativeClick(t, tt, "重试回复语音")
 	nativeComplete(t, updates, tt)
 	voiceService.mu.Lock()
@@ -462,6 +493,7 @@ func TestNativeListeningNoticeIsNotAnError(t *testing.T) {
 func TestNativeVoiceOfflineAndUnsupportedControls(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	f.state.Settings.Voice.Enabled = true
+	f.state.Voice.Phase = "listening"
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
 	for _, label := range []string{"手动唤醒", "取消对话", "清空对话"} {
@@ -493,7 +525,10 @@ func TestNativeVoiceMinimumWindowAndScrollableSettings(t *testing.T) {
 	a, _, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
 	nativeClick(t, tt, "语音助手")
-	for _, label := range []string{"语音屏", "手动唤醒", "取消对话", "语音设置"} {
+	if _, ok := tt.AccessByRole(ui.RoleButton, "取消对话"); ok {
+		t.Fatal("idle composer exposes cancel")
+	}
+	for _, label := range []string{"语音屏", "手动唤醒", "语音设置"} {
 		r, ok := tt.Find(label)
 		if !ok || r.W <= 0 || r.X < 206 || r.X+r.W > 760 || r.Y+r.H > 600 {
 			t.Fatalf("voice control outside minimum window: %s %+v", label, r)

@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -59,6 +60,60 @@ func TestCanceledVoiceToolDoesNotDropTelemetry(t *testing.T) {
 				t.Fatal("canceling one tool dropped telemetry link")
 			}
 		})
+	}
+}
+
+func TestVoiceCommandTextValidation(t *testing.T) {
+	s := testService(t, testDeps())
+	s.mu.Lock()
+	s.state.Settings.Voice.Enabled = true
+	s.state.Voice.Connected = true
+	s.voiceCommands = make(chan voice.Command, 8)
+	s.mu.Unlock()
+	for _, text := range []string{"", " \n\t", "\u3000", strings.Repeat("a", 4097), strings.Repeat("界", 1366), " " + strings.Repeat("a", 4096)} {
+		if err := s.VoiceCommand("text", text); err == nil {
+			t.Fatalf("accepted invalid input of %d bytes", len(text))
+		}
+		if len(s.voiceCommands) != 0 {
+			t.Fatal("invalid text was queued")
+		}
+	}
+	for _, text := range []string{" \n 你好 \t", strings.Repeat("a", 4096), strings.Repeat("界", 1365) + "a"} {
+		if err := s.VoiceCommand("text", text); err != nil {
+			t.Fatal(err)
+		}
+		if got := <-s.voiceCommands; got.Kind != "text" || got.Text != strings.TrimSpace(text) {
+			t.Fatalf("queued %+v", got)
+		}
+	}
+	for i := 0; i < cap(s.voiceCommands); i++ {
+		s.voiceCommands <- voice.Command{Kind: "cancel"}
+	}
+	if err := s.VoiceCommand("text", "hello"); err == nil {
+		t.Fatal("accepted command with full queue")
+	}
+}
+
+func TestVoiceTextCommandsRespectServiceAvailability(t *testing.T) {
+	s := testService(t, testDeps())
+	if err := s.VoiceCommand("text", "hello"); err == nil {
+		t.Fatal("accepted while disabled")
+	}
+	s.mu.Lock()
+	s.state.Settings.Voice.Enabled = true
+	s.mu.Unlock()
+	if err := s.VoiceCommand("text", "hello"); !errors.Is(err, ErrOffline) {
+		t.Fatalf("offline: %v", err)
+	}
+	s.mu.Lock()
+	s.state.Voice.Connected = true
+	s.mu.Unlock()
+	if err := s.VoiceCommand("text", "hello"); !errors.Is(err, ErrOffline) {
+		t.Fatalf("missing queue: %v", err)
+	}
+	s.Close()
+	if err := s.VoiceCommand("text", "hello"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("closed: %v", err)
 	}
 }
 

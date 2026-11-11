@@ -68,7 +68,7 @@ func TestNativeTimeCardKeepsCompactControlsVisible(t *testing.T) {
 	tt.SetSize(760, 577)
 	report := currentTimeCardFixture(t, "system_fallback")
 	data, _ := json.Marshal(report)
-	f.state.Voice = voice.State{Turn: 1, Transcript: "查询现在时间", ToolCalls: []brain.ToolCall{{ID: 1, Name: "get_current_time", Status: "succeeded", Result: string(data), Millis: 4000}}}
+	f.state.Voice = voice.State{Turn: 1, Phase: "thinking", Transcript: "查询现在时间", ToolCalls: []brain.ToolCall{{ID: 1, Name: "get_current_time", Status: "succeeded", Result: string(data), Millis: 4000}}}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
 	nativeClick(t, tt, "第 1 轮工具详情 查询当前时间 #1")

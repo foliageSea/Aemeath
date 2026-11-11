@@ -54,7 +54,16 @@ func (a *nativeUI) voiceCommand(kind, text string) {
 		a.notify("当前服务不支持语音操作，请更新桌面应用。")
 		return
 	}
+	textRevision := a.voiceTextRevision
 	a.run("voice-command", func() error { return service.VoiceCommand(kind, text) }, func() {
+		if kind == "text" {
+			if a.voiceTextRevision == textRevision {
+				a.voiceText = ""
+			}
+			a.voiceScroll.Y = math.MaxFloat32
+			a.notify("文本消息已发送。")
+			return
+		}
 		if kind == "clear" {
 			a.voiceHistory = nil
 			a.voiceCleared, a.voiceClearTurn = true, a.snapshot.Voice.Turn
@@ -211,6 +220,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 					voiceAvatar(c, 88)
 					ui.Text(c, "和爱弥斯聊一聊").FontSize(22).Bold().TextAlign(ui.Center)
 					ui.Text(c, fmt.Sprintf("说出「%s」，或点击手动唤醒开始对话。", a.savedWakePhrase())).FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
+					ui.Text(c, "也可以在下方输入文字开始对话。").FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
 				})
 			})
 		} else {
@@ -236,28 +246,110 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 				})
 			})
 		}
-		ui.Column(c.Key("voice-controls")).Label("语音操作栏").FillWidth().Shrink(0).Padding(14, 16).Gap(12).Radius(18).Border(1, t.Border.Alpha(0.5)).Background(t.Surface).Children(func() {
-			ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(8, 8).Shrink(0).Radius(4).Background(nativeVoicePhaseColor(t, state))
-				ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
-					ui.Text(c, nativeVoiceActivity(state)).FontSize(14).Bold().Wrap()
-					if state.Turn > 0 && !(a.voiceCleared && state.Turn == a.voiceClearTurn && state.Session == a.voiceClearSession) {
-						a.voiceLiveStatusView(c)
-					} else {
-						ui.Text(c, "通过设备麦克风与你对话").FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
-					}
-				})
-				ui.Row(c).Shrink(0).Gap(8).AlignItems(ui.Center).Children(func() {
-					if state.Phase == "error" && state.Response != "" {
-						voiceIconButton(c, "voice-retry-response", "重试回复语音", voiceRetryIcon, false, disabled, func() { a.voiceCommand("preview", state.Response) })
-					}
-					voiceIconButton(c, "voice-cancel", "取消对话", voiceCancelIcon, false, disabled, func() { a.voiceCommand("cancel", "") })
-					voiceIconButton(c, "voice-wake", "手动唤醒", sidebarVoice, true, disabled, func() { a.voiceCommand("wake", "") })
-				})
-			})
-			a.voiceContextView(c)
-			a.voiceNoticeView(c)
+		a.voiceControlsView(c)
+	})
+}
+
+func (a *nativeUI) sendVoiceText() {
+	text := strings.TrimSpace(a.voiceText)
+	if a.voiceDisabled() || text == "" {
+		return
+	}
+	if len(text) > 4096 {
+		a.notify("文本消息过长，请缩短后重试（最多 4096 字节）。")
+		return
+	}
+	a.voiceCommand("text", text)
+}
+
+func (a *nativeUI) voiceControlsView(c *ui.Context) {
+	t := c.Theme()
+	card := ui.Column(c.Key("voice-controls")).Label("语音操作栏").FillWidth().Shrink(0).MinWidth(0).Radius(16).Border(1, t.Border.Alpha(0.55)).Background(t.Surface)
+	if card.FocusWithin() {
+		card.BorderColor(t.Accent.Alpha(0.55))
+	}
+	card.Children(func() {
+		a.voiceTextInputView(c)
+		a.voiceContextView(c)
+		_, supported := a.service.(nativeVoiceService)
+		if !supported || a.snapshot.Voice.Error != "" || a.voiceGlobalError != "" || a.snapshot.Voice.Notice != "" {
+			ui.Column(c.Key("voice-notices")).FillWidth().MinWidth(0).Padding(0, 16, 12).Gap(4).Children(func() { a.voiceNoticeView(c) })
+		}
+	})
+}
+
+func nativeVoiceCanCancel(phase string) bool {
+	switch phase {
+	case "wake", "listening", "recognizing", "thinking", "synthesizing", "speaking":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *nativeUI) voiceComposerStatus() string {
+	state := a.snapshot.Voice
+	if !a.snapshot.Settings.Voice.Enabled {
+		return "助手未启用"
+	}
+	if !state.Connected {
+		if state.Phase == "connecting" {
+			return "正在连接…"
+		}
+		return "连接已断开"
+	}
+	if a.voiceHold {
+		return "正在录音 · 松开快捷键发送"
+	}
+	if state.Phase == "speaking" && state.GeneratedSegments > 0 {
+		return fmt.Sprintf("正在播放回复 · 已播 %d/%d 段", state.PlayedSegments, state.GeneratedSegments)
+	}
+	return nativeVoiceActivity(state)
+}
+
+func (a *nativeUI) voiceTextInputView(c *ui.Context) {
+	t, state := c.Theme(), a.snapshot.Voice
+	width, _ := c.Size()
+	ui.Column(c.Key("voice-text-composer")).FillWidth().MinWidth(0).Padding(14, 16, 10).Gap(8).Children(func() {
+		input := ui.TextArea(c.Key("voice-text-input"), &a.voiceText).Label("文本消息").Placeholder("输入消息…").FillWidth().MinWidth(0).Padding(0).BorderWidth(0).Background(ui.Color{}).Radius(0).FontSize(14).FixedLineHeight(20)
+		inputWidth := input.Bounds().W
+		if inputWidth <= 0 {
+			inputWidth = max(160, width-280)
+		}
+		// Include a final glyph so a trailing newline gets its own editable line.
+		_, lineHeight := c.MeasureText(inputWidth, ui.Span{Text: "M", Size: 14})
+		_, textHeight := c.MeasureText(inputWidth, ui.Span{Text: a.voiceText + " ", Size: 14})
+		lines := float32(math.Ceil(float64(textHeight / max(1, lineHeight))))
+		input.Height(max(2, min(6, lines)) * 20).MinHeight(40)
+		input.OnTextKey(func(k ui.TextKey) bool {
+			if k.Key != ui.KeyEnter || k.Mods != 0 {
+				return false
+			}
+			a.voiceTextSubmit = true
+			return true
 		})
+		if input.Changed() {
+			a.voiceTextRevision++
+		}
+		ui.Row(c.Key("voice-composer-actions")).FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+				if width >= 900 {
+					ui.Text(c, "Enter 发送 · Shift+Enter 换行").Label("文本输入快捷键").FontSize(11).TextColor(t.TextMuted).SingleLine()
+				}
+			})
+			if state.Phase == "error" && state.Response != "" {
+				voiceIconButton(c, "voice-retry-response", "重试回复语音", voiceRetryIcon, false, a.voiceDisabled(), func() { a.voiceCommand("preview", state.Response) })
+			}
+			if nativeVoiceCanCancel(state.Phase) || a.voiceHold {
+				voiceIconButton(c, "voice-cancel", "取消对话", voiceCancelIcon, false, a.voiceDisabled(), func() { a.voiceCommand("cancel", "") })
+			}
+			voiceIconButton(c, "voice-wake", "手动唤醒", sidebarVoice, false, a.voiceDisabled(), func() { a.voiceCommand("wake", "") })
+			ui.PrimaryButton(c.Key("voice-text-send"), "↑ 发送").Label("发送文本消息").Height(36).Padding(0, 14).Radius(18).Shrink(0).Disabled(a.voiceDisabled() || strings.TrimSpace(a.voiceText) == "").OnClick(a.sendVoiceText)
+		})
+		if a.voiceTextSubmit {
+			a.voiceTextSubmit = false
+			a.sendVoiceText()
+		}
 	})
 }
 

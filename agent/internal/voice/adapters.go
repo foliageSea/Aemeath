@@ -204,7 +204,14 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 					fail("recognizing", errors.New("transcript too long"))
 					return
 				}
+				text = transcript
 				if !publish(w, result{phase: "transcript", text: transcript, millis: time.Since(start).Milliseconds()}) {
+					return
+				}
+			}
+			if w.kind == "utterance" || w.kind == "text" {
+				if w.kind == "text" && (text == "" || len(w.text) > 4096) {
+					fail("thinking", errors.New("empty or oversized text input"))
 					return
 				}
 				if cfg.LLMModel == "" {
@@ -214,10 +221,10 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 				if !publish(w, result{phase: "thinking"}) {
 					return
 				}
-				start = time.Now()
-				stageStarted = start
+				stageStarted = time.Now()
 				agentCtx, stopAgent := context.WithTimeout(w.ctx, agentBudget)
 				defer stopAgent()
+				var err error
 				if engine == nil {
 					engine, err = d.newBrain(agentCtx, cfg, host)
 					if err != nil {
@@ -226,7 +233,7 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 					}
 				}
 				stopAgent()
-				err = segmentedSpeech(w.ctx, engine, speech, transcript, cfg.ReferenceAudio, func(c context.Context, r result) bool {
+				err = segmentedSpeech(w.ctx, engine, speech, text, cfg.ReferenceAudio, func(c context.Context, r result) bool {
 					chunkWork := w
 					chunkWork.ctx = c
 					return publish(chunkWork, r)

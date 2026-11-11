@@ -98,16 +98,17 @@ func (a *nativeUI) voiceContextView(c *ui.Context) {
 	}
 	estimateTooltip := fmt.Sprintf("按序列化请求估算，非精确分词；占用比例按输入预算计算，已扣除 %d Tokens 预留。达到 70%% 后台摘要，85%% 同步压缩。", stats.ReservedTokens)
 	usageTooltip := "累计 Tokens（本地估算），非精确分词，不等于服务商计费用量。按实际发送的请求（含历史上下文、工具定义和工具结果）及收到的输出（含可见推理和工具调用）估算，覆盖工具决策、回复与摘要请求。本地保存，启动后立即恢复并继续累计；重连、重启和对话上下文闲置 4 小时过期均保留累计用量。手动清空对话会清零用量并删除保存记录；无保存用量时从 0 开始。"
-	ui.Column(c.Key("voice-context")).Label("上下文与用量").FillWidth().MinWidth(0).Gap(10).Children(func() {
+	ui.Column(c.Key("voice-context")).Label("上下文与用量").FillWidth().MinWidth(0).Padding(8, 16, 10).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(t.Border.Alpha(0.35)).Children(func() {
 		ui.Row(c).FillWidth().MinWidth(0).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Row(c).Grow(1).MinWidth(0).Wrap().GapX(12).GapY(6).AlignItems(ui.Center).Children(func() {
+			status := a.voiceComposerStatus()
+			ui.Row(c.Key("voice-footer-status")).Label("当前对话状态").Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(nativeVoicePhaseColor(t, a.snapshot.Voice))
+				ui.Text(c, status).FontSize(11).TextColor(t.TextMuted).MinWidth(0).SingleLine().Ellipsis("…").Tooltip(status)
+			})
+			ui.Row(c).Shrink(0).MinWidth(0).Wrap().GapX(10).GapY(6).AlignItems(ui.Center).Children(func() {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Tooltip(estimateTooltip).Children(func() {
 					ui.Text(c, "上下文").FontSize(12).TextColor(t.TextMuted)
 					if stats.InputBudget > 0 {
-						fraction := max(0, min(1, stats.UsagePercent/100))
-						ui.Progress(c, fraction).Label("上下文占用（估算）").Size(64, 4).MinWidth(0).Shrink(0).Background(t.Border.Alpha(0.6)).Draw(func(p *ui.Painter, r ui.Rect) {
-							p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * float32(fraction), H: r.H}, occupancyColor, 2)
-						})
 						ui.Text(c, fmt.Sprintf("%.1f%%", stats.UsagePercent)).FontSize(12).Bold().TextColor(occupancyColor)
 					} else {
 						ui.Text(c, "等待初始化").FontSize(12).TextColor(t.TextMuted)
@@ -139,6 +140,10 @@ func (a *nativeUI) voiceContextView(c *ui.Context) {
 			occupancy := "等待模型初始化"
 			if stats.InputBudget > 0 {
 				occupancy = fmt.Sprintf("%s / %s Tokens（估算）", nativeContextNumber(stats.EstimatedTokens), nativeContextNumber(stats.InputBudget))
+			}
+			state := a.snapshot.Voice
+			if state.Turn > 0 && !(a.voiceCleared && state.Turn == a.voiceClearTurn && state.Session == a.voiceClearSession) {
+				a.voiceLiveStatusView(c)
 			}
 			nativeContextDetail(c, "上下文", occupancy, estimateTooltip, t.Text)
 			nativeContextDetail(c, "容量", nativeContextCapacity(window)+" · "+strings.ReplaceAll(source, "未获取，使用备用值", "使用备用值"), sourceTooltip, t.Text)

@@ -13,7 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestNativeContextPercentageFollowsProgressWithoutSummaryCapacity(t *testing.T) {
+func TestNativeContextPercentageSharesFooterWithStatusWithoutProgress(t *testing.T) {
 	for _, size := range [][2]int{{760, 577}, {1100, 900}} {
 		for _, dark := range []bool{false, true} {
 			a, f, _, tt := nativeTest(t)
@@ -26,13 +26,20 @@ func TestNativeContextPercentageFollowsProgressWithoutSummaryCapacity(t *testing
 				if expanded {
 					nativeClick(t, tt, "上下文详情")
 				}
-				bar, ok := tt.Find("上下文占用（估算）")
+				if _, ok := tt.Find("上下文占用（估算）"); ok {
+					t.Fatal("obsolete context progress bar remains")
+				}
+				context, ok := tt.Find("上下文")
 				if !ok {
-					t.Fatal("missing context progress bar")
+					t.Fatal("missing context footer text")
 				}
 				percent, ok := tt.Find("0.6%")
-				if !ok || percent.X < bar.X+bar.W || percent.Y > bar.Y+bar.H || percent.Y+percent.H < bar.Y || percent.X+percent.W > float32(size[0]-20) {
-					t.Fatalf("percentage must follow bar on same row: bar=%+v percent=%+v", bar, percent)
+				if !ok || percent.X < context.X+context.W || percent.Y > context.Y+context.H || percent.Y+percent.H < context.Y || percent.X+percent.W > float32(size[0]-20) {
+					t.Fatalf("percentage must follow context on same row: context=%+v percent=%+v", context, percent)
+				}
+				status, ok := tt.Find("当前对话状态")
+				if !ok || status.Y > percent.Y+percent.H || status.Y+status.H < percent.Y || status.X+status.W > context.X {
+					t.Fatalf("activity and context must share footer without overlap: status=%+v context=%+v percent=%+v", status, context, percent)
 				}
 				if tt.HasText("容量 1,050,000") {
 					t.Fatal("redundant summary capacity remains")
@@ -48,6 +55,7 @@ func TestNativeContextPercentageFollowsProgressWithoutSummaryCapacity(t *testing
 func TestNativeContextStatsRefreshWithoutVoiceEvent(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
+	f.state.Voice.Phase = "listening"
 	f.state.Voice.Context = brain.ContextStats{ContextWindowSource: "modelsdev", ContextWindowModel: strings.Repeat("very-long-request-model-id-", 8), EstimatedTokens: 21000, InputBudget: 28000, ContextWindow: 32768, UsagePercent: 75, Compressing: true, RetainedTurns: 4}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
@@ -204,6 +212,8 @@ func TestNativeContextCapacitySources(t *testing.T) {
 	}
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
+	f.state.Voice.Phase = "listening"
+	a.refresh()
 	nativeClick(t, tt, "语音助手")
 	nativeClick(t, tt, "上下文详情")
 	for _, source := range []string{"manual", "fallback", "modelsdev"} {
@@ -272,6 +282,7 @@ func TestNativeContextDisclosureAndCompactLayout(t *testing.T) {
 		a, f, _, tt := nativeTest(t)
 		tt.SetSize(760, 600)
 		tt.SetDark(dark)
+		f.state.Voice.Phase = "listening"
 		f.state.Voice.Context = brain.ContextStats{
 			ContextWindow: 2097152, InputBudget: 1676698, EstimatedTokens: 1500000, UsagePercent: 89.5,
 			LastCompression: "failed", SummaryTokens: 1200, RetainedTurns: 4, Compressions: 12, DroppedTurns: 8,
@@ -307,6 +318,46 @@ func TestNativeContextDisclosureAndCompactLayout(t *testing.T) {
 		if after, _ := tt.Find("语音操作栏"); after.H != collapsed.H {
 			t.Fatalf("collapse did not restore compact height: %v / %v", collapsed, after)
 		}
+	}
+}
+
+func TestNativeContextDetailsContainLiveRoundAndPlayback(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	tt.SetSize(760, 600)
+	f.state.Settings.Voice.Enabled = true
+	f.state.Voice.Connected = true
+	f.state.Voice.Phase = "speaking"
+	f.state.Voice.Turn = 3
+	f.state.Voice.GeneratedSegments = 4
+	f.state.Voice.PlayedSegments = 1
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	live := "第 3 轮 · 已播放 1 段 · 已合成 4 段"
+	if tt.HasText(live) {
+		t.Fatal("collapsed composer exposes live round details")
+	}
+	if !tt.HasText("正在播放回复 · 已播 1/4 段") {
+		t.Fatal("collapsed footer lost current playback status")
+	}
+	nativeClick(t, tt, "上下文详情")
+	details, ok := tt.Find("上下文统计详情")
+	line, found := tt.Find(live)
+	if !ok || !found || line.X < details.X || line.X+line.W > details.X+details.W || line.Y < details.Y || line.Y+line.H > details.Y+details.H {
+		t.Fatalf("live details must be inside expanded panel: panel=%+v live=%+v", details, line)
+	}
+	f.state.Voice.PlayedSegments = 2
+	a.refresh()
+	tt.Frame()
+	if !tt.HasText("第 3 轮 · 已播放 2 段 · 已合成 4 段") || tt.HasText(live) {
+		t.Fatal("expanded playback details did not refresh")
+	}
+	button, ok := tt.AccessByRole(ui.RoleButton, "上下文详情")
+	if !ok || !button.Expanded {
+		t.Fatal("playback refresh collapsed context details")
+	}
+	nativeClick(t, tt, "上下文详情")
+	if tt.HasText("第 3 轮 · 已播放 2 段 · 已合成 4 段") {
+		t.Fatal("live details remain after collapsing")
 	}
 }
 

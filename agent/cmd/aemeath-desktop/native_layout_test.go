@@ -285,7 +285,10 @@ func TestNativeVoiceEmptyLayoutWithConnectionWarning(t *testing.T) {
 			if !ok || abs(int(title.X+title.W/2-body.X-body.W/2)) > 2 || title.Y < body.Y || title.Y+title.H > body.Y+body.H {
 				t.Fatalf("empty state is not centered in conversation: title=%+v body=%+v", title, body)
 			}
-			for _, label := range []string{"语音操作栏", "手动唤醒", "取消对话", "清空对话", "语音设置"} {
+			if _, ok := tt.AccessByRole(ui.RoleButton, "取消对话"); ok {
+				t.Fatal("idle composer exposes cancel during connection warning")
+			}
+			for _, label := range []string{"语音操作栏", "手动唤醒", "清空对话", "语音设置"} {
 				r, ok := tt.Find(label)
 				if !ok || r.W <= 0 || r.X < 226 || r.X+r.W > float32(size[0]-20)+1 || r.Y < 20 || r.Y+r.H > float32(size[1]-20)+1 {
 					t.Fatalf("warning pushed control outside content %v dark=%v: %s %+v", size, dark, label, r)
@@ -299,6 +302,7 @@ func TestNativeConversationLongMessagesKeepControlsWithinWindow(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
 	f.state.Voice.Turn = 1
+	f.state.Voice.Phase = "speaking"
 	f.state.Voice.Transcript = strings.Repeat("这是一条需要换行的长消息。", 30)
 	f.state.Voice.Response = strings.Repeat("我会为你详细解释。", 60)
 	a.refresh()
