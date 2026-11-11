@@ -9,6 +9,11 @@ firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old
 
+# Web flasher
+flasher/node_modules/
+flasher/dist/
+flasher/public/firmware/
+
 # Go
 agent/aemeath-agent
 agent/*.exe

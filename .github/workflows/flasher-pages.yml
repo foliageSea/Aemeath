@@ -1,0 +1,90 @@
+name: Web flasher (GitHub Pages)
+
+on:
+  push:
+    branches:
+      - main
+      - 'ci/flasher-pages/**'
+    paths:
+      - 'firmware/**'
+      - 'flasher/**'
+      - 'VERSION'
+      - '.github/workflows/flasher-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    container:
+      image: espressif/idf:v6.0.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Same entry point as the release workflow, so the site ships the release build
+      # (fresh sdkconfig from sdkconfig.defaults in firmware/build-release).
+      - name: Build ESP32-S3 firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          bash firmware/scripts/build-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flasher-firmware
+          path: |
+            firmware/build-release/flasher_args.json
+            firmware/build-release/project_description.json
+            firmware/build-release/bootloader/bootloader.bin
+            firmware/build-release/partition_table/partition-table.bin
+            firmware/build-release/aemeath.bin
+          if-no-files-found: error
+
+  site:
+    needs: firmware
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: flasher-firmware
+          path: firmware/build-release
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: flasher/pnpm-lock.yaml
+      - name: Test and build flasher
+        working-directory: flasher
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm run stage -- --build-dir ../firmware/build-release
+          pnpm run build:ui
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: flasher/dist
+
+  deploy:
+    needs: site
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

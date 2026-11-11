@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Aemeath 网页刷机</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <h1>Aemeath 网页刷机</h1>
+        <p class="sub">Waveshare ESP32-S3-Touch-LCD-4B · 通过浏览器 USB 串口直接刷入固件，无需安装 ESP-IDF</p>
+      </div>
+      <span id="fw-badge" class="badge" hidden></span>
+    </header>
+
+    <div id="unsupported" class="banner error" hidden>
+      当前浏览器不支持 Web Serial。请使用桌面版 Chrome 或 Edge（89+），并通过 HTTPS 或 localhost 打开本页。
+    </div>
+
+    <main>
+      <section class="card" id="card-connect">
+        <h2><span class="step">1</span>连接设备</h2>
+        <p class="hint">用 USB-C 数据线连接开发板，点击“连接”，在弹窗中选择 ESP32-S3（USB JTAG/serial debug unit）。</p>
+        <div class="row">
+          <label>波特率
+            <select id="baud">
+              <option value="115200" selected>115200（推荐）</option>
+              <option value="460800">460800</option>
+              <option value="921600">921600</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="all-ports" /> 显示所有串口</label>
+          <span class="grow"></span>
+          <button id="btn-connect" class="primary">连接</button>
+          <button id="btn-disconnect" hidden>断开</button>
+        </div>
+        <dl id="chip-info" class="info" hidden></dl>
+        <div id="connect-msg" class="msg" hidden></div>
+        <details class="help">
+          <summary>连接失败？手动进入下载模式</summary>
+          <ol>
+            <li>按住板上的 <b>BOOT</b> 键；</li>
+            <li>短按一下 <b>RESET（RST）</b> 键；</li>
+            <li>松开 <b>BOOT</b>，再点击“连接”。</li>
+          </ol>
+          <p>另外请确认已关闭 <code>idf.py monitor</code>、串口助手等占用串口的程序，并使用支持数据传输的 USB 线。</p>
+        </details>
+      </section>
+
+      <section class="card" id="card-flash">
+        <h2><span class="step">2</span>刷入固件</h2>
+        <div class="tabs" role="tablist">
+          <button role="tab" id="tab-release" class="tab active" aria-selected="true">发布固件</button>
+          <button role="tab" id="tab-local" class="tab" aria-selected="false">本地文件（高级）</button>
+        </div>
+
+        <div id="panel-release">
+          <div id="release-loading" class="hint">正在读取固件信息…</div>
+          <div id="release-missing" class="msg warn" hidden>此站点未附带发布固件，请使用“本地文件”刷入。</div>
+          <div id="release-info" hidden>
+            <dl class="info" id="release-meta"></dl>
+            <table class="parts">
+              <thead><tr><th>分区</th><th>偏移</th><th>文件</th><th>大小</th></tr></thead>
+              <tbody id="release-parts"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="panel-local" hidden>
+          <p class="hint">选择 ESP-IDF 构建产物，文件名会自动推断偏移：bootloader → 0x0，partition-table → 0x8000，其他 → 0x10000（app）。合并镜像（merge_bin）请填 0x0。</p>
+          <div class="row">
+            <label class="file-btn">添加 .bin 文件<input type="file" id="local-input" accept=".bin,application/octet-stream" multiple /></label>
+          </div>
+          <table class="parts" id="local-table" hidden>
+            <thead><tr><th>文件</th><th>偏移</th><th>大小</th><th></th></tr></thead>
+            <tbody id="local-rows"></tbody>
+          </table>
+          <ul id="local-errors" class="errors"></ul>
+        </div>
+
+        <div class="row options">
+          <label class="check danger"><input type="checkbox" id="erase-all" /> 刷入前整片擦除（会清除 Wi-Fi 配网与屏幕设置）</label>
+          <span class="grow"></span>
+          <button id="btn-flash" class="primary" disabled>开始刷入</button>
+        </div>
+        <p class="hint">默认只写入固件区域，保留 NVS 中的 Wi-Fi 配网、亮度等设置。</p>
+
+        <div id="progress-wrap" hidden>
+          <div class="progress"><div id="progress-bar"></div></div>
+          <div class="progress-label"><span id="progress-text"></span><span id="progress-pct"></span></div>
+        </div>
+        <div id="flash-msg" class="msg" hidden></div>
+      </section>
+
+      <section class="card" id="card-monitor">
+        <h2><span class="step">3</span>串口日志</h2>
+        <p class="hint">以 115200 读取设备启动日志。刷入完成后设备会自动重启，可在此确认固件正常运行。</p>
+        <div class="row">
+          <button id="btn-monitor">打开串口日志</button>
+          <button id="btn-monitor-stop" hidden>停止</button>
+          <button id="btn-reset" disabled>复位设备</button>
+          <span class="grow"></span>
+          <label class="check"><input type="checkbox" id="autoscroll" checked /> 自动滚动</label>
+          <button id="btn-clear">清空</button>
+          <button id="btn-save">下载日志</button>
+        </div>
+        <div id="monitor-msg" class="msg" hidden></div>
+        <pre id="monitor" class="terminal" aria-live="off"></pre>
+      </section>
+
+      <details class="card" id="card-log">
+        <summary>刷写详细输出（esptool）</summary>
+        <pre id="esptool-log" class="terminal small"></pre>
+      </details>
+    </main>
+
+    <footer>
+      源码：<a href="https://github.com/foliageSea/Aemeath" target="_blank" rel="noopener">foliageSea/Aemeath</a> · 基于 <a href="https://github.com/espressif/esptool-js" target="_blank" rel="noopener">esptool-js</a>
+    </footer>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

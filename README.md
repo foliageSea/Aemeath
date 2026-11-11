@@ -62,6 +62,29 @@ idf.py -p /dev/cu.usbmodem11101 flash monitor
 `Aemeath-XXXX` 热点后会弹出配网页（或打开 `http://192.168.4.1`），选择 Wi‑Fi 并保存。
 联网后设备广播 `aemeath.local` 与 `_aemeath._tcp`，也可在浏览器访问 `http://aemeath.local/` 重新配网。
 
+### 网页刷机（无需 ESP-IDF）
+
+打开 <https://foliageSea.github.io/Aemeath/>，用桌面版 **Chrome / Edge 89+** 通过 USB 直接刷入发布固件（基于 Web Serial 与 [esptool-js](https://github.com/espressif/esptool-js)）：
+
+1. USB-C 连接开发板，点击“连接”，选择 ESP32-S3 串口；页面会校验芯片为 ESP32-S3、Flash 为 16MB。
+2. 点击“开始刷入”。固件下载后先做 SHA-256 校验，写入后再做 MD5 回读校验，完成后自动重启。
+3. 在“串口日志”查看启动输出（115200）。
+
+默认只写入 bootloader（0x0）、分区表（0x8000）和 app（0x10000），**保留 NVS 中的 Wi‑Fi 配网与屏幕设置**；勾选“整片擦除”才会清除。“本地文件”页可刷自行构建的 `.bin`（合并镜像填 0x0）。若无法自动进入下载模式：按住 BOOT，短按 RESET，松开 BOOT 后重新连接；并关闭 `idf.py monitor` 等占用串口的程序。
+
+本地开发与构建（源码在 `flasher/`，需要 Node 22 + pnpm，先完成 `idf.py build`）：
+
+```bash
+cd flasher
+pnpm install
+pnpm stage        # 把 firmware/build 产物与 manifest.json 复制到 public/firmware/
+pnpm dev          # http://localhost:5173
+pnpm test
+pnpm build        # stage + 类型检查 + 生成 dist/
+```
+
+推送到 `main` 后，[`.github/workflows/flasher-pages.yml`](.github/workflows/flasher-pages.yml) 会构建固件和网页并发布到 GitHub Pages；首次使用需在仓库 **Settings → Pages** 把 Source 设为 “GitHub Actions”。要打包发版构建的固件，可运行 `pnpm run stage -- --build-dir ../firmware/build-release`（先执行 `bash scripts/build-release.sh firmware`）。
+
 ## 采集端
 
 ```bash
