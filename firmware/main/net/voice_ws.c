@@ -15,11 +15,12 @@
 #define TX_MAX 1024
 #define SESSION_MAGIC 0x564F4943u
 #define TX_DEPTH 48
+#define TX_CONTROL_DEPTH 16
 
 typedef struct { uint32_t magic, epoch; int fd; bool owner; } session_t;
 typedef struct { uint32_t epoch; int fd; httpd_ws_type_t type; bool close_after; size_t len; uint8_t data[TX_MAX]; } output_t;
 static httpd_handle_t s_server;
-static QueueHandle_t s_output;
+static QueueHandle_t s_output, s_control;
 static TaskHandle_t s_writer;
 static portMUX_TYPE s_lock=portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_epoch;
@@ -55,17 +56,38 @@ static void session_free(void *arg)
 }
 static bool enqueue(const output_t *out)
 {
-    return s_output && xQueueSend(s_output,out,0)==pdTRUE;
+    QueueHandle_t queue=out->type==HTTPD_WS_TYPE_BINARY?s_output:s_control;
+    return queue && xQueueSend(queue,out,0)==pdTRUE;
 }
-bool voice_ws_send(uint32_t epoch, bool binary, const void *data, size_t len)
+static bool send_output(uint32_t epoch, bool binary, bool ordered, const void *data, size_t len)
 {
     if (!len || len>TX_MAX || !data) return false;
     output_t out={.epoch=epoch,.type=binary?HTTPD_WS_TYPE_BINARY:HTTPD_WS_TYPE_TEXT,.len=len};
-    portENTER_CRITICAL(&s_lock); out.fd=s_epoch==epoch?s_fd:-1; portEXIT_CRITICAL(&s_lock);
-    if (out.fd<0) return false;
     memcpy(out.data,data,len);
-    if (!enqueue(&out)) { voice_ws_close(epoch); return false; }
-    return true;
+    portENTER_CRITICAL(&s_lock);
+    out.fd=s_epoch==epoch?s_fd:-1;
+    QueueHandle_t queue=(binary || ordered)?s_output:s_control;
+    bool sent=out.fd>=0 && queue && xQueueSend(queue,&out,0)==pdTRUE;
+    portEXIT_CRITICAL(&s_lock);
+    if (!sent && out.fd>=0) voice_ws_close(epoch);
+    return sent;
+}
+bool voice_ws_send(uint32_t epoch, bool binary, const void *data, size_t len)
+{
+    return send_output(epoch,binary,false,data,len);
+}
+bool voice_ws_send_ordered(uint32_t epoch, const void *data, size_t len)
+{
+    return send_output(epoch,false,true,data,len);
+}
+void voice_ws_discard_audio(uint32_t epoch)
+{
+    portENTER_CRITICAL(&s_lock);
+    // Queue entries contain inline bytes. A reset owns no heap payload and
+    // cannot free the single work item already owned by the HTTPD callback.
+    // A pending wake is superseded by the local cancellation too.
+    if (epoch && s_epoch==epoch && s_output) xQueueReset(s_output);
+    portEXIT_CRITICAL(&s_lock);
 }
 // This function owns out until it has sent (or discarded) it. The queued work
 // stores a shallow frame payload; freeing before this callback would be UAF.
@@ -89,12 +111,20 @@ static void send_work(void *arg)
     free(out);
     xTaskNotifyGive(s_writer);
 }
+static bool next_output(output_t *queued)
+{
+    return xQueueReceive(s_control,queued,0)==pdTRUE || xQueueReceive(s_output,queued,0)==pdTRUE;
+}
 static void writer(void *arg)
 {
     (void)arg;
     output_t queued;
     for (;;) {
-        xQueueReceive(s_output,&queued,portMAX_DELAY);
+        // Only the currently submitted HTTPD work item may precede a control.
+        // Never pre-submit the audio FIFO: send_work retains payload ownership.
+        if (!next_output(&queued)) {
+            vTaskDelay(pdMS_TO_TICKS(5)); continue;
+        }
         output_t *out=malloc(sizeof(*out));
         if (!out) { voice_ws_close(queued.epoch); continue; }
         *out=queued;
@@ -146,19 +176,26 @@ static esp_err_t receive(httpd_req_t *req)
     if (frame.type!=HTTPD_WS_TYPE_TEXT && frame.type!=HTTPD_WS_TYPE_BINARY) { free(data); return ESP_FAIL; }
     return voice_transport_receive(session->epoch,frame.type==HTTPD_WS_TYPE_BINARY,data,frame.len)?ESP_OK:ESP_FAIL;
 }
+static void delete_output(void)
+{
+    if (s_output) vQueueDeleteWithCaps(s_output);
+    if (s_control) vQueueDeleteWithCaps(s_control);
+    s_output=s_control=NULL;
+}
 esp_err_t voice_ws_register(httpd_handle_t server)
 {
     s_server=server;
     // Task-only network buffering must not consume the scarce internal/DMA heap.
     // xQueueCreate() forces ~50 KiB into internal RAM despite available PSRAM.
     s_output=xQueueCreateWithCaps(TX_DEPTH,sizeof(output_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if (!s_output) return ESP_ERR_NO_MEM;
-    if (xTaskCreate(writer,"voice_tx",4096,NULL,4,&s_writer)!=pdPASS) { vQueueDeleteWithCaps(s_output); s_output=NULL; return ESP_ERR_NO_MEM; }
+    s_control=xQueueCreateWithCaps(TX_CONTROL_DEPTH,sizeof(output_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if (!s_output || !s_control) { delete_output(); return ESP_ERR_NO_MEM; }
+    if (xTaskCreate(writer,"voice_tx",4096,NULL,4,&s_writer)!=pdPASS) { delete_output(); return ESP_ERR_NO_MEM; }
     const httpd_uri_t uri={.uri="/voice",.method=HTTP_GET,.handler=receive,.is_websocket=true,.handle_ws_control_frames=true,.ws_post_handshake_cb=connected};
     esp_err_t err=httpd_register_uri_handler(server,&uri);
-    if (err!=ESP_OK) { vTaskDelete(s_writer); s_writer=NULL; vQueueDeleteWithCaps(s_output); s_output=NULL; return err; }
+    if (err!=ESP_OK) { vTaskDelete(s_writer); s_writer=NULL; delete_output(); return err; }
     ESP_LOGI("voice_ws","registered /voice; TX %u bytes in PSRAM, free internal %u, PSRAM %u",
-        (unsigned)(TX_DEPTH*sizeof(output_t)),(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)((TX_DEPTH+TX_CONTROL_DEPTH)*sizeof(output_t)),(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     return ESP_OK;
 }

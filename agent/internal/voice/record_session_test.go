@@ -64,7 +64,7 @@ func TestRecordHoldReleasePreservesSilenceAndSubmitsOnce(t *testing.T) {
 		t.Run(map[bool]string{true: "models_ready", false: "models_unavailable"}[models], func(t *testing.T) {
 			s := recordTestSession(t)
 			if models {
-				// This detector would cancel on the first frame if hold capture fed KWS.
+				// This detector would restart on the first frame if hold capture fed KWS.
 				s.detector = &fakeDetector{hitAt: frameSamples}
 				s.vad = &fakeVAD{}
 				s.state.WakeReady = true

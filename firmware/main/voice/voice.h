@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 esp_err_t voice_init(void);
-// Touch callbacks: bounded nonblocking command enqueue; false means unavailable/full.
+// Touch callbacks: bounded nonblocking priority FIFO; full closes the session.
+// Cancel/clear/mute fence rounds already received; false means unavailable/full.
 bool voice_request_wake(void);
 bool voice_request_cancel(void);
 bool voice_request_clear(void);

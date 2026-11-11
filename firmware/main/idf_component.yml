@@ -9,3 +9,4 @@ dependencies:
   espressif/mdns: "^1.8"
   espressif/cjson: "^1.7"
   espressif/esp_codec_dev: "==1.6.2"
+  espressif/esp-sr: "==2.6.1"

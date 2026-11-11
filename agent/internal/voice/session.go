@@ -631,10 +631,10 @@ func (s *session) microphone(b []byte) error {
 		}
 		return nil
 	}
-	// Keep keyword spotting live during recording, cloud work and playback.
-	// A second invocation cancels the turn; it must not start a new capture or
-	// send the cancellation keyword to ASR. Idle spotting below still wakes.
-	if s.active && s.state.WakeReady {
+	// Retain the detector decision delay during capture, cloud work and playback
+	// too, so a wake word followed immediately by a new question loses no suffix.
+	if s.state.WakeReady {
+		s.ring.add(f.PCM)
 		s.kwsSamples += int64(len(f.PCM))
 		hit, err := s.detector.Feed(f.PCM)
 		if err != nil {
@@ -643,7 +643,27 @@ func (s *session) microphone(b []byte) error {
 			return s.fail("wake", err)
 		}
 		if hit {
-			return s.command(Command{Kind: "cancel"})
+			end := s.detector.KeywordEndSamples()
+			// Never include keyword audio without a valid detector endpoint.
+			suffix := 0
+			if end > 0 && end <= s.kwsSamples {
+				suffix = int(s.kwsSamples - end)
+			}
+			// begin resets the detector and ring while canceling the old turn.
+			p := s.ring.tail(suffix)
+			if err = s.command(Command{Kind: "wake"}); err != nil {
+				return err
+			}
+			for len(p) > 0 {
+				n := min(frameSamples, len(p))
+				speech, e := s.vad.Speech(p[:n])
+				if e != nil {
+					return s.fail("vad", e)
+				}
+				s.capture.feed(p[:n], speech)
+				p = p[n:]
+			}
+			return nil
 		}
 	}
 	if s.capture != nil {
@@ -674,39 +694,6 @@ func (s *session) microphone(b []byte) error {
 			return s.phase("recognizing")
 		}
 		return nil
-	}
-	if s.active || !s.state.WakeReady {
-		return nil
-	}
-	s.ring.add(f.PCM)
-	s.kwsSamples += int64(len(f.PCM))
-	hit, err := s.detector.Feed(f.PCM)
-	if err != nil {
-		s.state.WakeReady = false
-		s.diagnostic = "Offline wake unavailable: " + s.safe(err.Error())
-		return s.fail("wake", err)
-	}
-	if !hit {
-		return nil
-	}
-	end := s.detector.KeywordEndSamples()
-	// Never include keyword audio if a detector cannot supply a valid endpoint.
-	suffix := 0
-	if end > 0 && end <= s.kwsSamples {
-		suffix = int(s.kwsSamples - end)
-	}
-	p := s.ring.tail(suffix)
-	if err = s.command(Command{Kind: "wake"}); err != nil {
-		return err
-	}
-	for len(p) > 0 {
-		n := min(frameSamples, len(p))
-		speech, e := s.vad.Speech(p[:n])
-		if e != nil {
-			return s.fail("vad", e)
-		}
-		s.capture.feed(p[:n], speech)
-		p = p[n:]
 	}
 	return nil
 }
