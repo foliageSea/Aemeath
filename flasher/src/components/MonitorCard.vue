@@ -22,7 +22,7 @@ watch(f.monitorLog, async () => {
 </script>
 
 <template>
-  <Card class="flex min-w-0 flex-col">
+  <Card class="flex min-h-0 min-w-0 flex-col">
     <CardHeader>
       <CardTitle><StepTitle :n="3" title="串口日志" :active="f.step.value === 3" /></CardTitle>
       <CardDescription>以 115200 读取设备日志，确认刷入后的固件正常启动。</CardDescription>
@@ -32,7 +32,7 @@ watch(f.monitorLog, async () => {
         </Badge>
       </CardAction>
     </CardHeader>
-    <CardContent class="flex flex-1 flex-col gap-3">
+    <CardContent class="flex min-h-0 flex-1 flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2">
         <Button v-if="!f.monitor.value" size="sm" :disabled="!f.supported || f.busy.value !== null" @click="f.startMonitor">
           <LoaderCircle v-if="f.busy.value === 'monitor-opening'" class="animate-spin" /><Play v-else />打开日志
@@ -66,7 +66,7 @@ watch(f.monitorLog, async () => {
       <NoticeAlert v-if="f.notices.monitor" :notice="f.notices.monitor" />
       <pre
         ref="term"
-        class="min-h-80 flex-1 overflow-auto rounded-lg border bg-zinc-950 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-zinc-200 lg:min-h-0 lg:h-0"
+        class="h-80 min-h-0 flex-none overflow-auto overscroll-contain rounded-lg border bg-zinc-950 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-zinc-200 lg:h-0 lg:flex-1"
       ><template v-if="f.monitorLog.value">{{ f.monitorLog.value }}</template><span v-else class="text-zinc-500">{{ f.monitor.value ? "等待设备输出…" : "日志未打开。刷入完成后点击“打开日志”查看设备启动输出。" }}</span></pre>
     </CardContent>
   </Card>
