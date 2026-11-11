@@ -235,6 +235,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 					voiceIconButton(c, "voice-wake", "手动唤醒", sidebarVoice, true, disabled, func() { a.voiceCommand("wake", "") })
 				})
 			})
+			a.voiceContextView(c)
 			a.voiceNoticeView(c)
 			ui.Row(c).FillWidth().Wrap().GapX(16).GapY(6).Padding(10, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(t.Border.Alpha(0.4)).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 				a.voiceStatusView(c)

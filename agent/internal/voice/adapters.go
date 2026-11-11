@@ -53,7 +53,7 @@ func productionDependencies() dependencies {
 			if m, ok := h.(MemoryHost); ok {
 				memory = m.ConversationMemory()
 			}
-			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey, HomeAssistant: hamcp.Config{Enabled: c.HAMCPEnabled, Endpoint: c.HAMCPURL, Token: c.HAAccessToken}, Memory: memory}, h)
+			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, ContextWindow: c.ContextWindow, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey, HomeAssistant: hamcp.Config{Enabled: c.HAMCPEnabled, Endpoint: c.HAMCPURL, Token: c.HAAccessToken}, Memory: memory}, h)
 		},
 		reference: managedReference,
 	}
@@ -70,6 +70,7 @@ type result struct {
 	generation    uint64
 	toolCall      *brain.ToolCall
 	homeAssistant *hamcp.Status
+	context       *brain.ContextStats
 	turn          uint32
 	phase, text   string
 	pcm           []int16
@@ -93,6 +94,15 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 	publish := func(w work, r result) bool {
 		if w.ctx.Err() != nil || ctx.Err() != nil {
 			return false
+		}
+		if source, ok := engine.(interface{ ContextStats() brain.ContextStats }); ok {
+			stats := source.ContextStats()
+			r.context = &stats
+		} else if h, ok := host.(MemoryHost); ok {
+			if memory := h.ConversationMemory(); memory != nil {
+				stats := memory.ContextStats()
+				r.context = &stats
+			}
 		}
 		r.turn = w.turn
 		r.generation = w.generation
@@ -128,6 +138,7 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 			generation = w.generation
 		}
 		if w.kind == "clear" {
+			publish(w, result{phase: "context"})
 			continue
 		}
 		func() {

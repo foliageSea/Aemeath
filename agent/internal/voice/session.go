@@ -836,7 +836,17 @@ func (s *session) recordStageMillis(stage string, millis int64) {
 }
 
 func (s *session) result(r result) error {
-	if !s.active || r.turn != s.state.Turn || r.generation != s.generation {
+	if r.turn != s.state.Turn || r.generation != s.generation {
+		return nil
+	}
+	if r.context != nil {
+		s.state.Context = *r.context
+	}
+	if r.phase == "context" {
+		s.emitState()
+		return nil
+	}
+	if !s.active {
 		return nil
 	}
 	if r.homeAssistant != nil {

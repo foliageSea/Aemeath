@@ -92,6 +92,16 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 	a.voiceField(c, "voice-llm-url", "OpenAI 服务地址", "https://api.openai.com/v1", &cfg.LLMBaseURL, false)
 	a.voiceField(c, "voice-llm-key", "OpenAI API 密钥", "输入 API 密钥", &cfg.LLMAPIKey, true)
 	a.voiceField(c, "voice-llm-model", "对话模型", "填写服务提供的模型名称", &cfg.LLMModel, false)
+	ui.Field(c.Key("voice-context-window"), "模型上下文容量（Tokens）", func() {
+		capacity := float64(cfg.ContextWindow)
+		if capacity == 0 {
+			capacity = 32768
+		}
+		if ui.NumberInput(c, &capacity, 8192, 2097152, 1024).FillWidth().Changed() {
+			cfg.ContextWindow = int(capacity)
+			a.edited()
+		}
+	}).FillWidth().Description("按模型支持的上下文上限设置；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。")
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "启用 Agent 工具").Grow(1).MinWidth(0).Wrap()
 		if ui.Switch(c.Key("voice-tools"), &cfg.LLMTools).Label("启用 Agent 工具").Changed() {

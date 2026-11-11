@@ -284,15 +284,12 @@ func TestReplyStreamCancelClearCallbackAndSerialGate(t *testing.T) {
 	}
 }
 
-func TestReplyStreamHistoryBoundAndClear(t *testing.T) {
+func TestReplyStreamRetainsHistoryWithinBudgetAndClear(t *testing.T) {
 	var requests atomic.Int32
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req := readRequest(t, r)
 		n := int(requests.Add(1)) - 1
 		prior := n
-		if prior > 9 {
-			prior = 9
-		}
 		if n == 12 {
 			prior = 0
 		}
@@ -300,8 +297,8 @@ func TestReplyStreamHistoryBoundAndClear(t *testing.T) {
 		if len(msgs) != 2+2*prior {
 			t.Errorf("request %d messages=%d", n, len(msgs))
 		}
-		if n == 11 && msgs[1].(map[string]any)["content"] != "turn-2" {
-			t.Error("old history not trimmed")
+		if n == 11 && msgs[1].(map[string]any)["content"] != "turn-0" {
+			t.Error("short conversation was unnecessarily trimmed")
 		}
 		sseChunk(w, map[string]any{"role": "assistant", "content": "回复。"}, nil)
 		sseEnd(w)
@@ -313,7 +310,7 @@ func TestReplyStreamHistoryBoundAndClear(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(e.history) != 20 {
+	if len(e.history) != 24 {
 		t.Fatalf("history=%d", len(e.history))
 	}
 	e.Clear()

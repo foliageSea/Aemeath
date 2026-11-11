@@ -127,8 +127,15 @@ func newService(path string, settings Settings, deps dependencies) *Service {
 
 func (s *Service) Snapshot() State {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.state.Clone()
+	state := s.state.Clone()
+	memory := s.memory
+	s.mu.RUnlock()
+	// The UI polls snapshots once per second. Read live memory statistics so
+	// background compression and expiry are visible without a voice event.
+	if memory != nil {
+		state.Voice.Context = memory.ContextStats()
+	}
+	return state
 }
 
 // Start is idempotent and starts asynchronous discovery, connection and retry.

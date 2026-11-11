@@ -29,6 +29,7 @@ type Config struct {
  LLMAPIKey string `json:"llmAPIKey"`
  LLMModel string `json:"llmModel"`
  LLMTools bool `json:"llmTools"`
+ ContextWindow int `json:"contextWindow"` // manually configured model limit; 0 => 32768; allowed 8192..2097152
  HAMCPEnabled bool `json:"haMCPEnabled"`
  HAMCPURL string `json:"haMCPURL"`
  HAAccessToken string `json:"haAccessToken"`
@@ -49,6 +50,7 @@ type Config struct {
  Persona string `json:"persona"`
 }
 type State struct {
+ Context brain.ContextStats `json:"context"`
  Connected bool `json:"connected"`
  WakeReady bool `json:"wakeReady"`
  Phase string `json:"phase"`
@@ -78,7 +80,7 @@ func Run(ctx context.Context, address string, cfg Config, host Host, commands <-
 
 Run owns ONE connection; caller retries with bounded backoff and cancels/restarts on config/device changes. Emits snapshots containing no keys. Commands are nonblocking from desktop service; preview synthesizes Text (default short greeting), reference plays configured sample without cloud, clear drops history, wake manually starts a round. Empty/missing wake model gives explicit error; manual wake/reference/preview should remain available to diagnose, but never pretend offline wake is ready.
 
-Desktop conversation memory persists the latest ten completed user/final-assistant pairs in `voice_history.json` next to settings, with owner-only permissions and atomic replacement. Tool traces and credentials are not stored. The shared memory survives device reconnects and app restarts, expires after four hours of inactivity, and is deleted by clear (even before the lazy model engine is first created). CLI shares memory across reconnects without writing disk. On window creation the desktop restores unexpired text exchanges, marks them as historical text, and omits unavailable execution timings/tool details; the current live snapshot is deduplicated. Host-assigned `State.Session` plus `Turn` identify live exchanges so reconnects cannot overwrite earlier turns with recycled turn numbers.
+Desktop conversation memory persists a summary and retained completed user/final-assistant pairs in `voice_history.json` next to settings, with owner-only permissions and atomic replacement (v2 writes, v1 reads remain supported). Tool traces and credentials are not stored. The shared memory survives device reconnects and app restarts, expires after four hours of inactivity, and is deleted by clear (even before the lazy model engine is first created). CLI shares memory across reconnects without writing disk. On window creation the desktop restores unexpired text exchanges, marks them as historical text, and omits unavailable execution timings/tool details; the current live snapshot is deduplicated. Host-assigned `State.Session` plus `Turn` identify live exchanges so reconnects cannot overwrite earlier turns with recycled turn numbers.
 
 Snapshots expose `FirstAudioMillis` (submit-to-first actual playing ACK), `GeneratedSegments`, and `PlayedSegments`; the first-audio timer is written once per logical request, and segment counters distinguish generated PCM from drained playback.
 
@@ -114,14 +116,18 @@ func EncodeWAV(pcm []int16,rate int) []byte
 
 `internal/brain` owns Eino:
 ```go
-type Config struct {BaseURL,APIKey,Model,Persona string; Tools bool}
+type Config struct {BaseURL,APIKey,Model,Persona string; Tools bool; ContextWindow int}
 type Host interface {Metrics() string; Quota() string; SetPage(context.Context,string)error; SetScreen(context.Context,bool,int)error; LockComputer(context.Context)error}
 type Engine struct{}
 func New(ctx context.Context,cfg Config,host Host)(*Engine,error)
 func (e *Engine) Reply(ctx context.Context,text string)(string,error)
 func (e *Engine) Clear()
 ```
-Engine keeps <=10 complete conversation turns, bounded tool steps, context cancellation, plain chat when Tools=false.
+Engine uses a manually configurable context window (0 defaults to 32768; allowed values are 8192..2097152 Tokens), bounded tool steps, context cancellation, and plain chat when Tools=false. Saving a capacity change reconnects the voice session. `brain.NormalizeContextWindow(int) (int,error)` validates the value and is called by voice configuration normalization. At 70% of estimated input budget it summarizes in the background; at 85% it compresses synchronously before the next model request. Compression aims to retain the latest four complete exchanges; hard budget enforcement can drop further complete exchanges. Oversized tool results fail safely without replaying actions.
+
+`Engine.ContextStats() ContextStats` and `Memory.ContextStats() ContextStats` return value snapshots. Fields are `EstimatedTokens`, `InputBudget`, `ContextWindow`, `ReservedTokens`, `PromptTokens`, `CompletionTokens`, `TotalTokens`, `SummaryTokens`, `RetainedTurns`, `Compressions`, `DroppedTurns` (int), `UsagePercent` (float64), `UsageAvailable`, `Compressing` (bool), and `LastCompression` (empty / `compressed` / `fallback` / `failed`); JSON names are camelCase. Estimated context occupancy is based on serialized requests, not exact provider tokenization. Prompt/completion/total usage accumulates only provider-reported values during the current application session, including tool selection, final streaming, and summary calls; missing provider usage is unavailable, not zero consumption, and some providers never support it. Usage is not restored across app restarts.
+
+Desktop `Service.Snapshot()` reads `Memory.ContextStats()` dynamically, outside the service state lock. The native desktop refreshes snapshots once per second with `win.Update(native.refresh)`, so background summary completion and memory expiry appear without a new voice event. Voice worker events also attach engine statistics to `State.Context`. The UI displays estimated occupancy/budget, summary state and cumulative provider-reported usage separately. The capacity setting is labeled 模型上下文容量（Tokens） and uses the manually configured model limit. New configuration and stats require no device protocol or firmware change.
 
 `internal/wake` owns official sherpa-onnx Go/cgo bindings and model setup:
 ```go

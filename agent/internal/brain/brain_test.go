@@ -132,7 +132,7 @@ func TestRealEinoToolCalls(t *testing.T) {
 		t.Fatal("history must contain one complete text turn")
 	}
 }
-func TestPlainChatHistoryBoundAndClear(t *testing.T) {
+func TestPlainChatRetainsHistoryWithinBudgetAndClear(t *testing.T) {
 	requestNo := 0
 	cleared := false
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,9 +142,6 @@ func TestPlainChatHistoryBoundAndClear(t *testing.T) {
 		}
 		msgs := req["messages"].([]any)
 		prior := requestNo
-		if prior > 9 {
-			prior = 9
-		}
 		want := 2 + prior*2
 		if cleared {
 			want = 2
@@ -155,8 +152,8 @@ func TestPlainChatHistoryBoundAndClear(t *testing.T) {
 		if msgs[0].(map[string]any)["content"] != "测试助手" {
 			t.Error("persona missing")
 		}
-		if requestNo == 11 && !cleared && msgs[1].(map[string]any)["content"] != "turn-2" {
-			t.Error("oldest history not trimmed")
+		if requestNo == 11 && !cleared && msgs[1].(map[string]any)["content"] != "turn-0" {
+			t.Error("short conversation was unnecessarily trimmed")
 		}
 		requestNo++
 		replyJSON(w, "回复")
@@ -168,7 +165,7 @@ func TestPlainChatHistoryBoundAndClear(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(e.history) != 20 {
+	if len(e.history) != 24 {
 		t.Fatalf("history=%d", len(e.history))
 	}
 	e.Clear()

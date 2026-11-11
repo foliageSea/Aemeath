@@ -21,6 +21,7 @@ type Config struct {
 	LLMAPIKey         string  `json:"llmAPIKey"`
 	LLMModel          string  `json:"llmModel"`
 	LLMTools          bool    `json:"llmTools"`
+	ContextWindow     int     `json:"contextWindow"`
 	TavilyAPIKey      string  `json:"tavilyAPIKey"`
 	HAMCPEnabled      bool    `json:"haMCPEnabled"`
 	HAMCPURL          string  `json:"haMCPURL"`
@@ -43,23 +44,24 @@ type Config struct {
 }
 
 type State struct {
-	ToolCalls         []brain.ToolCall `json:"toolCalls,omitempty"`
-	HomeAssistant     hamcp.Status     `json:"homeAssistant"`
-	Connected         bool             `json:"connected"`
-	WakeReady         bool             `json:"wakeReady"`
-	Phase             string           `json:"phase"`
-	Error             string           `json:"error"`
-	ErrorStage        string           `json:"errorStage,omitempty"`
-	Notice            string           `json:"notice,omitempty"`
-	Transcript        string           `json:"transcript"`
-	Response          string           `json:"response"`
-	Turn              uint32           `json:"turn"`
-	ASRMillis         int64            `json:"asrMillis"`
-	AgentMillis       int64            `json:"agentMillis"`
-	TTSMillis         int64            `json:"ttsMillis"`
-	FirstAudioMillis  int64            `json:"firstAudioMillis"`
-	GeneratedSegments int              `json:"generatedSegments"`
-	PlayedSegments    int              `json:"playedSegments"`
+	Context           brain.ContextStats `json:"context"`
+	ToolCalls         []brain.ToolCall   `json:"toolCalls,omitempty"`
+	HomeAssistant     hamcp.Status       `json:"homeAssistant"`
+	Connected         bool               `json:"connected"`
+	WakeReady         bool               `json:"wakeReady"`
+	Phase             string             `json:"phase"`
+	Error             string             `json:"error"`
+	ErrorStage        string             `json:"errorStage,omitempty"`
+	Notice            string             `json:"notice,omitempty"`
+	Transcript        string             `json:"transcript"`
+	Response          string             `json:"response"`
+	Turn              uint32             `json:"turn"`
+	ASRMillis         int64              `json:"asrMillis"`
+	AgentMillis       int64              `json:"agentMillis"`
+	TTSMillis         int64              `json:"ttsMillis"`
+	FirstAudioMillis  int64              `json:"firstAudioMillis"`
+	GeneratedSegments int                `json:"generatedSegments"`
+	PlayedSegments    int                `json:"playedSegments"`
 	// Session identifies the voice connection. Turn numbers restart on every
 	// connection, so (Session, Turn) is what identifies a turn. Assigned by the
 	// host; always 0 inside this package.
@@ -93,6 +95,11 @@ type MemoryHost interface {
 // NormalizeConfig applies local defaults. Credentials and installed assets are
 // checked only when an operation needs them, keeping audio diagnostics usable.
 func NormalizeConfig(c Config) (Config, error) {
+	var contextErr error
+	c.ContextWindow, contextErr = brain.NormalizeContextWindow(c.ContextWindow)
+	if contextErr != nil {
+		return c, contextErr
+	}
 	var phraseErr error
 	c.WakePhrase, phraseErr = wake.NormalizePhrase(c.WakePhrase)
 	if phraseErr != nil {

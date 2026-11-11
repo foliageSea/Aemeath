@@ -16,7 +16,7 @@ import (
 // asked the next morning does not silently inherit yesterday's context.
 const MemoryTTL = 4 * time.Hour
 
-const memoryVersion = 1
+const memoryVersion = 2
 
 type memoryTurn struct {
 	User      string `json:"user"`
@@ -26,16 +26,21 @@ type memoryFile struct {
 	Version   int          `json:"version"`
 	UpdatedAt time.Time    `json:"updated_at"`
 	Turns     []memoryTurn `json:"turns"`
+	Summary   string       `json:"summary,omitempty"`
 }
 
 // Memory outlives individual Engines (one per voice connection) so that
 // reconnects and app restarts keep the conversation. An empty path keeps it
 // in process memory only. Safe for concurrent use.
 type Memory struct {
-	mu      sync.Mutex
-	path    string
-	turns   []memoryTurn
-	updated time.Time
+	mu       sync.Mutex
+	path     string
+	turns    []memoryTurn
+	updated  time.Time
+	summary  string
+	stats    ContextStats
+	revision uint64
+	epoch    uint64 // changes only when the conversation is cleared or expires
 }
 
 // OpenMemory loads a persisted conversation. A missing, unreadable or
@@ -53,7 +58,7 @@ func OpenMemory(path string) *Memory {
 		return m
 	}
 	var f memoryFile
-	if json.Unmarshal(b, &f) != nil || f.Version != memoryVersion {
+	if json.Unmarshal(b, &f) != nil || (f.Version != 1 && f.Version != memoryVersion) {
 		log.Printf("brain: ignoring malformed conversation memory")
 		return m
 	}
@@ -66,6 +71,9 @@ func OpenMemory(path string) *Memory {
 		m.turns = m.turns[len(m.turns)-maxTurns:]
 	}
 	m.updated = f.UpdatedAt
+	if len(f.Summary) <= maxTextBytes {
+		m.summary = f.Summary
+	}
 	return m
 }
 
@@ -98,23 +106,14 @@ func (m *Memory) snapshot() ([]*schema.Message, time.Time) {
 	return out, m.updated
 }
 
-// store replaces the conversation with history (user/assistant pairs).
-func (m *Memory) store(history []*schema.Message, at time.Time) {
-	turns := make([]memoryTurn, 0, len(history)/2)
-	for i := 0; i+1 < len(history); i += 2 {
-		turns = append(turns, memoryTurn{User: history[i].Content, Assistant: history[i+1].Content})
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.turns, m.updated = turns, at
-	m.persist()
-}
-
 // Clear removes both the in-process conversation and its persisted file.
 func (m *Memory) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.turns, m.updated = nil, time.Time{}
+	m.turns, m.updated, m.summary = nil, time.Time{}, ""
+	m.stats = ContextStats{}
+	m.revision++
+	m.epoch++
 	if m.path != "" {
 		if err := os.Remove(m.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("brain: cannot delete conversation memory")
@@ -128,7 +127,7 @@ func (m *Memory) persist() {
 	if m.path == "" {
 		return
 	}
-	b, err := json.Marshal(memoryFile{Version: memoryVersion, UpdatedAt: m.updated, Turns: m.turns})
+	b, err := json.Marshal(memoryFile{Version: memoryVersion, UpdatedAt: m.updated, Turns: m.turns, Summary: m.summary})
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(m.path), 0o700)
 	}

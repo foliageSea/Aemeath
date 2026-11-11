@@ -27,7 +27,8 @@ type Config struct {
 	TavilyAPIKey                    string
 	HomeAssistant                   hamcp.Config
 	// Memory shares the conversation across Engines; nil keeps it per Engine.
-	Memory *Memory
+	Memory        *Memory
+	ContextWindow int
 }
 type Host interface {
 	Metrics() string
@@ -38,29 +39,40 @@ type Host interface {
 }
 
 const (
-	maxTurns     = 10
+	maxTurns     = 128 // emergency bound; normal retention follows the token budget
 	maxTextBytes = 16 << 10
 	maxSteps     = 32
 )
 
 type Engine struct {
-	baseTools    []tool.BaseTool
-	haConfig     hamcp.Config
-	ha           homeAssistantClient
-	haFactory    homeAssistantFactory
-	lifeCtx      context.Context
-	lifeCancel   context.CancelFunc
-	closed       bool
-	model        *openai.ChatModel
-	agent        *react.Agent
-	persona      string
-	gate         chan struct{}
-	mu           sync.Mutex
-	generation   uint64
-	streamCancel context.CancelFunc
-	history      []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
-	lastActive   time.Time         // last committed turn; history expires after MemoryTTL
-	memory       *Memory
+	baseTools          []tool.BaseTool
+	haConfig           hamcp.Config
+	ha                 homeAssistantClient
+	haFactory          homeAssistantFactory
+	lifeCtx            context.Context
+	lifeCancel         context.CancelFunc
+	closed             bool
+	model              *openai.ChatModel
+	agent              *react.Agent
+	persona            string
+	gate               chan struct{}
+	mu                 sync.Mutex
+	generation         uint64
+	streamCancel       context.CancelFunc
+	history            []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
+	lastActive         time.Time         // last committed turn; history expires after MemoryTTL
+	memory             *Memory
+	summary            string
+	stats              ContextStats
+	memoryRevision     uint64
+	memoryEpoch        uint64
+	contextVersion     uint64
+	contextPrompt      string
+	toolTokens         int
+	compDone           chan struct{}
+	compCancel         context.CancelFunc
+	compWG             sync.WaitGroup
+	compressionTimeout time.Duration
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
@@ -101,16 +113,32 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 	if len(persona) > maxTextBytes {
 		return nil, errors.New("brain: persona exceeds 16384 bytes")
 	}
-	maxTokens := 1024
-	cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{BaseURL: cfg.BaseURL, APIKey: strings.TrimSpace(cfg.APIKey), Model: cfg.Model, MaxTokens: &maxTokens, HTTPClient: &http.Client{Timeout: 45 * time.Second, Transport: boundedTransport{}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}})
+	window, err := NormalizeContextWindow(cfg.ContextWindow)
 	if err != nil {
-		return nil, errors.New("brain: cannot initialize OpenAI model")
+		return nil, err
 	}
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
-	e := &Engine{model: cm, persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory}
+	e := &Engine{persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory, stats: newContextStats(window), compressionTimeout: 20 * time.Second}
 	if e.memory != nil {
-		e.history, e.lastActive = e.memory.snapshot()
+		e.memory.mu.Lock()
+		e.memory.revision++ // a new connection invalidates older pending memory commits
+		for _, t := range e.memory.turns {
+			e.history = append(e.history, schema.UserMessage(t.User), schema.AssistantMessage(t.Assistant, nil))
+		}
+		e.summary, e.lastActive, e.memoryRevision = e.memory.summary, e.memory.updated, e.memory.revision
+		e.memoryEpoch = e.memory.epoch
+		// Reconnects keep in-process cumulative usage; a process restart starts at zero.
+		e.stats.PromptTokens, e.stats.CompletionTokens, e.stats.TotalTokens, e.stats.UsageAvailable = e.memory.stats.PromptTokens, e.memory.stats.CompletionTokens, e.memory.stats.TotalTokens, e.memory.stats.UsageAvailable
+		e.stats.Compressions, e.stats.DroppedTurns = e.memory.stats.Compressions, e.memory.stats.DroppedTurns
+		e.memory.mu.Unlock()
 	}
+	maxTokens := 1024
+	cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{BaseURL: cfg.BaseURL, APIKey: strings.TrimSpace(cfg.APIKey), Model: cfg.Model, MaxTokens: &maxTokens, HTTPClient: &http.Client{Timeout: 45 * time.Second, Transport: boundedTransport{engine: e}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}})
+	if err != nil {
+		lifeCancel()
+		return nil, errors.New("brain: cannot initialize OpenAI model")
+	}
+	e.model = cm
 	if cfg.Tools && cfg.HomeAssistant.Enabled {
 		e.haConfig = cfg.HomeAssistant
 	}
@@ -127,6 +155,7 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 			return nil, errors.New("brain: cannot initialize Eino ReAct tools")
 		}
 	}
+	e.updateContextLocked()
 	return e, nil
 }
 
@@ -180,14 +209,29 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		defer func() { e.mu.Lock(); e.streamCancel = nil; e.mu.Unlock() }()
 	}
 	e.mu.Lock()
-	generation := e.generation
-	if len(e.history) > 0 && !e.lastActive.IsZero() && time.Since(e.lastActive) > MemoryTTL {
+	e.syncMemoryLocked()
+	if !e.lastActive.IsZero() && time.Since(e.lastActive) > MemoryTTL {
 		e.history = nil
+		e.summary = ""
+		e.contextVersion++
+		if e.compCancel != nil {
+			e.compCancel()
+		}
+		e.stats = e.emptyContextStatsLocked()
+		e.lastActive = time.Time{}
+		e.generation++
+		e.compDone = nil
+		e.compCancel = nil
 		if e.memory != nil {
 			e.memory.Clear()
+			e.memory.mu.Lock()
+			e.memoryRevision = e.memory.revision
+			e.memoryEpoch = e.memory.epoch
+			e.memory.mu.Unlock()
 		}
 	}
-	hist := append([]*schema.Message(nil), e.history...)
+	generation := e.generation
+	ctx = context.WithValue(ctx, requestScopeKey{}, requestScope{generation: generation, epoch: e.memoryEpoch})
 	e.mu.Unlock()
 	haPrompt := ""
 	if e.haConfig.Enabled {
@@ -197,18 +241,17 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		return "", ctx.Err()
 	}
 
-	// At most ten turns are sent, including the current request.
-	if len(hist) > 2*(maxTurns-1) {
-		hist = hist[len(hist)-2*(maxTurns-1):]
-	}
-	input := make([]*schema.Message, 0, len(hist)+2)
 	persona := e.persona + haPrompt
 	if e.agent != nil {
 		persona += "\n本机日期提示（未进行外部校时）：" + time.Now().Format("2006-01-02")
 	}
-	input = append(input, schema.SystemMessage(persona))
-	input = append(input, hist...)
-	input = append(input, schema.UserMessage(text))
+	e.mu.Lock()
+	e.contextPrompt = haPrompt
+	e.mu.Unlock()
+	input, prepErr := e.prepareContext(ctx, persona, text)
+	if prepErr != nil {
+		return "", prepErr
+	}
 	var out *schema.Message
 	var err error
 	if streaming {
@@ -247,20 +290,43 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	}
 	if e.generation == generation {
 		e.history = append(e.history, schema.UserMessage(text), schema.AssistantMessage(reply, nil))
-		if len(e.history) > 2*maxTurns {
-			e.history = append([]*schema.Message(nil), e.history[len(e.history)-2*maxTurns:]...)
-		}
+
 		e.lastActive = time.Now()
-		if e.memory != nil {
-			e.memory.store(e.history, e.lastActive)
-		}
+		e.updateContextLocked()
+		e.saveMemoryLocked()
 	}
 	e.mu.Unlock()
+	e.maybeCompress()
 	return reply, nil
 }
 
 func (e *Engine) rebuildAgent(ctx context.Context, extra []tool.BaseTool) error {
 	all := append(append([]tool.BaseTool(nil), e.baseTools...), extra...)
+	// Estimate tool schemas before the first request, including newly discovered
+	// Home Assistant tools, so history can be compacted before network submission.
+	wireTools := make([]any, 0, len(all))
+	for _, candidate := range all {
+		info, err := candidate.Info(ctx)
+		if err != nil {
+			return err
+		}
+		params, err := info.ParamsOneOf.ToJSONSchema()
+		if err != nil {
+			return err
+		}
+		wireTools = append(wireTools, map[string]any{"type": "function", "function": map[string]any{"name": info.Name, "description": info.Desc, "parameters": params}})
+	}
+	data, err := json.Marshal(wireTools)
+	if err != nil {
+		return err
+	}
+	var payload any
+	if err = json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.toolTokens = estimateJSON(payload)
+	e.mu.Unlock()
 	for i, candidate := range all {
 		if invokable, ok := candidate.(tool.InvokableTool); ok {
 			all[i] = diagnosticTool{InvokableTool: invokable}
@@ -283,7 +349,13 @@ func (e *Engine) Close() error {
 	e.closed = true
 	e.lifeCancel()
 	client := e.ha
+	if e.compCancel != nil {
+		e.compCancel()
+	}
+	e.stats.Compressing = false
+	e.publishStatsLocked()
 	e.mu.Unlock()
+	e.compWG.Wait()
 	if client != nil {
 		if err := client.Close(); err != nil {
 			return errors.New("brain: cannot close Home Assistant connection")
@@ -296,21 +368,43 @@ func (e *Engine) Clear() {
 	e.mu.Lock()
 	e.history = nil
 	e.lastActive = time.Time{}
+	e.summary = ""
+	e.contextVersion++
+	if e.compCancel != nil {
+		e.compCancel()
+	}
+	e.compDone = nil
+	e.compCancel = nil
+	e.stats = e.emptyContextStatsLocked()
 	if e.memory != nil {
 		e.memory.Clear()
+		e.memory.mu.Lock()
+		e.memoryRevision = e.memory.revision
+		e.memoryEpoch = e.memory.epoch
+		e.memory.mu.Unlock()
 	}
 	e.generation++
 	if e.streamCancel != nil {
 		e.streamCancel()
 	}
+	e.contextPrompt = ""
+	e.updateContextLocked()
 	e.mu.Unlock()
 }
 
 // Cap JSON responses before decoding; cap SSE incrementally without delaying deltas.
 // Transport failures are intentionally not retried: a tool-bearing generation may have run.
-type boundedTransport struct{}
+type boundedTransport struct{ engine *Engine }
 
-func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var scope requestScope
+	if t.engine != nil {
+		var err error
+		req, scope, err = t.engine.budgetRequest(req)
+		if err != nil {
+			return nil, err
+		}
+	}
 	res, err := http.DefaultTransport.RoundTrip(req)
 	if err != nil {
 		failure := safeRequestFailure(err, "")
@@ -330,6 +424,9 @@ func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if res.StatusCode >= 200 && res.StatusCode < 300 && strings.HasPrefix(strings.ToLower(res.Header.Get("Content-Type")), "text/event-stream") {
 		// Never pre-read SSE: the first sentence must reach TTS before EOF.
 		res.Body = &boundedStreamBody{ReadCloser: res.Body, remaining: limit}
+		if t.engine != nil {
+			res.Body = &usageStreamBody{ReadCloser: res.Body, engine: t.engine, scope: scope}
+		}
 		return res, nil
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
@@ -339,6 +436,9 @@ func (boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if len(data) > limit {
 		return nil, &requestFailure{code: "response_limit"}
+	}
+	if t.engine != nil {
+		t.engine.recordUsage(data, scope)
 	}
 	// Bound tool fan-out before Eino creates any tool execution tasks.
 	if res.StatusCode >= 200 && res.StatusCode < 300 {

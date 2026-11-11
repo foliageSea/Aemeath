@@ -61,6 +61,8 @@ func (e *requestFailure) Error() string {
 		message = "工具调用失败，请查看本轮工具记录"
 	case "stream_protocol":
 		message = "模型流式响应不完整或格式不兼容"
+	case "context_limit":
+		message = "本轮消息、提示词或工具结果超过上下文预算，请缩短内容或检查模型上下文容量设置"
 	case "response_limit":
 		message = "模型响应超过安全大小限制"
 	case "tool_call_limit":

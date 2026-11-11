@@ -291,7 +291,10 @@ func TestHomeAssistantClearDuringDiscovery(t *testing.T) {
 					return nil, nil
 				}
 			}}
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { replyJSON(w, "完成") }))
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Error("cleared discovery sent an obsolete model request")
+				replyJSON(w, "完成")
+			}))
 			defer s.Close()
 			e := newHAEngine(t, s, f)
 			done := make(chan error, 1)
@@ -308,7 +311,7 @@ func TestHomeAssistantClearDuringDiscovery(t *testing.T) {
 			e.Clear()
 			close(release)
 			err := <-done
-			if streaming && !errors.Is(err, context.Canceled) || !streaming && err != nil {
+			if !errors.Is(err, context.Canceled) {
 				t.Errorf("err=%v", err)
 			}
 			if len(e.history) != 0 {
