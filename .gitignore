@@ -1,4 +1,8 @@
+# Release packages
+dist/
+
 # ESP-IDF
+firmware/build-release/
 firmware/build/
 firmware/build-avatar-host/
 firmware/managed_components/

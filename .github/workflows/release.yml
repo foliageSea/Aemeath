@@ -1,0 +1,136 @@
+name: Build release packages
+
+on:
+  push:
+    branches: ['ci/release-build/**']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild (for example v0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Validate version and existing release
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(python3 scripts/version.py --check)"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            python3 scripts/version.py --check --tag "$RELEASE_TAG"
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  agent:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runner: ubuntu-24.04
+            suffix: windows-x64-setup.exe
+          - target: macos-arm64
+            runner: macos-15
+            suffix: macos-arm64.dmg
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: Install Windows cross-compilation tools
+        if: matrix.target == 'windows-x64'
+        run: sudo apt-get update && sudo apt-get install -y nsis gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+      - name: Build installer (including voice runtime)
+        run: bash scripts/build-release.sh "${{ matrix.target }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.target }}-${{ needs.version.outputs.version }}
+          path: dist/Aemeath-Agent-${{ needs.version.outputs.version }}-${{ matrix.suffix }}
+          if-no-files-found: error
+
+  firmware:
+    needs: version
+    runs-on: ubuntu-24.04
+    container:
+      image: espressif/idf:v6.0.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag || github.sha }}
+          persist-credentials: false
+      - name: Build ESP32-S3 release firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          bash scripts/build-release.sh firmware
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s3-${{ needs.version.outputs.version }}
+          path: dist/Aemeath-Firmware-${{ needs.version.outputs.version }}-esp32s3.*
+          if-no-files-found: error
+
+  upload:
+    needs: [version, agent, firmware]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-${{ needs.version.outputs.version }}'
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        shell: bash
+        run: |
+          cd dist
+          sha256sum Aemeath-* > "Aemeath-${RELEASE_VERSION}-SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums-${{ needs.version.outputs.version }}
+          path: dist/Aemeath-${{ needs.version.outputs.version }}-SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Upload release assets
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+        shell: bash
+        run: gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

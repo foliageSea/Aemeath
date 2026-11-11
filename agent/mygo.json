@@ -2,7 +2,7 @@
   "name": "Aemeath",
   "slug": "aemeath",
   "identifier": "dev.aemeath.agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "main": "./cmd/aemeath-desktop",
   "out": "build",
   "resourcesExclude": ["native"],
