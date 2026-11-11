@@ -158,6 +158,149 @@ func TestNativeWakePhraseEditMarksDirtyAndPersists(t *testing.T) {
 	}
 }
 
+func nativeVoiceAssertTooltip(t *testing.T, tt *ui.Tester, label, want string) {
+	t.Helper()
+	info, ok := tt.Access(label)
+	if !ok || info.Description != want {
+		t.Fatalf("tooltip for %s = %q (found=%v), want %q", label, info.Description, ok, want)
+	}
+}
+
+func TestNativeVoiceCompactHeaderKeepsTwoRows(t *testing.T) {
+	for _, size := range [][2]int{{760, 577}, {1100, 900}, {1762, 883}} {
+		for _, dark := range []bool{false, true} {
+			a, f, _, tt := nativeTest(t)
+			a.service = &nativeVoiceFake{nativeFake: f}
+			tt.SetSize(size[0], size[1])
+			tt.SetDark(dark)
+			a.voiceGlobalReady, a.voiceGlobalKey = true, "F8"
+			nativeClick(t, tt, "语音助手")
+			for _, state := range []struct {
+				enabled, ready bool
+				want, detail   string
+			}{
+				{false, false, "助手未启用", "语音助手尚未启用，填写设置后保存即可开始。"},
+				{true, false, "唤醒未就绪", "离线唤醒：未就绪（模型缺失或不可用）"},
+				{true, true, "唤醒已就绪", "离线唤醒：已就绪 · 请说「你好爱弥斯今天也请多关照」"},
+			} {
+				f.state.Settings.Voice.Enabled = state.enabled
+				f.state.Settings.Voice.WakePhrase = "你好爱弥斯今天也请多关照"
+				f.state.Voice.WakeReady = state.ready
+				a.refresh()
+				tt.Frame()
+				header, ok := tt.Find("语音助手状态栏")
+				if !ok {
+					t.Fatal("missing assistant header")
+				}
+				first, ok := tt.Find("助手连接状态")
+				if !ok {
+					t.Fatal("missing first header row")
+				}
+				second, ok := tt.Find("助手唤醒与快捷键")
+				if !ok || first.Y+first.H > second.Y+1 || second.Y+second.H > header.Y+header.H+1 || header.H > 60 {
+					t.Fatalf("header is not compact two-row layout: size=%v dark=%v header=%+v first=%+v second=%+v", size, dark, header, first, second)
+				}
+				for _, label := range []string{"离线唤醒状态", state.want, "语音快捷键提示"} {
+					box, found := tt.Find(label)
+					if !found || box.W <= 0 || box.H <= 0 || box.X < second.X || box.X+box.W > second.X+second.W+1 || box.Y < second.Y || box.Y+box.H > second.Y+second.H+1 {
+						t.Fatalf("second-row item escaped header: %s %+v second=%+v", label, box, second)
+					}
+				}
+				status, _ := tt.Find("离线唤醒状态")
+				hint, _ := tt.Find("语音快捷键提示")
+				if status.X+status.W >= hint.X {
+					t.Fatalf("wake and shortcut overlap: status=%+v hint=%+v", status, hint)
+				}
+				if !tt.HasText("F8 按住说话") || tt.HasText(state.detail) {
+					t.Fatal("header did not abbreviate status and shortcut")
+				}
+				nativeVoiceAssertTooltip(t, tt, "离线唤醒状态", state.detail)
+				nativeVoiceAssertTooltip(t, tt, "语音快捷键提示", "全局 F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒")
+				controls, ok := tt.Find("语音操作栏")
+				if !ok || header.Y+header.H > controls.Y || controls.Y+controls.H > float32(size[1])+1 {
+					t.Fatalf("header or controls escaped window: header=%+v controls=%+v", header, controls)
+				}
+				count := 0
+				for _, text := range tt.Texts() {
+					if text == state.want {
+						count++
+					}
+				}
+				if count != 1 {
+					t.Fatalf("wake status rendered %d times, want once", count)
+				}
+			}
+		}
+	}
+}
+
+func TestNativeVoiceCompactConnectionState(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	tt.SetSize(760, 577)
+	nativeClick(t, tt, "语音助手")
+	for _, state := range []struct {
+		connected           bool
+		phase, want, detail string
+	}{
+		{false, "idle", "· 未连接", "语音通道：未连接"},
+		{false, "speaking", "· 未连接", "语音通道：未连接"},
+		{true, "idle", "· 已连接 · 待命", "语音通道：已连接 · 待命"},
+		{true, "speaking", "· 已连接 · 正在说话", "语音通道：已连接 · 正在说话"},
+	} {
+		f.state.Voice.Connected, f.state.Voice.Phase = state.connected, state.phase
+		a.refresh()
+		tt.Frame()
+		if !tt.HasText(state.want) {
+			t.Fatalf("missing compact connection state: %s", state.want)
+		}
+		nativeVoiceAssertTooltip(t, tt, state.want, state.detail)
+		row, _ := tt.Find("助手连接状态")
+		text, ok := tt.Find(state.want)
+		if !ok || text.X < row.X || text.X+text.W > row.X+row.W+1 || text.Y < row.Y || text.Y+text.H > row.Y+row.H+1 {
+			t.Fatal("connection status escaped first row")
+		}
+		if !state.connected {
+			for _, text := range tt.Texts() {
+				if strings.Contains(text, "未连接") && strings.Contains(text, "待命") {
+					t.Fatalf("disconnected header still shows standby: %s", text)
+				}
+			}
+		}
+	}
+}
+
+func TestNativeVoiceCompactShortcutDynamicState(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	a.service = &nativeVoiceFake{nativeFake: f}
+	f.state.Settings.Voice.Enabled = true
+	f.state.Voice.Connected = true
+	a.refresh()
+	tt.SetSize(760, 577)
+	nativeClick(t, tt, "语音助手")
+	for _, state := range []struct {
+		ready, hold       bool
+		key, want, detail string
+	}{
+		{false, false, "", "快捷键未就绪", "全局快捷键尚未就绪"},
+		{true, false, "", "F8 按住说话", "全局 F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒"},
+		{true, false, "Ctrl+Shift+F8", "Ctrl+Shift+F8 按住说话", "全局 Ctrl+Shift+F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒"},
+		{true, true, "Ctrl+Shift+F8", "录音中 · 松开发送", "正在按住录音 · 松开 Ctrl+Shift+F8 发送 · 前台 Esc 取消"},
+		{true, false, "F8", "F8 按住说话", "全局 F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒"},
+	} {
+		a.voiceGlobalReady, a.voiceHold, a.voiceGlobalKey = state.ready, state.hold, state.key
+		tt.Frame()
+		if !tt.HasText(state.want) || tt.HasText(state.detail) {
+			t.Fatalf("shortcut did not abbreviate dynamic state: %s", state.want)
+		}
+		nativeVoiceAssertTooltip(t, tt, "语音快捷键提示", state.detail)
+		row, _ := tt.Find("助手唤醒与快捷键")
+		hint, ok := tt.Find("语音快捷键提示")
+		if !ok || hint.X < row.X || hint.X+hint.W > row.X+row.W+1 || hint.Y < row.Y || hint.Y+hint.H > row.Y+row.H+1 {
+			t.Fatalf("dynamic shortcut escaped second row: hint=%+v row=%+v", hint, row)
+		}
+	}
+}
+
 func TestNativeVoiceWakeHintsUseSavedPhrase(t *testing.T) {
 	for _, test := range []struct {
 		name, saved, want string
@@ -179,12 +322,13 @@ func TestNativeVoiceWakeHintsUseSavedPhrase(t *testing.T) {
 			nativeClick(t, tt, "语音助手")
 			for _, text := range []string{
 				"说出「" + test.want + "」，或点击手动唤醒开始对话。",
-				"离线唤醒：已就绪 · 请说「" + test.want + "」",
+				"唤醒已就绪",
 			} {
 				if !tt.HasText(text) {
 					t.Fatalf("missing saved wake phrase hint: %s", text)
 				}
 			}
+			nativeVoiceAssertTooltip(t, tt, "离线唤醒状态", "离线唤醒：已就绪 · 请说「"+test.want+"」")
 		})
 	}
 }
@@ -211,7 +355,7 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	f.state.Voice.Error = "找不到唤醒模型"
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
-	if !tt.HasText("离线唤醒：未就绪（模型缺失或不可用）") || !tt.HasText("语音提示：找不到唤醒模型") {
+	if !tt.HasText("唤醒未就绪") || !tt.HasText("语音提示：找不到唤醒模型") {
 		t.Fatal("missing models were not diagnosed")
 	}
 	tt.SetSize(1100, 3200)
@@ -252,7 +396,7 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	f.state.Voice.GeneratedSegments, f.state.Voice.PlayedSegments = 3, 1
 	a.refresh()
 	tt.Frame()
-	for _, text := range []string{"离线唤醒：已就绪 · 请说「你好小爱」", "语音通道：已连接 · 正在说话", "现在电脑忙吗？", "我来帮你看看。"} {
+	for _, text := range []string{"唤醒已就绪", "· 已连接 · 正在说话", "现在电脑忙吗？", "我来帮你看看。"} {
 		if !tt.HasText(text) {
 			t.Fatalf("updated voice state not displayed: %s", text)
 		}
@@ -340,7 +484,7 @@ func TestNativeVoiceOfflineAndUnsupportedControls(t *testing.T) {
 	a.refresh()
 	tt.Frame()
 	info, _ = tt.AccessByRole(ui.RoleButton, "手动唤醒")
-	if !info.Disabled || !tt.HasText("语音助手尚未启用，填写设置后保存即可开始。") {
+	if !info.Disabled || !tt.HasText("助手未启用") {
 		t.Fatal("disabled voice assistant state not shown")
 	}
 }

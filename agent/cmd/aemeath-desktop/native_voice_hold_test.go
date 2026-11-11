@@ -171,9 +171,10 @@ func TestGlobalVoiceHoldFallsBackAndDisplaysBinding(t *testing.T) {
 	)
 	defer stop()
 	tt.Frame()
-	if !a.voiceGlobalReady || a.voiceGlobalKey != "Ctrl+Shift+F8" || !tt.HasText("全局 Ctrl+Shift+F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒") {
+	if !a.voiceGlobalReady || a.voiceGlobalKey != "Ctrl+Shift+F8" || !tt.HasText("Ctrl+Shift+F8 按住说话") {
 		t.Fatal("fallback binding not displayed")
 	}
+	nativeVoiceAssertTooltip(t, tt, "语音快捷键提示", "全局 Ctrl+Shift+F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒")
 	emit(true)
 	emit(false)
 	if len(f.commands) != 2 || f.commands[1][0] != "record_stop" {

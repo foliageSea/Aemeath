@@ -181,15 +181,23 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 	state := a.snapshot.Voice
 	disabled := a.voiceDisabled()
 	ui.Column(c.Key("voice-chat")).FillWidth().Grow(1).MinHeight(0).Gap(16).Children(func() {
-		ui.Row(c.Key("voice-toolbar")).FillWidth().Shrink(0).Gap(10).Padding(0, 0, 12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border.Alpha(0.5)).AlignItems(ui.Center).Children(func() {
+		ui.Row(c.Key("voice-toolbar")).Label("语音助手状态栏").FillWidth().Shrink(0).Gap(10).Padding(0, 0, 12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border.Alpha(0.5)).AlignItems(ui.Center).Children(func() {
 			voiceAvatar(c, 40)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-				ui.Text(c, "爱弥斯").Bold().FontSize(15)
-				connection := "语音通道：未连接"
-				if state.Connected {
-					connection = "语音通道：已连接"
-				}
-				ui.Text(c, connection+" · "+nativeVoicePhase(state.Phase)).FontSize(11).TextColor(t.TextMuted).Wrap()
+				ui.Row(c.Key("voice-connection")).Label("助手连接状态").FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "爱弥斯").Bold().FontSize(15).Shrink(0)
+					connection, detail := "未连接", "语音通道：未连接"
+					if state.Connected {
+						connection = "已连接 · " + nativeVoicePhase(state.Phase)
+						detail = "语音通道：" + connection
+					}
+					ui.Text(c, "· "+connection).MinWidth(0).FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…").Tooltip(detail)
+				})
+				ui.Row(c.Key("voice-header-hints")).Label("助手唤醒与快捷键").FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
+					a.voiceStatusView(c)
+					ui.Text(c, "·").FontSize(11).TextColor(t.TextMuted).Shrink(0)
+					a.voiceHoldHintView(c)
+				})
 			})
 			voiceIconButton(c, "voice-configure", "语音设置", voiceSettingsIcon, false, false, a.openVoiceSettings)
 			voiceIconButton(c, "voice-clear", "清空对话", voiceClearIcon, false, disabled, func() { a.voiceClearConfirm = true })
@@ -249,10 +257,6 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 			})
 			a.voiceContextView(c)
 			a.voiceNoticeView(c)
-			ui.Row(c).FillWidth().Wrap().GapX(16).GapY(6).Padding(10, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(t.Border.Alpha(0.4)).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-				a.voiceStatusView(c)
-				a.voiceHoldHintView(c)
-			})
 		})
 	})
 }
@@ -351,15 +355,15 @@ func (a *nativeUI) voiceNoticeView(c *ui.Context) {
 
 func (a *nativeUI) voiceStatusView(c *ui.Context) {
 	t, state := c.Theme(), a.snapshot.Voice
-	wake, color := "离线唤醒：未就绪（模型缺失或不可用）", t.Warning
+	wake, detail, color := "唤醒未就绪", "离线唤醒：未就绪（模型缺失或不可用）", t.Warning
 	if !a.snapshot.Settings.Voice.Enabled {
-		wake, color = "语音助手尚未启用，填写设置后保存即可开始。", t.TextMuted
+		wake, detail, color = "助手未启用", "语音助手尚未启用，填写设置后保存即可开始。", t.TextMuted
 	} else if state.WakeReady {
-		wake, color = fmt.Sprintf("离线唤醒：已就绪 · 请说「%s」", a.savedWakePhrase()), t.Success
+		wake, detail, color = "唤醒已就绪", fmt.Sprintf("离线唤醒：已就绪 · 请说「%s」", a.savedWakePhrase()), t.Success
 	}
-	ui.Row(c).MinWidth(0).Shrink(1).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("voice-wake-status")).Label("离线唤醒状态").Tooltip(detail).Shrink(0).Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(color)
-		ui.Text(c, wake).FontSize(11).TextColor(t.TextMuted).Wrap()
+		ui.Text(c, wake).FontSize(11).TextColor(t.TextMuted).SingleLine()
 	})
 }
 
@@ -369,14 +373,16 @@ func (a *nativeUI) voiceHoldHintView(c *ui.Context) {
 	if key == "" {
 		key = "F8"
 	}
-	hint, color := fmt.Sprintf("全局 %s · 后台也可按住说话 · 松开发送 · 最长 30 秒", key), t.TextMuted
+	hint, detail, color := key+" 按住说话", fmt.Sprintf("全局 %s · 后台也可按住说话 · 松开发送 · 最长 30 秒", key), t.TextMuted
 	if !a.voiceGlobalReady {
-		hint = "全局快捷键尚未就绪"
+		hint, detail = "快捷键未就绪", "全局快捷键尚未就绪"
 	}
 	if a.voiceHold {
-		hint, color = fmt.Sprintf("正在按住录音 · 松开 %s 发送 · 前台 Esc 取消", key), t.Accent
+		hint, detail, color = "录音中 · 松开发送", fmt.Sprintf("正在按住录音 · 松开 %s 发送 · 前台 Esc 取消", key), t.Accent
 	}
-	ui.Text(c, hint).FontSize(11).TextColor(color).Wrap()
+	ui.Row(c.Key("voice-shortcut-hint")).Label("语音快捷键提示").Tooltip(detail).MinWidth(0).Grow(1).Children(func() {
+		ui.Text(c, hint).MinWidth(0).Grow(1).FontSize(11).TextColor(color).SingleLine().Ellipsis("…")
+	})
 }
 
 func (a *nativeUI) voicePreviewView(c *ui.Context) {
