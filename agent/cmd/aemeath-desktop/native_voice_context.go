@@ -97,7 +97,7 @@ func (a *nativeUI) voiceContextView(c *ui.Context) {
 		summaryColor = t.Warning
 	}
 	estimateTooltip := fmt.Sprintf("按序列化请求估算，非精确分词；占用比例按输入预算计算，已扣除 %d Tokens 预留。达到 70%% 后台摘要，85%% 同步压缩。", stats.ReservedTokens)
-	usageTooltip := "当前应用会话中服务商已上报的累计 Tokens，可能包含工具决策、最终回复与摘要请求；未上报部分无法计入，重启应用后重新累计。部分服务商不支持上报。"
+	usageTooltip := "累计 Tokens（本地估算），非精确分词，不等于服务商计费用量。按实际发送的请求（含历史上下文、工具定义和工具结果）及收到的输出（含可见推理和工具调用）估算，覆盖工具决策、回复与摘要请求。本地保存，启动后立即恢复并继续累计；重连、重启和对话上下文闲置 4 小时过期均保留累计用量。手动清空对话会清零用量并删除保存记录；无保存用量时从 0 开始。"
 	ui.Column(c.Key("voice-context")).Label("上下文与用量").FillWidth().MinWidth(0).Gap(10).Children(func() {
 		ui.Row(c).FillWidth().MinWidth(0).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Row(c).Grow(1).MinWidth(0).Wrap().GapX(12).GapY(6).AlignItems(ui.Center).Children(func() {
@@ -149,10 +149,7 @@ func (a *nativeUI) voiceContextView(c *ui.Context) {
 			}
 			nativeContextDetail(c, "摘要", summaryDetail, "", summaryColor)
 			nativeContextDetail(c, "对话保留", fmt.Sprintf("%d 轮 · 压缩 %d 次 · 丢弃 %d 轮", stats.RetainedTurns, stats.Compressions, stats.DroppedTurns), "", t.TextMuted)
-			usage := "服务商尚未上报"
-			if stats.UsageAvailable {
-				usage = fmt.Sprintf("输入 %s · 输出 %s · 总计 %s Tokens", nativeContextNumber(stats.PromptTokens), nativeContextNumber(stats.CompletionTokens), nativeContextNumber(stats.TotalTokens))
-			}
+			usage := fmt.Sprintf("输入 %s · 输出 %s · 总计 %s Tokens（本地估算）", nativeContextNumber(stats.LocalPromptTokens), nativeContextNumber(stats.LocalCompletionTokens), nativeContextNumber(stats.LocalTotalTokens))
 			nativeContextDetail(c, "累计用量", usage, usageTooltip, t.Text)
 		})
 	})

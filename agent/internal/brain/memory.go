@@ -22,14 +22,22 @@ type memoryTurn struct {
 	User      string `json:"user"`
 	Assistant string `json:"assistant"`
 }
+
+// localUsageFile stores only cumulative estimates, independent of conversation TTL.
+type localUsageFile struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
 type memoryFile struct {
-	Version         int          `json:"version"`
-	UpdatedAt       time.Time    `json:"updated_at"`
-	Turns           []memoryTurn `json:"turns"`
-	Summary         string       `json:"summary,omitempty"`
-	Compressions    int          `json:"compressions,omitempty"`
-	DroppedTurns    int          `json:"dropped_turns,omitempty"`
-	LastCompression string       `json:"last_compression,omitempty"`
+	Version         int             `json:"version"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	Turns           []memoryTurn    `json:"turns"`
+	Summary         string          `json:"summary,omitempty"`
+	Compressions    int             `json:"compressions,omitempty"`
+	DroppedTurns    int             `json:"dropped_turns,omitempty"`
+	LastCompression string          `json:"last_compression,omitempty"`
+	LocalUsage      *localUsageFile `json:"local_usage,omitempty"`
 }
 
 // Memory outlives individual Engines (one per voice connection) so that
@@ -73,6 +81,11 @@ func OpenMemory(path string) *Memory {
 	}
 	if len(m.turns) > maxTurns {
 		m.turns = m.turns[len(m.turns)-maxTurns:]
+	}
+	if usage := f.LocalUsage; usage != nil && usage.InputTokens >= 0 && usage.OutputTokens >= 0 && usage.InputTokens <= int(^uint(0)>>1)-usage.OutputTokens {
+		m.stats.LocalPromptTokens = usage.InputTokens
+		m.stats.LocalCompletionTokens = usage.OutputTokens
+		m.stats.LocalTotalTokens = usage.InputTokens + usage.OutputTokens
 	}
 	m.updated = f.UpdatedAt
 	if len(f.Summary) <= maxTextBytes {
@@ -119,16 +132,30 @@ func (m *Memory) snapshot() ([]*schema.Message, time.Time) {
 func (m *Memory) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.turns, m.updated, m.summary = nil, time.Time{}, ""
-	m.stats = ContextStats{}
-	m.statsConfig = contextConfigKey{}
-	m.revision++
-	m.epoch++
+	m.resetLocked()
 	if m.path != "" {
 		if err := os.Remove(m.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("brain: cannot delete conversation memory")
 		}
 	}
+}
+
+func (m *Memory) resetLocked() {
+	m.turns, m.updated, m.summary = nil, time.Time{}, ""
+	m.stats = ContextStats{}
+	m.statsConfig = contextConfigKey{}
+	m.revision++
+	m.epoch++
+}
+
+// Expiration forgets conversational context without resetting lifetime usage.
+func (m *Memory) expire() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previous := m.stats
+	m.resetLocked()
+	copyLocalUsage(&m.stats, previous)
+	m.persist()
 }
 
 // persist writes atomically with owner-only permissions; transcripts are private.
@@ -137,8 +164,13 @@ func (m *Memory) persist() {
 	if m.path == "" {
 		return
 	}
+	var usage *localUsageFile
+	if m.stats.LocalPromptTokens != 0 || m.stats.LocalCompletionTokens != 0 {
+		usage = &localUsageFile{InputTokens: m.stats.LocalPromptTokens, OutputTokens: m.stats.LocalCompletionTokens}
+	}
 	b, err := json.Marshal(memoryFile{
-		Version: memoryVersion, UpdatedAt: m.updated, Turns: m.turns, Summary: m.summary,
+		LocalUsage: usage,
+		Version:    memoryVersion, UpdatedAt: m.updated, Turns: m.turns, Summary: m.summary,
 		Compressions: m.stats.Compressions, DroppedTurns: m.stats.DroppedTurns, LastCompression: m.stats.LastCompression,
 	})
 	if err == nil {

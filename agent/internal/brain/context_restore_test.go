@@ -73,7 +73,7 @@ func TestRestoredContextEstimateMatchesEngineWithoutRequests(t *testing.T) {
 	}
 }
 
-func TestConversationStatisticsPersistButUsageDoesNot(t *testing.T) {
+func TestConversationStatisticsAndLocalUsagePersist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memory.json")
 	memory := OpenMemory(path)
 	memory.turns = []memoryTurn{{User: "问题", Assistant: "回答"}}
@@ -81,12 +81,16 @@ func TestConversationStatisticsPersistButUsageDoesNot(t *testing.T) {
 	memory.stats = ContextStats{
 		Compressions: 7, DroppedTurns: 5, LastCompression: "fallback", Compressing: true,
 		PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120, UsageAvailable: true,
+		LocalPromptTokens: 150, LocalCompletionTokens: 30, LocalTotalTokens: 180,
 	}
 	memory.persist()
 	restored := OpenMemory(path)
 	stats := restored.ContextStats()
 	if stats.Compressions != 7 || stats.DroppedTurns != 5 || stats.LastCompression != "fallback" || stats.RetainedTurns != 1 || stats.SummaryTokens == 0 {
 		t.Fatalf("conversation statistics not restored: %+v", stats)
+	}
+	if stats.LocalPromptTokens != 150 || stats.LocalCompletionTokens != 30 || stats.LocalTotalTokens != 180 {
+		t.Fatalf("local usage not restored: %+v", stats)
 	}
 	if stats.Compressing || stats.UsageAvailable || stats.PromptTokens != 0 || stats.CompletionTokens != 0 || stats.TotalTokens != 0 {
 		t.Fatalf("restored transient job or process usage: %+v", stats)

@@ -134,8 +134,8 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 		}
 		e.summary, e.lastActive, e.memoryRevision = e.memory.summary, e.memory.updated, e.memory.revision
 		e.memoryEpoch = e.memory.epoch
-		// Reconnects keep in-process cumulative usage; a process restart starts at zero.
-		e.stats.PromptTokens, e.stats.CompletionTokens, e.stats.TotalTokens, e.stats.UsageAvailable = e.memory.stats.PromptTokens, e.memory.stats.CompletionTokens, e.memory.stats.TotalTokens, e.memory.stats.UsageAvailable
+		// Local totals survive restarts; provider totals survive in-process reconnects.
+		copyUsage(&e.stats, e.memory.stats)
 		e.stats.Compressions, e.stats.DroppedTurns = e.memory.stats.Compressions, e.memory.stats.DroppedTurns
 		e.stats.LastCompression = e.memory.stats.LastCompression
 		e.memory.mu.Unlock()
@@ -228,16 +228,19 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		if e.compCancel != nil {
 			e.compCancel()
 		}
+		previousUsage := e.stats
 		e.stats = e.emptyContextStatsLocked()
+		copyLocalUsage(&e.stats, previousUsage)
 		e.lastActive = time.Time{}
 		e.generation++
 		e.compDone = nil
 		e.compCancel = nil
 		if e.memory != nil {
-			e.memory.Clear()
+			e.memory.expire()
 			e.memory.mu.Lock()
 			e.memoryRevision = e.memory.revision
 			e.memoryEpoch = e.memory.epoch
+			copyUsage(&e.stats, e.memory.stats)
 			e.memory.mu.Unlock()
 		}
 	}
@@ -441,6 +444,9 @@ func (t boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		res.Body.Close()
 		return nil, httpFailure(res.StatusCode)
+	}
+	if t.engine != nil {
+		t.engine.addLocalUsage(scope.inputTokens, 0, scope)
 	}
 	const limit = 1 << 20
 	if res.StatusCode >= 200 && res.StatusCode < 300 && strings.HasPrefix(strings.ToLower(res.Header.Get("Content-Type")), "text/event-stream") {

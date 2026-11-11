@@ -11,9 +11,10 @@ import (
 
 type requestScopeKey struct{}
 type requestScope struct {
-	generation uint64
-	epoch      uint64
-	summary    bool
+	generation  uint64
+	epoch       uint64
+	summary     bool
+	inputTokens int // local estimate, assigned only after the request passes its budget
 }
 
 // Count the actual serialized request payload, including tool definitions,
@@ -89,6 +90,7 @@ func (e *Engine) budgetRequest(req *http.Request) (*http.Request, requestScope, 
 	if tokens > hardLimit {
 		return nil, scope, &requestFailure{code: "context_limit"}
 	}
+	scope.inputTokens = tokens
 	return req, scope, nil
 }
 
@@ -116,6 +118,9 @@ func parseUsage(data []byte) *providerUsage {
 	return u
 }
 func (e *Engine) recordUsage(data []byte, scope requestScope) {
+	var output localOutputCounter
+	output.observe(data)
+	e.addLocalUsage(0, output.tokens(), scope)
 	if u := parseUsage(data); u != nil {
 		e.addUsage(*u, scope)
 	}
@@ -160,6 +165,7 @@ type usageStreamBody struct {
 	mu       sync.Mutex
 	line     []byte
 	usage    *providerUsage
+	output   localOutputCounter
 	finished bool
 }
 
@@ -187,7 +193,9 @@ func (b *usageStreamBody) parseLine() {
 	if !bytes.HasPrefix(line, []byte("data:")) {
 		return
 	}
-	if u := parseUsage(bytes.TrimSpace(line[5:])); u != nil {
+	data := bytes.TrimSpace(line[5:])
+	b.output.observe(data)
+	if u := parseUsage(data); u != nil {
 		b.usage = u
 	}
 }
@@ -200,8 +208,11 @@ func (b *usageStreamBody) finish() {
 	b.parseLine()
 	b.finished = true
 	u := b.usage
+	outputTokens := b.output.tokens()
+	b.output = localOutputCounter{}
 	b.line = nil
 	b.mu.Unlock()
+	b.engine.addLocalUsage(0, outputTokens, b.scope)
 	if u != nil {
 		b.engine.addUsage(*u, b.scope)
 	}

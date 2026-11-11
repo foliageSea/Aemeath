@@ -99,6 +99,7 @@ func TestSnapshotEstimatesRestoredContextBeforeVoiceStarts(t *testing.T) {
 				"version": 2, "updated_at": time.Now(), "summary": "用户喜欢清淡口味",
 				"turns":        []map[string]string{{"user": "推荐晚饭", "assistant": "可以喝粥"}},
 				"compressions": 3, "dropped_turns": 2, "last_compression": "compressed",
+				"local_usage": map[string]int{"input_tokens": 12000, "output_tokens": 700},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -116,6 +117,9 @@ func TestSnapshotEstimatesRestoredContextBeforeVoiceStarts(t *testing.T) {
 			stats := state.Voice.Context
 			if state.Running || stats.EstimatedTokens <= 0 || stats.InputBudget <= 0 || stats.UsagePercent <= 0 || stats.ContextWindow != 65536 || stats.RetainedTurns != 1 || stats.SummaryTokens <= 0 || stats.Compressions != 3 || stats.DroppedTurns != 2 || stats.LastCompression != "compressed" || stats.UsageAvailable {
 				t.Fatalf("startup still needs a voice request to restore context: %+v", stats)
+			}
+			if stats.LocalPromptTokens != 12000 || stats.LocalCompletionTokens != 700 || stats.LocalTotalTokens != 12700 {
+				t.Fatalf("startup did not restore local usage before voice starts: %+v", stats)
 			}
 			source := "manual"
 			if mode == "auto" {
