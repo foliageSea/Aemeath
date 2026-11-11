@@ -1,5 +1,7 @@
 # Aemeath — 性能监控台与爱弥斯语音 Agent
 
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/aemeath)
+
 Go 采集端（macOS / Windows）通过 Wi‑Fi WebSocket 把 CPU、内存、磁盘、网络、温度、GPU 推送到
 Waveshare **ESP32‑S3‑Touch‑LCD‑4B**（480×480 ST7701 + GT911），在 LVGL 多页仪表盘上显示。
 
@@ -12,6 +14,10 @@ agent/      Go 1.27.3+ 采集端 + MyGO 0.8.3 桌面管理端（gopsutil + cgo I
 firmware/   ESP-IDF v6.0.2 固件（LVGL 9、esp_lvgl_port、mDNS、esp_http_server WS）
 docs/       语音安装配置、通信协议与验证记录
 ```
+
+## 界面预览
+
+![Aemeath 桌面端语音助手界面](docs/images/aemeath.webp)
 
 ## 版本与自动发版
 
