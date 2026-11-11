@@ -2,9 +2,7 @@ name: Web flasher (GitHub Pages)
 
 on:
   push:
-    branches:
-      - main
-      - 'ci/flasher-pages/**'
+    branches: [main]
     paths:
       - 'firmware/**'
       - 'flasher/**'
