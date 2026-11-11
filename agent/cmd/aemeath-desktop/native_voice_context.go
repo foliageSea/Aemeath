@@ -2,24 +2,37 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"aemeath/agent/internal/brain"
 
 	"github.com/egoist/mygo/ui"
 )
 
-// Keep estimates and provider-reported usage separate: they measure different
-// things, and many compatible providers never send usage at all.
-func nativeContextText(stats brain.ContextStats, configuredWindow int) (occupancy, summary, usage string) {
+func nativeContextWindow(stats brain.ContextStats, configuredWindow int) int {
 	window := stats.ContextWindow
 	if window == 0 {
 		window, _ = brain.NormalizeContextWindow(configuredWindow)
 	}
-	if stats.InputBudget > 0 {
-		occupancy = fmt.Sprintf("上下文（估算）：%.1f%% · %d / %d Tokens · 容量 %d", stats.UsagePercent, stats.EstimatedTokens, stats.InputBudget, window)
-	} else {
-		occupancy = fmt.Sprintf("上下文（估算）：等待模型初始化 · 容量 %d Tokens", window)
+	return window
+}
+
+func nativeContextNumber(value int) string {
+	text := fmt.Sprint(value)
+	for i := len(text) - 3; i > 0; i -= 3 {
+		text = text[:i] + "," + text[i:]
 	}
+	return text
+}
+
+func nativeContextCapacity(window int) string {
+	if window >= 1024 && window%1024 == 0 {
+		return fmt.Sprintf("%dK", window/1024)
+	}
+	return nativeContextNumber(window)
+}
+
+func nativeContextSummary(stats brain.ContextStats) string {
 	status := "尚未压缩"
 	if stats.SummaryTokens > 0 {
 		status = "已有摘要"
@@ -35,12 +48,7 @@ func nativeContextText(stats brain.ContextStats, configuredWindow int) (occupanc
 	if stats.Compressing {
 		status = "正在压缩"
 	}
-	summary = fmt.Sprintf("摘要：%s · %d Tokens · 保留 %d 轮 · 压缩 %d 次 · 丢弃 %d 轮", status, stats.SummaryTokens, stats.RetainedTurns, stats.Compressions, stats.DroppedTurns)
-	usage = "累计 usage：服务商尚未上报（部分服务商不支持）"
-	if stats.UsageAvailable {
-		usage = fmt.Sprintf("累计 usage（服务商已上报）：输入 %d · 输出 %d · 总计 %d Tokens", stats.PromptTokens, stats.CompletionTokens, stats.TotalTokens)
-	}
-	return
+	return status
 }
 
 func nativeContextSourceText(stats brain.ContextStats, configuredMode string) (source, tooltip string) {
@@ -68,19 +76,84 @@ func nativeContextSourceText(stats brain.ContextStats, configuredMode string) (s
 
 func (a *nativeUI) voiceContextView(c *ui.Context) {
 	stats := a.snapshot.Voice.Context
-	occupancy, summary, usage := nativeContextText(stats, a.snapshot.Settings.Voice.ContextWindow)
+	window := nativeContextWindow(stats, a.snapshot.Settings.Voice.ContextWindow)
+	summary := nativeContextSummary(stats)
 	source, sourceTooltip := nativeContextSourceText(stats, a.snapshot.Settings.Voice.ContextWindowMode)
 	t := c.Theme()
-	color := t.TextMuted
-	if stats.UsagePercent >= 85 || stats.LastCompression == "failed" {
-		color = t.Warning
-	} else if stats.Compressing {
-		color = t.Accent
+	occupancyColor, summaryColor := t.Accent, t.TextMuted
+	if stats.UsagePercent >= 85 {
+		occupancyColor = t.Warning
 	}
-	ui.Column(c.Key("voice-context")).Label("上下文与用量").FillWidth().MinWidth(0).Gap(3).Children(func() {
-		ui.Text(c, "容量来源："+source).FontSize(11).TextColor(t.TextMuted).Wrap().Tooltip(sourceTooltip)
-		ui.Text(c, occupancy).FontSize(11).TextColor(color).Wrap().Tooltip(fmt.Sprintf("按序列化请求估算，非精确分词；输入预算已扣除 %d Tokens 预留。达到 70%% 后台摘要，85%% 同步压缩。", stats.ReservedTokens))
-		ui.Text(c, summary).FontSize(11).TextColor(color).Wrap()
-		ui.Text(c, usage).FontSize(11).TextColor(t.TextMuted).Wrap().Tooltip("当前会话中服务商已上报的累计数据，可能包含工具决策、最终回复与摘要请求；未上报部分无法计入，重启应用后重新累计。")
+	if stats.Compressing {
+		summaryColor = t.Accent
+	} else if stats.LastCompression == "failed" || stats.LastCompression == "fallback" {
+		summaryColor = t.Warning
+	}
+	estimateTooltip := fmt.Sprintf("按序列化请求估算，非精确分词；占用比例按输入预算计算，已扣除 %d Tokens 预留。达到 70%% 后台摘要，85%% 同步压缩。", stats.ReservedTokens)
+	usageTooltip := "当前应用会话中服务商已上报的累计 Tokens，可能包含工具决策、最终回复与摘要请求；未上报部分无法计入，重启应用后重新累计。部分服务商不支持上报。"
+	ui.Column(c.Key("voice-context")).Label("上下文与用量").FillWidth().MinWidth(0).Gap(10).Children(func() {
+		ui.Row(c).FillWidth().MinWidth(0).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Grow(1).MinWidth(0).Wrap().GapX(12).GapY(6).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Tooltip(estimateTooltip).Children(func() {
+					ui.Text(c, "上下文").FontSize(12).TextColor(t.TextMuted)
+					if stats.InputBudget > 0 {
+						ui.Text(c, fmt.Sprintf("%.1f%%", stats.UsagePercent)).FontSize(12).Bold().TextColor(occupancyColor)
+						fraction := max(0, min(1, stats.UsagePercent/100))
+						ui.Progress(c, fraction).Label("上下文占用（估算）").Size(64, 4).MinWidth(0).Shrink(0).Background(t.Border.Alpha(0.6)).Draw(func(p *ui.Painter, r ui.Rect) {
+							p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * float32(fraction), H: r.H}, occupancyColor, 2)
+						})
+					} else {
+						ui.Text(c, "等待初始化").FontSize(12).TextColor(t.TextMuted)
+					}
+				})
+				ui.Text(c, "容量 "+nativeContextCapacity(window)).FontSize(12).TextColor(t.TextMuted).Tooltip(fmt.Sprintf("%s Tokens\n%s", nativeContextNumber(window), sourceTooltip))
+				if summary != "尚未压缩" {
+					ui.Text(c, summary).FontSize(12).TextColor(summaryColor)
+				} else if stats.InputBudget > 0 && stats.UsagePercent >= 70 {
+					ui.Text(c, "接近压缩阈值").FontSize(12).TextColor(t.Warning)
+				}
+			})
+			button := ui.ButtonBase(c.Key("details-toggle")).Label("上下文详情").Expanded(a.voiceContextExpanded).Shrink(0).Padding(4, 6).Gap(3).Radius(6).AlignItems(ui.Center)
+			if button.Hovered() {
+				button.Background(t.SurfaceHover)
+			}
+			button.Children(func() {
+				label, icon := "详情", voiceToolCollapsedIcon
+				if a.voiceContextExpanded {
+					label, icon = "收起", voiceToolExpandedIcon
+				}
+				ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
+				ui.Icon(c, icon).Size(12, 12).TextColor(t.TextMuted)
+			}).OnClick(func() { a.voiceContextExpanded = !a.voiceContextExpanded })
+		})
+		if !a.voiceContextExpanded {
+			return
+		}
+		ui.Column(c.Key("details")).Label("上下文统计详情").FillWidth().MinWidth(0).Padding(8, 0, 0).Gap(7).BorderWidth(1, 0, 0, 0).BorderColor(t.Border.Alpha(0.35)).Children(func() {
+			occupancy := "等待模型初始化"
+			if stats.InputBudget > 0 {
+				occupancy = fmt.Sprintf("%s / %s Tokens（估算）", nativeContextNumber(stats.EstimatedTokens), nativeContextNumber(stats.InputBudget))
+			}
+			nativeContextDetail(c, "上下文", occupancy, estimateTooltip, t.Text)
+			nativeContextDetail(c, "容量", nativeContextCapacity(window)+" · "+strings.ReplaceAll(source, "未获取，使用备用值", "使用备用值"), sourceTooltip, t.Text)
+			summaryDetail := summary
+			if stats.SummaryTokens > 0 {
+				summaryDetail += " · " + nativeContextNumber(stats.SummaryTokens) + " Tokens"
+			}
+			nativeContextDetail(c, "摘要", summaryDetail, "", summaryColor)
+			nativeContextDetail(c, "对话保留", fmt.Sprintf("%d 轮 · 压缩 %d 次 · 丢弃 %d 轮", stats.RetainedTurns, stats.Compressions, stats.DroppedTurns), "", t.TextMuted)
+			usage := "服务商尚未上报"
+			if stats.UsageAvailable {
+				usage = fmt.Sprintf("输入 %s · 输出 %s · 总计 %s Tokens", nativeContextNumber(stats.PromptTokens), nativeContextNumber(stats.CompletionTokens), nativeContextNumber(stats.TotalTokens))
+			}
+			nativeContextDetail(c, "累计用量", usage, usageTooltip, t.Text)
+		})
+	})
+}
+
+func nativeContextDetail(c *ui.Context, label, value, tooltip string, color ui.Color) {
+	ui.Row(c).FillWidth().MinWidth(0).Gap(12).AlignItems(ui.Start).Children(func() {
+		ui.Text(c, label).Width(60).Shrink(0).FontSize(12).TextColor(c.Theme().TextMuted)
+		ui.Text(c, value).Grow(1).MinWidth(0).FontSize(12).TextColor(color).Wrap().Tooltip(tooltip)
 	})
 }

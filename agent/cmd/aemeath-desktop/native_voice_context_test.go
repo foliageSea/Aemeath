@@ -15,9 +15,18 @@ func TestNativeContextStatsRefreshWithoutVoiceEvent(t *testing.T) {
 	f.state.Voice.Context = brain.ContextStats{ContextWindowSource: "provider", ContextWindowModel: strings.Repeat("very-long-request-model-id-", 8), EstimatedTokens: 21000, InputBudget: 28000, ContextWindow: 32768, UsagePercent: 75, Compressing: true, RetainedTurns: 4}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
-	for _, text := range []string{"上下文（估算）：75.0% · 21000 / 28000 Tokens · 容量 32768", "摘要：正在压缩", "服务商尚未上报", "容量来源：服务上报"} {
+	for _, text := range []string{"75.0%", "正在压缩", "容量 32K"} {
 		if !nativeContextHasText(tt.Texts(), text) {
 			t.Fatalf("missing context display: %s", text)
+		}
+	}
+	if _, ok := tt.Find("上下文统计详情"); ok {
+		t.Fatal("context details should be collapsed by default")
+	}
+	nativeClick(t, tt, "上下文详情")
+	for _, text := range []string{"21,000 / 28,000 Tokens（估算）", "服务商尚未上报", "32K · 服务上报"} {
+		if !nativeContextHasText(tt.Texts(), text) {
+			t.Fatalf("missing expanded context display: %s", text)
 		}
 	}
 	// Background compression produces no new voice turn or event.
@@ -31,12 +40,12 @@ func TestNativeContextStatsRefreshWithoutVoiceEvent(t *testing.T) {
 	f.state.Voice.Context.TotalTokens = 12700
 	a.refresh()
 	tt.Frame()
-	for _, text := range []string{"摘要：已生成摘要 · 500 Tokens", "累计 usage（服务商已上报）：输入 12000 · 输出 700 · 总计 12700 Tokens"} {
+	for _, text := range []string{"已生成摘要 · 500 Tokens", "输入 12,000 · 输出 700 · 总计 12,700 Tokens"} {
 		if !nativeContextHasText(tt.Texts(), text) {
 			t.Fatalf("background statistics did not refresh: %s", text)
 		}
 	}
-	for _, label := range []string{"上下文与用量", "语音操作栏", "手动唤醒", "取消对话", "对话记录"} {
+	for _, label := range []string{"上下文与用量", "上下文统计详情", "语音操作栏", "手动唤醒", "取消对话", "对话记录"} {
 		r, ok := tt.Find(label)
 		if !ok || r.W <= 0 || r.X < 206 || r.X+r.W > 760 || r.Y < 0 || r.Y+r.H > 600 {
 			t.Fatalf("context display pushed controls out of compact window: %s %+v", label, r)
@@ -54,13 +63,24 @@ func nativeContextHasText(texts []string, want string) bool {
 }
 
 func TestNativeContextStatusesAndMissingUsage(t *testing.T) {
+	a, f, _, tt := nativeTest(t)
+	nativeClick(t, tt, "语音助手")
+	nativeClick(t, tt, "上下文详情")
 	for _, tc := range []struct{ status, want string }{{"", "尚未压缩"}, {"compressed", "已生成摘要"}, {"fallback", "已回退裁剪"}, {"failed", "压缩失败"}} {
-		occupancy, summary, usage := nativeContextText(brain.ContextStats{LastCompression: tc.status}, 65536)
-		if !strings.Contains(occupancy, "容量 65536 Tokens") || !strings.Contains(summary, tc.want) || !strings.Contains(usage, "尚未上报") || strings.Contains(usage, "总计 0") {
-			t.Fatalf("incorrect pending statistics: %s / %s / %s", occupancy, summary, usage)
+		f.state.Settings.Voice.ContextWindow = 65536
+		f.state.Voice.Context = brain.ContextStats{LastCompression: tc.status}
+		a.refresh()
+		tt.Frame()
+		for _, text := range []string{"等待模型初始化", "容量 64K", tc.want, "服务商尚未上报"} {
+			if !nativeContextHasText(tt.Texts(), text) {
+				t.Fatalf("incorrect pending statistics, missing %q: %v", text, tt.Texts())
+			}
+		}
+		if nativeContextHasText(tt.Texts(), "总计 0") || nativeContextHasText(tt.Texts(), "0.0%") {
+			t.Fatalf("unknown statistics rendered as zero: %v", tt.Texts())
 		}
 	}
-	_, summary, _ := nativeContextText(brain.ContextStats{SummaryTokens: 300}, 32768)
+	summary := nativeContextSummary(brain.ContextStats{SummaryTokens: 300})
 	if !strings.Contains(summary, "已有摘要") {
 		t.Fatalf("restored summary reported as uncompressed: %s", summary)
 	}
@@ -82,19 +102,60 @@ func TestNativeContextCapacitySources(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
 	nativeClick(t, tt, "语音助手")
+	nativeClick(t, tt, "上下文详情")
 	for _, source := range []string{"provider", "manual", "fallback", "detecting"} {
 		f.state.Voice.Context = brain.ContextStats{ContextWindowSource: source, ContextWindowModel: model, ContextWindow: 4096, InputBudget: 2253, EstimatedTokens: 1000}
 		a.refresh()
 		tt.Frame()
 		want, _ := nativeContextSourceText(f.state.Voice.Context, "auto")
-		if !nativeContextHasText(tt.Texts(), "容量来源："+want) || nativeContextHasText(tt.Texts(), model) {
+		if !nativeContextHasText(tt.Texts(), "4K · "+strings.ReplaceAll(want, "未获取，使用备用值", "使用备用值")) || nativeContextHasText(tt.Texts(), model) {
 			t.Fatalf("missing source or crowded model ID: %v", tt.Texts())
 		}
-		for _, label := range []string{"上下文与用量", "容量来源：" + want, "语音操作栏", "手动唤醒", "取消对话", "对话记录"} {
+		for _, label := range []string{"上下文与用量", "上下文统计详情", "语音操作栏", "手动唤醒", "取消对话", "对话记录"} {
 			r, ok := tt.Find(label)
 			if !ok || r.W <= 0 || r.X < 206 || r.X+r.W > 760 || r.Y < 0 || r.Y+r.H > 600 {
 				t.Fatalf("source %s escaped compact window: %s %+v", source, label, r)
 			}
+		}
+	}
+}
+
+func TestNativeContextDisclosureAndCompactLayout(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		a, f, _, tt := nativeTest(t)
+		tt.SetSize(760, 600)
+		tt.SetDark(dark)
+		f.state.Voice.Context = brain.ContextStats{
+			ContextWindow: 2097152, InputBudget: 1676698, EstimatedTokens: 1500000, UsagePercent: 89.5,
+			LastCompression: "failed", SummaryTokens: 1200, RetainedTurns: 4, Compressions: 12, DroppedTurns: 8,
+			UsageAvailable: true, PromptTokens: 123456789, CompletionTokens: 23456789, TotalTokens: 146913578,
+		}
+		a.refresh()
+		nativeClick(t, tt, "语音助手")
+		collapsed, _ := tt.Find("语音操作栏")
+		if !tt.HasText("压缩失败") || !tt.HasText("89.5%") {
+			t.Fatal("critical context status missing from collapsed view")
+		}
+		nativeClick(t, tt, "上下文详情")
+		button, ok := tt.AccessByRole(ui.RoleButton, "上下文详情")
+		if !ok || !button.Expanded {
+			t.Fatal("disclosure does not expose expanded state")
+		}
+		for _, label := range []string{"上下文与用量", "上下文统计详情", "累计用量", "手动唤醒", "取消对话", "对话记录"} {
+			r, ok := tt.Find(label)
+			if !ok || r.W <= 0 || r.X < 226 || r.X+r.W > 741 || r.Y < 20 || r.Y+r.H > 581 {
+				t.Fatalf("expanded context escaped compact window (dark=%v): %s %+v", dark, label, r)
+			}
+		}
+		if !nativeContextHasText(tt.Texts(), "总计 146,913,578 Tokens") {
+			t.Fatal("reported usage was truncated")
+		}
+		nativeClick(t, tt, "上下文详情")
+		if _, ok := tt.Find("上下文统计详情"); ok {
+			t.Fatal("details remain after collapsing")
+		}
+		if after, _ := tt.Find("语音操作栏"); after.H != collapsed.H {
+			t.Fatalf("collapse did not restore compact height: %v / %v", collapsed, after)
 		}
 	}
 }

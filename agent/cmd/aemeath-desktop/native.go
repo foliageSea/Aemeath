@@ -57,6 +57,7 @@ type nativeUI struct {
 	voiceScroll          ui.ScrollState
 	voiceCleared         bool
 	voiceClearConfirm    bool
+	voiceContextExpanded bool
 	voiceClearTurn       uint32
 	voiceClearSession    uint64
 	wakeAssets           nativeWakeAssets
