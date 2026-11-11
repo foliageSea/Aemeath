@@ -12,6 +12,7 @@ import (
 	"aemeath/agent/internal/voice"
 	"aemeath/agent/internal/wake"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -214,39 +215,42 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 		if ui.AlertDialog(c, &a.voiceClearConfirm, "清空对话？", "当前对话记录、上下文和累计用量将被清除，且无法恢复。", "取消", "清空") == 1 {
 			a.voiceCommand("clear", "")
 		}
-		if len(a.voiceHistory) == 0 {
-			ui.Column(c.Key("voice-empty")).Label("对话记录").FillWidth().Grow(1).MinHeight(0).Clip().Center().Children(func() {
-				ui.Column(c).MaxWidth(400).FillWidth().Padding(16).Gap(12).AlignItems(ui.Center).Children(func() {
-					voiceAvatar(c, 88)
-					ui.Text(c, "和爱弥斯聊一聊").FontSize(22).Bold().TextAlign(ui.Center)
-					ui.Text(c, fmt.Sprintf("说出「%s」，或点击手动唤醒开始对话。", a.savedWakePhrase())).FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
-					ui.Text(c, "也可以在下方输入文字开始对话。").FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
-				})
-			})
-		} else {
-			ui.Scroll(c.Key("voice-messages")).Label("对话记录").FillWidth().Grow(1).MinHeight(0).TrackScroll(&a.voiceScroll).Children(func() {
-				ui.Column(c).FillWidth().Padding(12, 12, 24).AlignItems(ui.Center).Children(func() {
-					ui.Column(c.Key("voice-reading-column")).FillWidth().MaxWidth(860).MinWidth(0).Gap(32).Children(func() {
-						for i, turn := range a.voiceHistory {
-							ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().MinWidth(0).Gap(18).Children(func() {
-								a.voiceBubble(c, "你", turn.transcript, true, nativeVoiceMessageTime(turn.transcriptAt))
-								if !turn.restored {
-									ui.Column(c).FillWidth().MaxWidth(688).MinWidth(0).Padding(0, 0, 0, 48).Children(func() {
-										a.voiceTurnProcessView(c, i)
-									})
-								}
-								if turn.response != "" {
-									a.voiceBubble(c, "爱弥斯", turn.response, false, nativeVoiceMessageTime(turn.responseAt))
-								} else if sameVoiceTurn(turn, state) && (state.Phase == "thinking" || state.Phase == "recognizing") {
-									a.voiceBubble(c, "爱弥斯", "正在思考…", false, "")
-								}
-							})
-						}
+		ui.Box(c.Key("voice-conversation")).FillWidth().Grow(1).MinHeight(0).Clip().Children(func() {
+			composerInset := max(156, a.voiceControlsHeight) + 16
+			if len(a.voiceHistory) == 0 {
+				ui.Column(c.Key("voice-empty")).Label("对话记录").Fill().MinHeight(0).Padding(0, 0, composerInset).Clip().Center().Children(func() {
+					ui.Column(c).MaxWidth(400).FillWidth().Padding(16).Gap(12).AlignItems(ui.Center).Children(func() {
+						voiceAvatar(c, 88)
+						ui.Text(c, "和爱弥斯聊一聊").FontSize(22).Bold().TextAlign(ui.Center)
+						ui.Text(c, fmt.Sprintf("说出「%s」，或点击手动唤醒开始对话。", a.savedWakePhrase())).FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
+						ui.Text(c, "也可以在下方输入文字开始对话。").FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
 					})
 				})
-			})
-		}
-		a.voiceControlsView(c)
+			} else {
+				ui.Scroll(c.Key("voice-messages")).Label("对话记录").Fill().MinHeight(0).ScrollbarInsets(0, 0, composerInset, 0).TrackScroll(&a.voiceScroll).Children(func() {
+					ui.Column(c).FillWidth().Padding(12, 12, composerInset+24).AlignItems(ui.Center).Children(func() {
+						ui.Column(c.Key("voice-reading-column")).FillWidth().MaxWidth(860).MinWidth(0).Gap(32).Children(func() {
+							for i, turn := range a.voiceHistory {
+								ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().MinWidth(0).Gap(18).Children(func() {
+									a.voiceBubble(c, "你", turn.transcript, true, nativeVoiceMessageTime(turn.transcriptAt))
+									if !turn.restored {
+										ui.Column(c).FillWidth().MaxWidth(688).MinWidth(0).Padding(0, 0, 0, 48).Children(func() {
+											a.voiceTurnProcessView(c, i)
+										})
+									}
+									if turn.response != "" {
+										a.voiceBubble(c, "爱弥斯", turn.response, false, nativeVoiceMessageTime(turn.responseAt))
+									} else if sameVoiceTurn(turn, state) && (state.Phase == "thinking" || state.Phase == "recognizing") {
+										a.voiceBubble(c, "爱弥斯", "正在思考…", false, "")
+									}
+								})
+							}
+						})
+					})
+				})
+			}
+			a.voiceControlsView(c)
+		})
 	})
 }
 
@@ -264,17 +268,24 @@ func (a *nativeUI) sendVoiceText() {
 
 func (a *nativeUI) voiceControlsView(c *ui.Context) {
 	t := c.Theme()
-	card := ui.Column(c.Key("voice-controls")).Label("语音操作栏").FillWidth().Shrink(0).MinWidth(0).Radius(16).Border(1, t.Border.Alpha(0.55)).Background(t.Surface)
+	// Blur only the backdrop; the composer contents stay sharp.
+	card := ui.Column(c.Key("voice-controls")).Label("语音操作栏").Absolute().Left(0).Right(0).Bottom(0).MinWidth(0).Radius(16).Border(1, t.Border.Alpha(0.55)).Material(glass.Blur{Radius: 20})
+	if height := card.Bounds().H; height > 0 && height != a.voiceControlsHeight {
+		a.voiceControlsHeight = height
+		c.Invalidate()
+	}
 	if card.FocusWithin() {
 		card.BorderColor(t.Accent.Alpha(0.55))
 	}
 	card.Children(func() {
-		a.voiceTextInputView(c)
-		a.voiceContextView(c)
-		_, supported := a.service.(nativeVoiceService)
-		if !supported || a.snapshot.Voice.Error != "" || a.voiceGlobalError != "" || a.snapshot.Voice.Notice != "" {
-			ui.Column(c.Key("voice-notices")).FillWidth().MinWidth(0).Padding(0, 16, 12).Gap(4).Children(func() { a.voiceNoticeView(c) })
-		}
+		ui.Column(c.Key("voice-controls-tint")).FillWidth().MinWidth(0).Radius(16).Background(t.Surface.Alpha(0.72)).Children(func() {
+			a.voiceTextInputView(c)
+			a.voiceContextView(c)
+			_, supported := a.service.(nativeVoiceService)
+			if !supported || a.snapshot.Voice.Error != "" || a.voiceGlobalError != "" || a.snapshot.Voice.Notice != "" {
+				ui.Column(c.Key("voice-notices")).FillWidth().MinWidth(0).Padding(0, 16, 12).Gap(4).Children(func() { a.voiceNoticeView(c) })
+			}
+		})
 	})
 }
 

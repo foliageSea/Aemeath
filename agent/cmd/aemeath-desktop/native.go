@@ -69,6 +69,7 @@ type nativeUI struct {
 	voiceHistory             []nativeVoiceTurn
 	voiceNextID              uint64
 	voiceScroll              ui.ScrollState
+	voiceControlsHeight      float32
 	voiceCleared             bool
 	voiceClearConfirm        bool
 	voiceContextExpanded     bool
