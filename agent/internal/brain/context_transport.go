@@ -83,6 +83,9 @@ func (e *Engine) budgetRequest(req *http.Request) (*http.Request, requestScope, 
 	// Allow tool-loop growth into its reserved 10%, but always retain output and
 	// safety space. Never replay a tool-bearing request or remove live tool pairs.
 	hardLimit := e.stats.InputBudget + e.stats.ContextWindow/10
+	if e.stats.ContextInputLimit > 0 {
+		hardLimit = min(hardLimit, e.stats.ContextInputLimit)
+	}
 	if tokens > hardLimit {
 		return nil, scope, &requestFailure{code: "context_limit"}
 	}

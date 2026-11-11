@@ -103,6 +103,18 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 			a.edited()
 		}
 	})
+	if autoContextWindow {
+		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Tooltip("从 models.dev 公共目录读取容量，未匹配时使用备用值，不向对话服务查询容量。后台下载不发送密钥或对话；目录容量不保证等于当前服务实际上限。").Children(func() {
+			ui.Text(c, "使用 models.dev 查询上下文容量").Grow(1).MinWidth(0).Wrap()
+			if ui.Switch(c.Key("voice-models-dev"), &cfg.ModelsDevEnabled).Label("使用 models.dev 查询上下文容量").Changed() {
+				a.edited()
+			}
+		})
+		if cfg.ModelsDevEnabled {
+			a.voiceField(c, "voice-models-dev-provider", "models.dev 服务商 ID", "留空按服务地址精确匹配，如 openai", &cfg.ModelsDevProvider, false)
+			a.voiceField(c, "voice-models-dev-model", "models.dev 模型 ID", "留空使用请求模型 ID；别名映射需填写服务商 ID", &cfg.ModelsDevModel, false)
+		}
+	}
 	capacityLabel := "备用上下文容量（Tokens）"
 	capacityDescription := "自动读取失败时使用；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。"
 	if !autoContextWindow {
@@ -119,7 +131,6 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 			a.edited()
 		}
 	}).FillWidth().Description(capacityDescription)
-	ui.Text(c, "标准接口不一定提供容量；自动失败会使用备用值，继续对话。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "启用 Agent 工具").Grow(1).MinWidth(0).Wrap()
 		if ui.Switch(c.Key("voice-tools"), &cfg.LLMTools).Label("启用 Agent 工具").Changed() {

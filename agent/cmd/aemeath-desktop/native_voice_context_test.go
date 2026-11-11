@@ -16,7 +16,7 @@ import (
 func TestNativeContextStatsRefreshWithoutVoiceEvent(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
-	f.state.Voice.Context = brain.ContextStats{ContextWindowSource: "provider", ContextWindowModel: strings.Repeat("very-long-request-model-id-", 8), EstimatedTokens: 21000, InputBudget: 28000, ContextWindow: 32768, UsagePercent: 75, Compressing: true, RetainedTurns: 4}
+	f.state.Voice.Context = brain.ContextStats{ContextWindowSource: "modelsdev", ContextWindowModel: strings.Repeat("very-long-request-model-id-", 8), EstimatedTokens: 21000, InputBudget: 28000, ContextWindow: 32768, UsagePercent: 75, Compressing: true, RetainedTurns: 4}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
 	for _, text := range []string{"75.0%", "正在压缩", "容量 32K"} {
@@ -28,7 +28,7 @@ func TestNativeContextStatsRefreshWithoutVoiceEvent(t *testing.T) {
 		t.Fatal("context details should be collapsed by default")
 	}
 	nativeClick(t, tt, "上下文详情")
-	for _, text := range []string{"21,000 / 28,000 Tokens（估算）", "服务商尚未上报", "32K · 服务上报"} {
+	for _, text := range []string{"21,000 / 28,000 Tokens（估算）", "服务商尚未上报", "32K · models.dev"} {
 		if !nativeContextHasText(tt.Texts(), text) {
 			t.Fatalf("missing expanded context display: %s", text)
 		}
@@ -121,9 +121,10 @@ func TestNativeContextDisplaysRestoredEstimateBeforeFirstReply(t *testing.T) {
 func TestNativeContextCapacitySources(t *testing.T) {
 	model := strings.Repeat("provider/long-exact-model-id-", 8)
 	for _, tc := range []struct{ source, mode, want string }{
-		{"provider", "auto", "服务上报"}, {"manual", "manual", "手动设置"},
-		{"fallback", "auto", "未获取，使用备用值"}, {"detecting", "auto", "等待识别"},
-		{"", "", "等待识别"}, {"", "manual", "手动设置"},
+		{"manual", "manual", "手动设置"},
+		{"modelsdev", "auto", "models.dev"},
+		{"fallback", "auto", "未获取，使用备用值"},
+		{"", "", "未获取，使用备用值"}, {"", "manual", "手动设置"},
 	} {
 		stats := brain.ContextStats{ContextWindowSource: tc.source, ContextWindowModel: model}
 		source, tooltip := nativeContextSourceText(stats, tc.mode)
@@ -135,7 +136,7 @@ func TestNativeContextCapacitySources(t *testing.T) {
 	tt.SetSize(760, 600)
 	nativeClick(t, tt, "语音助手")
 	nativeClick(t, tt, "上下文详情")
-	for _, source := range []string{"provider", "manual", "fallback", "detecting"} {
+	for _, source := range []string{"manual", "fallback", "modelsdev"} {
 		f.state.Voice.Context = brain.ContextStats{ContextWindowSource: source, ContextWindowModel: model, ContextWindow: 4096, InputBudget: 2253, EstimatedTokens: 1000}
 		a.refresh()
 		tt.Frame()
@@ -149,6 +150,50 @@ func TestNativeContextCapacitySources(t *testing.T) {
 				t.Fatalf("source %s escaped compact window: %s %+v", source, label, r)
 			}
 		}
+	}
+}
+
+func TestNativeModelsDevTooltip(t *testing.T) {
+	source, tooltip := nativeContextSourceText(brain.ContextStats{ContextWindowSource: "modelsdev", ContextWindowModel: "private-model", ContextWindowReference: "openai/exact-model", ContextInputLimit: 65536}, "auto")
+	if source != "models.dev" {
+		t.Fatal("catalog is mislabeled as provider metadata")
+	}
+	for _, text := range []string{"本地缓存", "不是当前服务的实测上限", "openai/exact-model", "private-model", "65,536"} {
+		if !strings.Contains(tooltip, text) {
+			t.Fatalf("catalog tooltip missing %q: %s", text, tooltip)
+		}
+	}
+}
+
+func TestNativeModelsDevSettingsSaveAndManualMode(t *testing.T) {
+	a, f, updates, tt := nativeTest(t)
+	tt.SetSize(1000, 1000)
+	nativeClick(t, tt, "设置")
+	nativeClick(t, tt, "语音")
+	nativeClick(t, tt, "对话服务")
+	if a.draft.Voice.ModelsDevEnabled {
+		t.Fatal("models.dev should be opt-in")
+	}
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "使用 models.dev 查询上下文容量")
+	nativeVoiceEdit(t, tt, "models.dev 服务商 ID", "openai")
+	nativeVoiceEdit(t, tt, "models.dev 模型 ID", "exact-model")
+	tt.Key(0, ui.KeyTab)
+	a.refresh()
+	tt.Frame()
+	if !a.draft.Voice.ModelsDevEnabled || a.draft.Voice.ModelsDevProvider != "openai" || a.draft.Voice.ModelsDevModel != "exact-model" {
+		t.Fatal("refresh discarded catalog settings draft")
+	}
+	nativeClick(t, tt, "保存设置")
+	nativeComplete(t, updates, tt)
+	if len(f.saves) != 1 || !f.saves[0].Voice.ModelsDevEnabled || f.saves[0].Voice.ModelsDevProvider != "openai" || f.saves[0].Voice.ModelsDevModel != "exact-model" {
+		t.Fatal("catalog settings were not saved")
+	}
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动读取模型上下文容量")
+	if _, ok := tt.AccessByRole(ui.RoleSwitch, "使用 models.dev 查询上下文容量"); ok {
+		t.Fatal("manual mode still offers automatic catalog lookup")
+	}
+	if !a.draft.Voice.ModelsDevEnabled || a.draft.Voice.ModelsDevModel != "exact-model" {
+		t.Fatal("manual mode discarded saved catalog mapping")
 	}
 }
 

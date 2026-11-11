@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -27,7 +29,7 @@ func TestContextWindowConfiguration(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"contextWindow":65536}`), &cfg); err != nil || cfg.ContextWindow != 65536 {
 		t.Fatalf("contextWindow JSON decoding: %+v, %v", cfg, err)
 	}
-	data, err := json.Marshal(State{Context: brain.ContextStats{EstimatedTokens: 1024, UsageAvailable: true, ContextWindowSource: "provider", ContextWindowModel: "exact-model-id"}})
+	data, err := json.Marshal(State{Context: brain.ContextStats{EstimatedTokens: 1024, UsageAvailable: true, ContextWindowSource: "modelsdev", ContextWindowModel: "exact-model-id"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +38,7 @@ func TestContextWindowConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stats map[string]any
-	if err := json.Unmarshal(state["context"], &stats); err != nil || stats["estimatedTokens"] != float64(1024) || stats["usageAvailable"] != true || stats["contextWindowSource"] != "provider" || stats["contextWindowModel"] != "exact-model-id" {
+	if err := json.Unmarshal(state["context"], &stats); err != nil || stats["estimatedTokens"] != float64(1024) || stats["usageAvailable"] != true || stats["contextWindowSource"] != "modelsdev" || stats["contextWindowModel"] != "exact-model-id" {
 		t.Fatalf("context stats JSON bridge: %s, %v", data, err)
 	}
 }
@@ -68,10 +70,74 @@ func TestContextWindowModeConfiguration(t *testing.T) {
 	}
 }
 
+func TestModelsDevConfiguration(t *testing.T) {
+	var input Config
+	if err := json.Unmarshal([]byte(`{"modelsDevEnabled":true,"modelsDevProvider":" openai ","modelsDevModel":" exact-model "}`), &input); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := NormalizeConfig(input)
+	if err != nil || !cfg.ModelsDevEnabled || cfg.ModelsDevProvider != "openai" || cfg.ModelsDevModel != "exact-model" {
+		t.Fatalf("models.dev settings not normalized: %+v %v", cfg, err)
+	}
+	data, _ := json.Marshal(cfg)
+	var restored Config
+	if json.Unmarshal(data, &restored) != nil || restored.ModelsDevEnabled != cfg.ModelsDevEnabled || restored.ModelsDevProvider != cfg.ModelsDevProvider || restored.ModelsDevModel != cfg.ModelsDevModel {
+		t.Fatal("models.dev settings lost in JSON round trip")
+	}
+	if defaults, err := NormalizeConfig(Config{}); err != nil || defaults.ModelsDevEnabled {
+		t.Fatal("external catalog must be opt-in")
+	}
+	for _, invalid := range []Config{{ModelsDevModel: "alias"}, {ModelsDevProvider: "bad\nID"}, {ModelsDevProvider: "has space"}, {ModelsDevProvider: "openai", ModelsDevModel: "bad\tID"}} {
+		if _, err := NormalizeConfig(invalid); err == nil {
+			t.Fatalf("invalid models.dev mapping accepted: %+v", invalid)
+		}
+	}
+}
+
+type catalogTestHost struct {
+	memoryTestHost
+	catalog *brain.ModelCatalog
+}
+
+func (h catalogTestHost) ModelsCatalog() *brain.ModelCatalog { return h.catalog }
+
+func TestProductionBrainReceivesModelsCatalog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	data, _ := json.Marshal(map[string]any{
+		"version": 1, "updated_at": time.Now(), "providers": map[string]any{
+			"test": map[string]any{"models": map[string]any{"catalog-id": map[string]any{"id": "catalog-id", "limit": map[string]int{"context": 131072, "input": 65536}}}},
+		},
+	})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := catalogTestHost{catalog: brain.NewModelCatalog(path)}
+	for _, tc := range []struct {
+		enabled bool
+		mode    string
+		source  string
+		window  int
+	}{{true, "auto", "modelsdev", 131072}, {false, "auto", "fallback", 32768}, {true, "manual", "manual", 32768}} {
+		engine, err := productionDependencies().newBrain(context.Background(), Config{LLMBaseURL: "https://proxy.private/v1", LLMModel: "private-deployment", ContextWindowMode: tc.mode, ModelsDevEnabled: tc.enabled, ModelsDevProvider: "test", ModelsDevModel: "catalog-id"}, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := engine.(interface {
+			ContextStats() brain.ContextStats
+			Close() error
+		})
+		stats := source.ContextStats()
+		source.Close()
+		if stats.ContextWindowSource != tc.source || stats.ContextWindow != tc.window || stats.ContextWindowModel != "private-deployment" {
+			t.Fatalf("production catalog config lost: %+v", stats)
+		}
+	}
+}
+
 func TestProductionBrainReceivesContextMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("brain construction must not query metadata") }))
 	defer server.Close()
-	for _, tc := range []struct{ mode, source string }{{"", "detecting"}, {"auto", "detecting"}, {"manual", "manual"}} {
+	for _, tc := range []struct{ mode, source string }{{"", "fallback"}, {"auto", "fallback"}, {"manual", "manual"}} {
 		t.Run(tc.source+tc.mode, func(t *testing.T) {
 			engine, err := productionDependencies().newBrain(context.Background(), Config{LLMBaseURL: server.URL, LLMModel: "exact-request-model", ContextWindowMode: tc.mode, ContextWindow: 65536}, nil)
 			if err != nil {
@@ -120,7 +186,7 @@ func TestWorkerPublishesEngineContextStats(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	defer func() { cancel(); <-done }()
-	want := brain.ContextStats{ContextWindow: 65536, ContextWindowSource: "provider", ContextWindowModel: "provider/exact-id", EstimatedTokens: 2048, InputBudget: 60000, TotalTokens: 900, UsageAvailable: true}
+	want := brain.ContextStats{ContextWindow: 65536, ContextWindowSource: "modelsdev", ContextWindowModel: "provider/exact-id", EstimatedTokens: 2048, InputBudget: 60000, TotalTokens: 900, UsageAvailable: true}
 	dep := fakeDependencies()
 	dep.newBrain = func(_ context.Context, cfg Config, _ Host) (brainAPI, error) {
 		if cfg.ContextWindow != want.ContextWindow {

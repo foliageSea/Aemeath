@@ -30,6 +30,9 @@ type Config struct {
 	Memory            *Memory
 	ContextWindow     int
 	AutoContextWindow bool
+	ModelsDev         *ModelCatalog
+	ModelsDevProvider string
+	ModelsDevModel    string
 }
 type Host interface {
 	Metrics() string
@@ -46,36 +49,35 @@ const (
 )
 
 type Engine struct {
-	baseTools            []tool.BaseTool
-	haConfig             hamcp.Config
-	ha                   homeAssistantClient
-	haFactory            homeAssistantFactory
-	lifeCtx              context.Context
-	lifeCancel           context.CancelFunc
-	closed               bool
-	model                *openai.ChatModel
-	agent                *react.Agent
-	persona              string
-	gate                 chan struct{}
-	mu                   sync.Mutex
-	generation           uint64
-	streamCancel         context.CancelFunc
-	history              []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
-	lastActive           time.Time         // last committed turn; history expires after MemoryTTL
-	memory               *Memory
-	summary              string
-	stats                ContextStats
-	memoryRevision       uint64
-	memoryEpoch          uint64
-	contextVersion       uint64
-	contextPrompt        string
-	toolTokens           int
-	compDone             chan struct{}
-	compCancel           context.CancelFunc
-	compWG               sync.WaitGroup
-	compressionTimeout   time.Duration
-	contextMetadata      *modelMetadataConfig
-	contextDiscoveryDone bool
+	baseTools          []tool.BaseTool
+	haConfig           hamcp.Config
+	ha                 homeAssistantClient
+	haFactory          homeAssistantFactory
+	lifeCtx            context.Context
+	lifeCancel         context.CancelFunc
+	closed             bool
+	model              *openai.ChatModel
+	agent              *react.Agent
+	persona            string
+	gate               chan struct{}
+	mu                 sync.Mutex
+	generation         uint64
+	streamCancel       context.CancelFunc
+	history            []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
+	lastActive         time.Time         // last committed turn; history expires after MemoryTTL
+	memory             *Memory
+	summary            string
+	stats              ContextStats
+	contextConfig      contextConfigKey
+	memoryRevision     uint64
+	memoryEpoch        uint64
+	contextVersion     uint64
+	contextPrompt      string
+	toolTokens         int
+	compDone           chan struct{}
+	compCancel         context.CancelFunc
+	compWG             sync.WaitGroup
+	compressionTimeout time.Duration
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
@@ -118,18 +120,12 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 	if len(persona) > maxTextBytes {
 		return nil, errors.New("brain: persona exceeds 16384 bytes")
 	}
-	window, err := NormalizeContextWindow(cfg.ContextWindow)
-	if err != nil {
+	if _, err := NormalizeContextWindow(cfg.ContextWindow); err != nil {
 		return nil, err
 	}
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
-	e := &Engine{persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory, stats: newContextStats(window), compressionTimeout: 20 * time.Second}
-	e.stats.ContextWindowSource = "manual"
-	e.stats.ContextWindowModel = cfg.Model
-	if cfg.AutoContextWindow {
-		e.contextMetadata = &modelMetadataConfig{baseURL: cfg.BaseURL, apiKey: strings.TrimSpace(cfg.APIKey), model: cfg.Model}
-		e.stats.ContextWindowSource = "detecting"
-	}
+	config := contextConfigFor(cfg)
+	e := &Engine{persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory, stats: contextCapacityStats(config), contextConfig: config, compressionTimeout: 20 * time.Second}
 	if e.memory != nil {
 		e.memory.mu.Lock()
 		e.memory.revision++ // a new connection invalidates older pending memory commits
@@ -168,6 +164,9 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 		}
 	}
 	e.updateContextLocked()
+	if cfg.AutoContextWindow && cfg.ModelsDev != nil {
+		cfg.ModelsDev.RefreshAsync(lifeCtx)
+	}
 	return e, nil
 }
 

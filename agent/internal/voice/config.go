@@ -23,6 +23,9 @@ type Config struct {
 	LLMTools          bool    `json:"llmTools"`
 	ContextWindowMode string  `json:"contextWindowMode"`
 	ContextWindow     int     `json:"contextWindow"`
+	ModelsDevEnabled  bool    `json:"modelsDevEnabled"`
+	ModelsDevProvider string  `json:"modelsDevProvider"`
+	ModelsDevModel    string  `json:"modelsDevModel"`
 	TavilyAPIKey      string  `json:"tavilyAPIKey"`
 	HAMCPEnabled      bool    `json:"haMCPEnabled"`
 	HAMCPURL          string  `json:"haMCPURL"`
@@ -93,6 +96,11 @@ type MemoryHost interface {
 	ConversationMemory() *brain.Memory
 }
 
+// ModelCatalogHost shares public catalog data across voice connections.
+type ModelCatalogHost interface {
+	ModelsCatalog() *brain.ModelCatalog
+}
+
 // NormalizeConfig applies local defaults. Credentials and installed assets are
 // checked only when an operation needs them, keeping audio diagnostics usable.
 func NormalizeConfig(c Config) (Config, error) {
@@ -102,6 +110,15 @@ func NormalizeConfig(c Config) (Config, error) {
 	}
 	if c.ContextWindowMode != "auto" && c.ContextWindowMode != "manual" {
 		return c, fmt.Errorf("context window mode must be auto or manual")
+	}
+	c.ModelsDevProvider, c.ModelsDevModel = strings.TrimSpace(c.ModelsDevProvider), strings.TrimSpace(c.ModelsDevModel)
+	for _, value := range []string{c.ModelsDevProvider, c.ModelsDevModel} {
+		if len(value) > 256 || strings.ContainsAny(value, "\r\n\t ") {
+			return c, fmt.Errorf("invalid models.dev provider or model ID")
+		}
+	}
+	if c.ModelsDevModel != "" && c.ModelsDevProvider == "" {
+		return c, fmt.Errorf("models.dev 模型映射须同时填写服务商 ID")
 	}
 	var contextErr error
 	c.ContextWindow, contextErr = brain.NormalizeContextWindow(c.ContextWindow)

@@ -61,7 +61,7 @@ func TestRestoredContextEstimateMatchesEngineWithoutRequests(t *testing.T) {
 			}
 			// Once an Engine publishes, its dynamic tool and capacity data win.
 			engine.mu.Lock()
-			engine.stats.ContextWindowSource = "provider"
+			engine.stats.ContextWindowSource = "modelsdev"
 			engine.contextPrompt = "动态设备说明"
 			engine.toolTokens += 100
 			engine.updateContextLocked()
@@ -122,7 +122,7 @@ func TestRestoredContextEstimateExpiryAndConfiguration(t *testing.T) {
 	}
 	first := memory.ContextStatsForConfig(Config{Model: "old-model", ContextWindow: 32768})
 	second := memory.ContextStatsForConfig(Config{Model: "new-model", ContextWindow: 65536, Persona: "新角色设定", AutoContextWindow: true})
-	if first.ContextWindow == second.ContextWindow || second.ContextWindowModel != "new-model" || second.ContextWindowSource != "detecting" || first.EstimatedTokens == second.EstimatedTokens {
+	if first.ContextWindow == second.ContextWindow || second.ContextWindowModel != "new-model" || second.ContextWindowSource != "fallback" || first.EstimatedTokens == second.EstimatedTokens {
 		t.Fatalf("preview retained old model configuration: %+v / %+v", first, second)
 	}
 	if !reflect.DeepEqual(memory.Turns(), []MemoryTurn{{User: "旧问题", Assistant: "旧回答"}}) {

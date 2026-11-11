@@ -67,6 +67,7 @@ type Service struct {
 	quotaWake     chan struct{}
 	voiceCommands chan voice.Command
 	memory        *brain.Memory // voice conversation; outlives each device connection
+	catalog       *brain.ModelCatalog
 	voiceSession  atomic.Uint64 // numbers voice connections; see voice.State.Session
 }
 
@@ -115,13 +116,18 @@ func newService(path string, settings Settings, deps dependencies) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1)}
 	memoryPath := ""
+	catalogPath := ""
 	if path != "" {
 		memoryPath = filepath.Join(filepath.Dir(path), "voice_history.json")
+		catalogPath = filepath.Join(filepath.Dir(path), "models_dev_cache.json")
 	}
 	s.memory = brain.OpenMemory(memoryPath)
-	s.wg.Add(2)
+	s.catalog = brain.NewModelCatalog(catalogPath)
+	s.refreshModelCatalog(settings.Voice)
+	s.wg.Add(3)
 	go s.sampleLoop()
 	go s.quotaLoop()
+	go s.modelCatalogLoop()
 	return s
 }
 
@@ -129,14 +135,19 @@ func (s *Service) Snapshot() State {
 	s.mu.RLock()
 	state := s.state.Clone()
 	memory := s.memory
+	catalog := s.catalog
 	s.mu.RUnlock()
 	// The UI polls snapshots once per second. Read live memory statistics so
 	// background compression and expiry are visible without a voice event.
 	if memory != nil {
 		cfg := state.Settings.Voice
+		if !cfg.ModelsDevEnabled || cfg.ContextWindowMode == "manual" {
+			catalog = nil
+		}
 		state.Voice.Context = memory.ContextStatsForConfig(brain.Config{
-			Model: cfg.LLMModel, Persona: cfg.Persona, Tools: cfg.LLMTools,
+			BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, Persona: cfg.Persona, Tools: cfg.LLMTools,
 			ContextWindow: cfg.ContextWindow, AutoContextWindow: cfg.ContextWindowMode != "manual",
+			ModelsDev: catalog, ModelsDevProvider: cfg.ModelsDevProvider, ModelsDevModel: cfg.ModelsDevModel,
 		})
 	}
 	return state
@@ -219,6 +230,7 @@ func (s *Service) SaveSettings(settings Settings) error {
 		s.state.Quota, s.state.QuotaError = nil, ""
 	}
 	s.mu.Unlock()
+	s.refreshModelCatalog(normalized.Voice)
 	signal(s.updates)
 	if old.MagpieURL != normalized.MagpieURL {
 		signal(s.quotaWake)

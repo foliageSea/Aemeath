@@ -119,7 +119,7 @@ func TestSnapshotEstimatesRestoredContextBeforeVoiceStarts(t *testing.T) {
 			}
 			source := "manual"
 			if mode == "auto" {
-				source = "detecting"
+				source = "fallback"
 			}
 			if stats.ContextWindowSource != source {
 				t.Fatalf("startup claimed unverified model capacity: %+v", stats)
@@ -136,5 +136,46 @@ func TestSnapshotEstimatesRestoredContextBeforeVoiceStarts(t *testing.T) {
 				t.Fatalf("cleared startup estimate retained history: %+v", got)
 			}
 		})
+	}
+}
+
+func TestModelsDevCacheSettingsAndRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	data, _ := json.Marshal(map[string]any{
+		"version": 1, "updated_at": time.Now(), "providers": map[string]any{
+			"test": map[string]any{"models": map[string]any{"catalog-id": map[string]any{"id": "catalog-id", "limit": map[string]int{"context": 131072, "input": 65536}}}},
+		},
+	})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "models_dev_cache.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := normalizeSettings(Settings{Voice: voice.Config{LLMModel: "private-deployment", ModelsDevEnabled: true, ModelsDevProvider: "test", ModelsDevModel: "catalog-id"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := newService(path, settings, testDeps())
+	defer service.Close()
+	if err := service.SaveSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadSettings(path)
+	if err != nil || !loaded.Voice.ModelsDevEnabled || loaded.Voice.ModelsDevProvider != "test" || loaded.Voice.ModelsDevModel != "catalog-id" {
+		t.Fatalf("catalog settings not persisted: %+v %v", loaded, err)
+	}
+	restarted := newService(path, loaded, testDeps())
+	defer restarted.Close()
+	for _, s := range []*Service{service, restarted} {
+		stats := s.Snapshot().Voice.Context
+		if stats.ContextWindowSource != "modelsdev" || stats.ContextWindow != 131072 || stats.InputBudget != 65536 || stats.ContextWindowReference != "test/catalog-id" || (voiceHost{s}).ModelsCatalog() != s.catalog {
+			t.Fatalf("startup did not use shared disk catalog: %+v", stats)
+		}
+		cfg := s.Snapshot().Settings
+		cfg.Voice.ModelsDevEnabled = false
+		if err := s.SaveSettings(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if stats := s.Snapshot().Voice.Context; stats.ContextWindowSource != "fallback" || stats.ContextWindow != 32768 || stats.ContextWindowReference != "" {
+			t.Fatalf("disabled catalog still used: %+v", stats)
+		}
 	}
 }

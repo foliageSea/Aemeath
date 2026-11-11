@@ -94,6 +94,9 @@ func (c *cliVoiceControl) start(ctx context.Context, address string, cfg voice.C
 		close(done)
 		return done
 	}
+	if cfg.ModelsDevEnabled && cfg.ContextWindowMode != "manual" {
+		brain.DefaultModelCatalog().RefreshAsync(ctx)
+	}
 	commands := make(chan voice.Command, 8)
 	c.mu.Lock()
 	c.commands = commands

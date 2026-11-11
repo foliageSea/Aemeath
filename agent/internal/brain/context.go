@@ -20,23 +20,25 @@ const contextToolInstructions = "\n" + webSearchInstructions + "\n" + currentTim
 // ContextStats separates estimated active context from provider-reported usage.
 // Usage is cumulative for this conversation in this process, including summaries.
 type ContextStats struct {
-	EstimatedTokens     int     `json:"estimatedTokens"`
-	InputBudget         int     `json:"inputBudget"`
-	ContextWindow       int     `json:"contextWindow"`
-	ContextWindowSource string  `json:"contextWindowSource,omitempty"`
-	ContextWindowModel  string  `json:"contextWindowModel,omitempty"`
-	ReservedTokens      int     `json:"reservedTokens"`
-	UsagePercent        float64 `json:"usagePercent"`
-	PromptTokens        int     `json:"promptTokens"`
-	CompletionTokens    int     `json:"completionTokens"`
-	TotalTokens         int     `json:"totalTokens"`
-	UsageAvailable      bool    `json:"usageAvailable"`
-	SummaryTokens       int     `json:"summaryTokens"`
-	RetainedTurns       int     `json:"retainedTurns"`
-	Compressions        int     `json:"compressions"`
-	DroppedTurns        int     `json:"droppedTurns"`
-	Compressing         bool    `json:"compressing"`
-	LastCompression     string  `json:"lastCompression,omitempty"`
+	EstimatedTokens        int     `json:"estimatedTokens"`
+	InputBudget            int     `json:"inputBudget"`
+	ContextWindow          int     `json:"contextWindow"`
+	ContextWindowSource    string  `json:"contextWindowSource,omitempty"`
+	ContextWindowModel     string  `json:"contextWindowModel,omitempty"`
+	ContextWindowReference string  `json:"contextWindowReference,omitempty"`
+	ContextInputLimit      int     `json:"contextInputLimit,omitempty"`
+	ReservedTokens         int     `json:"reservedTokens"`
+	UsagePercent           float64 `json:"usagePercent"`
+	PromptTokens           int     `json:"promptTokens"`
+	CompletionTokens       int     `json:"completionTokens"`
+	TotalTokens            int     `json:"totalTokens"`
+	UsageAvailable         bool    `json:"usageAvailable"`
+	SummaryTokens          int     `json:"summaryTokens"`
+	RetainedTurns          int     `json:"retainedTurns"`
+	Compressions           int     `json:"compressions"`
+	DroppedTurns           int     `json:"droppedTurns"`
+	Compressing            bool    `json:"compressing"`
+	LastCompression        string  `json:"lastCompression,omitempty"`
 }
 
 func NormalizeContextWindow(n int) (int, error) {
@@ -112,7 +114,8 @@ func (e *Engine) updateContextLocked() {
 
 // Conversation resets retain the configured or discovered model capacity.
 func (e *Engine) emptyContextStatsLocked() ContextStats {
-	s := newContextStats(e.stats.ContextWindow)
+	s := ContextStats{}
+	applyContextCapacity(&s, e.stats.ContextWindow, e.stats.ContextInputLimit, e.stats.ContextWindowSource, e.stats.ContextWindowReference)
 	s.ContextWindowSource, s.ContextWindowModel = e.stats.ContextWindowSource, e.stats.ContextWindowModel
 	return s
 }
@@ -146,6 +149,7 @@ func (e *Engine) publishStatsLocked() {
 	}
 	if e.memory.revision == e.memoryRevision {
 		e.memory.stats = e.stats
+		e.memory.statsConfig = e.contextConfig
 	}
 	e.memory.mu.Unlock()
 }
@@ -194,19 +198,16 @@ func (m *Memory) ContextStatsForConfig(cfg Config) ContextStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.contextStatsLocked()
-	if s.InputBudget > 0 || strings.TrimSpace(cfg.Model) == "" {
+	if strings.TrimSpace(cfg.Model) == "" || (s.InputBudget > 0 && m.statsConfig == contextConfigFor(cfg)) {
 		return s
 	}
-	window, err := NormalizeContextWindow(cfg.ContextWindow)
-	if err != nil {
+	if _, err := NormalizeContextWindow(cfg.ContextWindow); err != nil {
 		return s
 	}
-	budget := newContextStats(window)
+	budget := contextCapacityStats(contextConfigFor(cfg))
 	s.ContextWindow, s.InputBudget, s.ReservedTokens = budget.ContextWindow, budget.InputBudget, budget.ReservedTokens
-	s.ContextWindowModel, s.ContextWindowSource = strings.TrimSpace(cfg.Model), "manual"
-	if cfg.AutoContextWindow {
-		s.ContextWindowSource = "detecting"
-	}
+	s.ContextWindowModel, s.ContextWindowSource = budget.ContextWindowModel, budget.ContextWindowSource
+	s.ContextInputLimit, s.ContextWindowReference = budget.ContextInputLimit, budget.ContextWindowReference
 	if !m.updated.IsZero() && time.Since(m.updated) > MemoryTTL {
 		return s
 	}
@@ -219,6 +220,7 @@ func (m *Memory) ContextStatsForConfig(cfg Config) ContextStats {
 		persona += contextToolInstructions
 		// Only schema metadata is read; these tool handlers are never invoked.
 		tools := append(deviceTools(nil), webSearchTool(nil), currentTimeTool(nil))
+		var err error
 		toolTokens, err = estimateToolSchemas(context.Background(), tools)
 		if err != nil {
 			return m.contextStatsLocked()
@@ -251,6 +253,7 @@ func (e *Engine) saveMemoryLocked() {
 	}
 	copyUsage(&e.stats, m.stats)
 	m.turns, m.summary, m.updated, m.stats = turns, e.summary, e.lastActive, e.stats
+	m.statsConfig = e.contextConfig
 	m.revision++
 	e.memoryRevision = m.revision
 	m.persist()

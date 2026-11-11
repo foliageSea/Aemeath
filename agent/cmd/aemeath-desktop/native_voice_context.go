@@ -53,21 +53,28 @@ func nativeContextSummary(stats brain.ContextStats) string {
 
 func nativeContextSourceText(stats brain.ContextStats, configuredMode string) (source, tooltip string) {
 	switch stats.ContextWindowSource {
-	case "provider":
-		source = "服务上报"
+	case "modelsdev":
+		source = "models.dev"
 	case "manual":
 		source = "手动设置"
 	case "fallback":
 		source = "未获取，使用备用值"
-	case "detecting":
-		source = "等待识别"
 	default:
-		source = "等待识别"
+		source = "未获取，使用备用值"
 		if configuredMode == "manual" {
 			source = "手动设置"
 		}
 	}
-	tooltip = "容量来源：" + source + "。服务上报容量来自当前配置服务的模型元数据；标准接口不一定提供容量，未获取时使用备用值。"
+	tooltip = "容量来源：" + source + "。自动模式仅从已启用的 models.dev 目录读取容量，未匹配时使用备用值；手动模式使用设置的容量。"
+	if stats.ContextWindowSource == "modelsdev" {
+		tooltip = "容量来源：models.dev 公共目录（可能使用本地缓存），不是当前服务的实测上限；中转服务的实际限制可能更小。"
+		if stats.ContextWindowReference != "" {
+			tooltip += "\n目录条目：" + stats.ContextWindowReference
+		}
+		if stats.ContextInputLimit > 0 {
+			tooltip += "\n目录输入上限：" + nativeContextNumber(stats.ContextInputLimit) + " Tokens"
+		}
+	}
 	if stats.ContextWindowModel != "" {
 		tooltip += "\n请求模型 ID：" + stats.ContextWindowModel
 	}

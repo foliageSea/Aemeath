@@ -36,14 +36,15 @@ type memoryFile struct {
 // reconnects and app restarts keep the conversation. An empty path keeps it
 // in process memory only. Safe for concurrent use.
 type Memory struct {
-	mu       sync.Mutex
-	path     string
-	turns    []memoryTurn
-	updated  time.Time
-	summary  string
-	stats    ContextStats
-	revision uint64
-	epoch    uint64 // changes only when the conversation is cleared or expires
+	mu          sync.Mutex
+	path        string
+	turns       []memoryTurn
+	updated     time.Time
+	summary     string
+	stats       ContextStats
+	statsConfig contextConfigKey
+	revision    uint64
+	epoch       uint64 // changes only when the conversation is cleared or expires
 }
 
 // OpenMemory loads a persisted conversation. A missing, unreadable or
@@ -120,6 +121,7 @@ func (m *Memory) Clear() {
 	defer m.mu.Unlock()
 	m.turns, m.updated, m.summary = nil, time.Time{}, ""
 	m.stats = ContextStats{}
+	m.statsConfig = contextConfigKey{}
 	m.revision++
 	m.epoch++
 	if m.path != "" {

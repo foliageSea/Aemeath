@@ -148,6 +148,31 @@ type voiceHost struct{ service *Service }
 
 func (h voiceHost) ConversationMemory() *brain.Memory { return h.service.memory }
 
+func (h voiceHost) ModelsCatalog() *brain.ModelCatalog { return h.service.catalog }
+
+func (s *Service) refreshModelCatalog(cfg voice.Config) {
+	if cfg.ModelsDevEnabled && cfg.ContextWindowMode != "manual" && s.catalog != nil {
+		s.catalog.RefreshAsync(s.ctx)
+	}
+}
+
+func (s *Service) modelCatalogLoop() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.RLock()
+			cfg := s.state.Settings.Voice
+			s.mu.RUnlock()
+			s.refreshModelCatalog(cfg)
+		}
+	}
+}
+
 func (h voiceHost) LockComputer(ctx context.Context) error { return sessionlock.Lock(ctx) }
 
 func (h voiceHost) Metrics() string {
