@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/voice"
@@ -64,12 +65,13 @@ func (a *nativeUI) voiceCommand(kind, text string) {
 }
 
 type nativeVoiceTurn struct {
-	id                   uint64
-	turn                 uint32
-	transcript, response string
-	state                voice.State
-	toolDetails          map[uint64]bool
-	restored             bool
+	id                       uint64
+	turn                     uint32
+	transcript, response     string
+	transcriptAt, responseAt time.Time
+	state                    voice.State
+	toolDetails              map[uint64]bool
+	restored                 bool
 }
 
 // Persisted exchanges have no runtime turn/tool metadata. Keep them separate
@@ -115,15 +117,25 @@ func (a *nativeUI) recordVoice() {
 		return
 	}
 	s.ToolCalls = slices.Clone(s.ToolCalls)
-	next := nativeVoiceTurn{turn: s.Turn, transcript: s.Transcript, response: s.Response, state: s}
+	// Capture first arrival, not every status refresh or streamed text update.
+	now := time.Now()
+	next := nativeVoiceTurn{turn: s.Turn, transcript: s.Transcript, response: s.Response, transcriptAt: now, state: s}
+	if s.Response != "" {
+		next.responseAt = now
+	}
 	n := len(a.voiceHistory)
 	if n > 0 && reflect.DeepEqual(a.voiceHistory[n-1].state, next.state) {
 		return
 	}
 	follow := a.voiceScroll.Y >= a.voiceScroll.MaxY-8
 	if n > 0 && sameVoiceTurn(a.voiceHistory[n-1], s) {
-		next.id = a.voiceHistory[n-1].id
-		next.toolDetails = a.voiceHistory[n-1].toolDetails
+		previous := a.voiceHistory[n-1]
+		next.id = previous.id
+		next.toolDetails = previous.toolDetails
+		next.transcriptAt = previous.transcriptAt
+		if !previous.responseAt.IsZero() {
+			next.responseAt = previous.responseAt
+		}
 		a.voiceHistory[n-1] = next
 	} else {
 		// A snapshot may skip a terminal tool event when the next turn starts quickly.
@@ -170,9 +182,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 	disabled := a.voiceDisabled()
 	ui.Column(c.Key("voice-chat")).FillWidth().Grow(1).MinHeight(0).Gap(16).Children(func() {
 		ui.Row(c.Key("voice-toolbar")).FillWidth().Shrink(0).Gap(10).Padding(0, 0, 12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border.Alpha(0.5)).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(36, 36).Shrink(0).Radius(12).Background(t.Accent.Alpha(0.1)).Center().Children(func() {
-				ui.Icon(c, sidebarVoice).Size(19, 19).TextColor(t.Accent)
-			})
+			voiceAvatar(c, 40)
 			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
 				ui.Text(c, "爱弥斯").Bold().FontSize(15)
 				connection := "语音通道：未连接"
@@ -190,29 +200,31 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 		if len(a.voiceHistory) == 0 {
 			ui.Column(c.Key("voice-empty")).Label("对话记录").FillWidth().Grow(1).MinHeight(0).Clip().Center().Children(func() {
 				ui.Column(c).MaxWidth(400).FillWidth().Padding(16).Gap(12).AlignItems(ui.Center).Children(func() {
-					ui.Box(c).Size(64, 64).Radius(22).Background(t.Accent.Alpha(0.08)).Center().Children(func() {
-						ui.Icon(c, sidebarVoice).Size(30, 30).TextColor(t.Accent)
-					})
+					voiceAvatar(c, 88)
 					ui.Text(c, "和爱弥斯聊一聊").FontSize(22).Bold().TextAlign(ui.Center)
 					ui.Text(c, fmt.Sprintf("说出「%s」，或点击手动唤醒开始对话。", a.savedWakePhrase())).FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
 				})
 			})
 		} else {
 			ui.Scroll(c.Key("voice-messages")).Label("对话记录").FillWidth().Grow(1).MinHeight(0).TrackScroll(&a.voiceScroll).Children(func() {
-				ui.Column(c).FillWidth().Padding(4, 8, 12).Gap(18).Children(func() {
-					for i, turn := range a.voiceHistory {
-						ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().Gap(12).Children(func() {
-							a.voiceBubble(c, "你", turn.transcript, true)
-							if !turn.restored {
-								a.voiceTurnProcessView(c, i)
-							}
-							if turn.response != "" {
-								a.voiceBubble(c, "爱弥斯", turn.response, false)
-							} else if sameVoiceTurn(turn, state) && (state.Phase == "thinking" || state.Phase == "recognizing") {
-								a.voiceBubble(c, "爱弥斯", "正在思考…", false)
-							}
-						})
-					}
+				ui.Column(c).FillWidth().Padding(12, 12, 24).AlignItems(ui.Center).Children(func() {
+					ui.Column(c.Key("voice-reading-column")).FillWidth().MaxWidth(860).MinWidth(0).Gap(32).Children(func() {
+						for i, turn := range a.voiceHistory {
+							ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().MinWidth(0).Gap(18).Children(func() {
+								a.voiceBubble(c, "你", turn.transcript, true, nativeVoiceMessageTime(turn.transcriptAt))
+								if !turn.restored {
+									ui.Column(c).FillWidth().MaxWidth(688).MinWidth(0).Padding(0, 0, 0, 48).Children(func() {
+										a.voiceTurnProcessView(c, i)
+									})
+								}
+								if turn.response != "" {
+									a.voiceBubble(c, "爱弥斯", turn.response, false, nativeVoiceMessageTime(turn.responseAt))
+								} else if sameVoiceTurn(turn, state) && (state.Phase == "thinking" || state.Phase == "recognizing") {
+									a.voiceBubble(c, "爱弥斯", "正在思考…", false, "")
+								}
+							})
+						}
+					})
 				})
 			})
 		}
@@ -245,16 +257,38 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 	})
 }
 
-func (a *nativeUI) voiceBubble(c *ui.Context, speaker, text string, user bool) {
+func nativeVoiceMessageTime(sentAt time.Time) string {
+	if sentAt.IsZero() {
+		return "此消息未记录时间"
+	}
+	return sentAt.Local().Format("2006年01月02日 15:04:05")
+}
+
+func (a *nativeUI) voiceBubble(c *ui.Context, speaker, text string, user bool, timestamp string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
 	t := c.Theme()
 	align, background, foreground := ui.Start, t.Surface, t.Text
+	border := t.Border.Alpha(0.5)
+	radii := []float32{6, 18, 18, 18}
 	if user {
 		align, background, foreground = ui.End, t.Accent, t.AccentText
+		border, radii = t.Accent.Alpha(0.3), []float32{18, 6, 18, 18}
 	}
-	ui.Row(c).FillWidth().Justify(align).Children(func() {
-		ui.Column(c).MaxWidth(560).MinWidth(0).Padding(12, 16).Gap(5).Radius(16).Background(background).Children(func() {
-			ui.Text(c, speaker).FontSize(11).TextColor(foreground.Alpha(0.7))
-			ui.Text(c, text).FontSize(14).TextColor(foreground).Wrap().Selectable()
+	ui.Row(c).FillWidth().MinWidth(0).Gap(12).AlignItems(ui.Start).Justify(align).Children(func() {
+		if !user {
+			voiceAvatar(c, 36)
+		}
+		ui.Column(c).MaxWidth(640).MinWidth(0).Shrink(1).Gap(7).AlignItems(align).Children(func() {
+			ui.Text(c, speaker).FontSize(11).TextColor(t.TextMuted)
+			bubble := ui.Column(c).MinWidth(0).Padding(14, 18).Radius(radii...).Background(background).Border(1, border)
+			if timestamp != "" {
+				bubble.Tooltip(timestamp)
+			}
+			bubble.Children(func() {
+				ui.Text(c, text).FontSize(15).LineHeight(1.65).TextColor(foreground).Wrap().Selectable()
+			})
 		})
 	})
 }
