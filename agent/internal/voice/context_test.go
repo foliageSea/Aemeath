@@ -27,7 +27,7 @@ func TestContextWindowConfiguration(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"contextWindow":65536}`), &cfg); err != nil || cfg.ContextWindow != 65536 {
 		t.Fatalf("contextWindow JSON decoding: %+v, %v", cfg, err)
 	}
-	data, err := json.Marshal(State{Context: brain.ContextStats{EstimatedTokens: 1024, UsageAvailable: true}})
+	data, err := json.Marshal(State{Context: brain.ContextStats{EstimatedTokens: 1024, UsageAvailable: true, ContextWindowSource: "provider", ContextWindowModel: "exact-model-id"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,13 +36,61 @@ func TestContextWindowConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stats map[string]any
-	if err := json.Unmarshal(state["context"], &stats); err != nil || stats["estimatedTokens"] != float64(1024) || stats["usageAvailable"] != true {
+	if err := json.Unmarshal(state["context"], &stats); err != nil || stats["estimatedTokens"] != float64(1024) || stats["usageAvailable"] != true || stats["contextWindowSource"] != "provider" || stats["contextWindowModel"] != "exact-model-id" {
 		t.Fatalf("context stats JSON bridge: %s, %v", data, err)
 	}
 }
 
+func TestContextWindowModeConfiguration(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{{"", "auto"}, {"auto", "auto"}, {"manual", "manual"}, {" AUTO ", "auto"}, {" Manual ", "manual"}} {
+		cfg, err := NormalizeConfig(Config{ContextWindowMode: tc.input})
+		if err != nil || cfg.ContextWindowMode != tc.want || cfg.ContextWindow != 32768 {
+			t.Fatalf("mode %q: got %q, window %d, err %v", tc.input, cfg.ContextWindowMode, cfg.ContextWindow, err)
+		}
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored Config
+		if err := json.Unmarshal(data, &restored); err != nil || restored.ContextWindowMode != tc.want {
+			t.Fatalf("mode failed JSON round trip: %s, %v", data, err)
+		}
+	}
+	for _, mode := range []string{"invalid", "automatic", "false"} {
+		if _, err := NormalizeConfig(Config{ContextWindowMode: mode}); err == nil {
+			t.Fatalf("accepted invalid mode %q while disabled", mode)
+		}
+	}
+	for _, mode := range []string{"auto", "manual"} {
+		if _, err := NormalizeConfig(Config{ContextWindowMode: mode, ContextWindow: 4096}); err == nil {
+			t.Fatalf("accepted 4096 as configured fallback/manual capacity in %s mode", mode)
+		}
+	}
+}
+
+func TestProductionBrainReceivesContextMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("brain construction must not query metadata") }))
+	defer server.Close()
+	for _, tc := range []struct{ mode, source string }{{"", "detecting"}, {"auto", "detecting"}, {"manual", "manual"}} {
+		t.Run(tc.source+tc.mode, func(t *testing.T) {
+			engine, err := productionDependencies().newBrain(context.Background(), Config{LLMBaseURL: server.URL, LLMModel: "exact-request-model", ContextWindowMode: tc.mode, ContextWindow: 65536}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := engine.(interface {
+				ContextStats() brain.ContextStats
+				Close() error
+			})
+			defer source.Close()
+			if got := source.ContextStats(); got.ContextWindowSource != tc.source || got.ContextWindowModel != "exact-request-model" {
+				t.Fatalf("production mode %q lost source/model: %+v", tc.mode, got)
+			}
+		})
+	}
+}
+
 func TestProductionBrainReceivesContextWindow(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("brain construction must not send HTTP requests") }))
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("brain construction must not query metadata") }))
 	defer server.Close()
 	engine, err := productionDependencies().newBrain(context.Background(), Config{LLMBaseURL: server.URL, LLMModel: "test", ContextWindow: 65536}, nil)
 	if err != nil {
@@ -72,7 +120,7 @@ func TestWorkerPublishesEngineContextStats(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	defer func() { cancel(); <-done }()
-	want := brain.ContextStats{ContextWindow: 65536, EstimatedTokens: 2048, InputBudget: 60000, TotalTokens: 900, UsageAvailable: true}
+	want := brain.ContextStats{ContextWindow: 65536, ContextWindowSource: "provider", ContextWindowModel: "provider/exact-id", EstimatedTokens: 2048, InputBudget: 60000, TotalTokens: 900, UsageAvailable: true}
 	dep := fakeDependencies()
 	dep.newBrain = func(_ context.Context, cfg Config, _ Host) (brainAPI, error) {
 		if cfg.ContextWindow != want.ContextWindow {

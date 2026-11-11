@@ -21,6 +21,7 @@ type Config struct {
 	LLMAPIKey         string  `json:"llmAPIKey"`
 	LLMModel          string  `json:"llmModel"`
 	LLMTools          bool    `json:"llmTools"`
+	ContextWindowMode string  `json:"contextWindowMode"`
 	ContextWindow     int     `json:"contextWindow"`
 	TavilyAPIKey      string  `json:"tavilyAPIKey"`
 	HAMCPEnabled      bool    `json:"haMCPEnabled"`
@@ -95,6 +96,13 @@ type MemoryHost interface {
 // NormalizeConfig applies local defaults. Credentials and installed assets are
 // checked only when an operation needs them, keeping audio diagnostics usable.
 func NormalizeConfig(c Config) (Config, error) {
+	c.ContextWindowMode = strings.ToLower(strings.TrimSpace(c.ContextWindowMode))
+	if c.ContextWindowMode == "" {
+		c.ContextWindowMode = "auto"
+	}
+	if c.ContextWindowMode != "auto" && c.ContextWindowMode != "manual" {
+		return c, fmt.Errorf("context window mode must be auto or manual")
+	}
 	var contextErr error
 	c.ContextWindow, contextErr = brain.NormalizeContextWindow(c.ContextWindow)
 	if contextErr != nil {

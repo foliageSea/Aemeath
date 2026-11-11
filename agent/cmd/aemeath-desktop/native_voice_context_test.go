@@ -12,10 +12,10 @@ import (
 func TestNativeContextStatsRefreshWithoutVoiceEvent(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
-	f.state.Voice.Context = brain.ContextStats{EstimatedTokens: 21000, InputBudget: 28000, ContextWindow: 32768, UsagePercent: 75, Compressing: true, RetainedTurns: 4}
+	f.state.Voice.Context = brain.ContextStats{ContextWindowSource: "provider", ContextWindowModel: strings.Repeat("very-long-request-model-id-", 8), EstimatedTokens: 21000, InputBudget: 28000, ContextWindow: 32768, UsagePercent: 75, Compressing: true, RetainedTurns: 4}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
-	for _, text := range []string{"上下文（估算）：75.0% · 21000 / 28000 Tokens · 容量 32768", "摘要：正在压缩", "服务商尚未上报"} {
+	for _, text := range []string{"上下文（估算）：75.0% · 21000 / 28000 Tokens · 容量 32768", "摘要：正在压缩", "服务商尚未上报", "容量来源：服务上报"} {
 		if !nativeContextHasText(tt.Texts(), text) {
 			t.Fatalf("missing context display: %s", text)
 		}
@@ -66,13 +66,46 @@ func TestNativeContextStatusesAndMissingUsage(t *testing.T) {
 	}
 }
 
+func TestNativeContextCapacitySources(t *testing.T) {
+	model := strings.Repeat("provider/long-exact-model-id-", 8)
+	for _, tc := range []struct{ source, mode, want string }{
+		{"provider", "auto", "服务上报"}, {"manual", "manual", "手动设置"},
+		{"fallback", "auto", "未获取，使用备用值"}, {"detecting", "auto", "等待识别"},
+		{"", "", "等待识别"}, {"", "manual", "手动设置"},
+	} {
+		stats := brain.ContextStats{ContextWindowSource: tc.source, ContextWindowModel: model}
+		source, tooltip := nativeContextSourceText(stats, tc.mode)
+		if source != tc.want || !strings.Contains(tooltip, model) || strings.Contains(source, model) {
+			t.Fatalf("source/model rendering: %q / %q", source, tooltip)
+		}
+	}
+	a, f, _, tt := nativeTest(t)
+	tt.SetSize(760, 600)
+	nativeClick(t, tt, "语音助手")
+	for _, source := range []string{"provider", "manual", "fallback", "detecting"} {
+		f.state.Voice.Context = brain.ContextStats{ContextWindowSource: source, ContextWindowModel: model, ContextWindow: 4096, InputBudget: 2253, EstimatedTokens: 1000}
+		a.refresh()
+		tt.Frame()
+		want, _ := nativeContextSourceText(f.state.Voice.Context, "auto")
+		if !nativeContextHasText(tt.Texts(), "容量来源："+want) || nativeContextHasText(tt.Texts(), model) {
+			t.Fatalf("missing source or crowded model ID: %v", tt.Texts())
+		}
+		for _, label := range []string{"上下文与用量", "容量来源：" + want, "语音操作栏", "手动唤醒", "取消对话", "对话记录"} {
+			r, ok := tt.Find(label)
+			if !ok || r.W <= 0 || r.X < 206 || r.X+r.W > 760 || r.Y < 0 || r.Y+r.H > 600 {
+				t.Fatalf("source %s escaped compact window: %s %+v", source, label, r)
+			}
+		}
+	}
+}
+
 func TestNativeContextWindowSettingsSurviveRefreshAndSave(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(760, 600)
 	nativeClick(t, tt, "设置")
 	nativeClick(t, tt, "语音")
 	nativeClick(t, tt, "对话服务")
-	nativeVoiceEdit(t, tt, "模型上下文容量（Tokens）", "131072")
+	nativeVoiceEdit(t, tt, "备用上下文容量（Tokens）", "131072")
 	tt.Key(0, ui.KeyTab)
 	if a.draft.Voice.ContextWindow != 131072 || !a.dirty {
 		t.Fatalf("context capacity input was not bound: %d", a.draft.Voice.ContextWindow)
@@ -82,9 +115,30 @@ func TestNativeContextWindowSettingsSurviveRefreshAndSave(t *testing.T) {
 	if a.draft.Voice.ContextWindow != 131072 {
 		t.Fatal("refresh discarded context capacity draft")
 	}
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动读取模型上下文容量")
+	if a.draft.Voice.ContextWindowMode != "manual" || !a.dirty {
+		t.Fatal("manual context mode was not bound")
+	}
+	a.refresh()
+	tt.Frame()
+	if a.draft.Voice.ContextWindowMode != "manual" {
+		t.Fatal("refresh discarded manual context mode")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleTextField, "手动上下文容量（Tokens）"); !ok {
+		t.Fatal("manual mode did not relabel capacity")
+	}
 	nativeClick(t, tt, "保存设置")
 	nativeComplete(t, updates, tt)
-	if len(f.saves) != 1 || f.saves[0].Voice.ContextWindow != 131072 {
-		t.Fatal("context capacity was not saved")
+	if len(f.saves) != 1 || f.saves[0].Voice.ContextWindow != 131072 || f.saves[0].Voice.ContextWindowMode != "manual" {
+		t.Fatal("manual context mode/capacity was not saved")
+	}
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动读取模型上下文容量")
+	if a.draft.Voice.ContextWindowMode != "auto" || a.draft.Voice.ContextWindow != 131072 {
+		t.Fatal("switching to auto lost fallback capacity")
+	}
+	nativeClick(t, tt, "保存设置")
+	nativeComplete(t, updates, tt)
+	if len(f.saves) != 2 || f.saves[1].Voice.ContextWindowMode != "auto" || f.saves[1].Voice.ContextWindow != 131072 {
+		t.Fatal("auto mode/fallback capacity was not saved")
 	}
 }

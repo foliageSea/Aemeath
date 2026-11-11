@@ -27,8 +27,9 @@ type Config struct {
 	TavilyAPIKey                    string
 	HomeAssistant                   hamcp.Config
 	// Memory shares the conversation across Engines; nil keeps it per Engine.
-	Memory        *Memory
-	ContextWindow int
+	Memory            *Memory
+	ContextWindow     int
+	AutoContextWindow bool
 }
 type Host interface {
 	Metrics() string
@@ -45,34 +46,36 @@ const (
 )
 
 type Engine struct {
-	baseTools          []tool.BaseTool
-	haConfig           hamcp.Config
-	ha                 homeAssistantClient
-	haFactory          homeAssistantFactory
-	lifeCtx            context.Context
-	lifeCancel         context.CancelFunc
-	closed             bool
-	model              *openai.ChatModel
-	agent              *react.Agent
-	persona            string
-	gate               chan struct{}
-	mu                 sync.Mutex
-	generation         uint64
-	streamCancel       context.CancelFunc
-	history            []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
-	lastActive         time.Time         // last committed turn; history expires after MemoryTTL
-	memory             *Memory
-	summary            string
-	stats              ContextStats
-	memoryRevision     uint64
-	memoryEpoch        uint64
-	contextVersion     uint64
-	contextPrompt      string
-	toolTokens         int
-	compDone           chan struct{}
-	compCancel         context.CancelFunc
-	compWG             sync.WaitGroup
-	compressionTimeout time.Duration
+	baseTools            []tool.BaseTool
+	haConfig             hamcp.Config
+	ha                   homeAssistantClient
+	haFactory            homeAssistantFactory
+	lifeCtx              context.Context
+	lifeCancel           context.CancelFunc
+	closed               bool
+	model                *openai.ChatModel
+	agent                *react.Agent
+	persona              string
+	gate                 chan struct{}
+	mu                   sync.Mutex
+	generation           uint64
+	streamCancel         context.CancelFunc
+	history              []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
+	lastActive           time.Time         // last committed turn; history expires after MemoryTTL
+	memory               *Memory
+	summary              string
+	stats                ContextStats
+	memoryRevision       uint64
+	memoryEpoch          uint64
+	contextVersion       uint64
+	contextPrompt        string
+	toolTokens           int
+	compDone             chan struct{}
+	compCancel           context.CancelFunc
+	compWG               sync.WaitGroup
+	compressionTimeout   time.Duration
+	contextMetadata      *modelMetadataConfig
+	contextDiscoveryDone bool
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
@@ -104,7 +107,9 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 		return nil, errors.New("brain: invalid model base URL")
 	}
 	// Accept the conventional base URL and an accidentally pasted full completion URL.
-	u.Path = strings.TrimSuffix(u.Path, "/chat/completions")
+	escapedPath := strings.TrimSuffix(u.EscapedPath(), "/chat/completions")
+	u.Path, _ = url.PathUnescape(escapedPath)
+	u.RawPath = escapedPath
 	cfg.BaseURL = u.String()
 	persona := strings.TrimSpace(cfg.Persona)
 	if persona == "" {
@@ -119,6 +124,12 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 	}
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
 	e := &Engine{persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory, stats: newContextStats(window), compressionTimeout: 20 * time.Second}
+	e.stats.ContextWindowSource = "manual"
+	e.stats.ContextWindowModel = cfg.Model
+	if cfg.AutoContextWindow {
+		e.contextMetadata = &modelMetadataConfig{baseURL: cfg.BaseURL, apiKey: strings.TrimSpace(cfg.APIKey), model: cfg.Model}
+		e.stats.ContextWindowSource = "detecting"
+	}
 	if e.memory != nil {
 		e.memory.mu.Lock()
 		e.memory.revision++ // a new connection invalidates older pending memory commits
@@ -233,6 +244,9 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	generation := e.generation
 	ctx = context.WithValue(ctx, requestScopeKey{}, requestScope{generation: generation, epoch: e.memoryEpoch})
 	e.mu.Unlock()
+	if err := e.resolveContextWindow(ctx, generation); err != nil {
+		return "", err
+	}
 	haPrompt := ""
 	if e.haConfig.Enabled {
 		haPrompt = e.refreshHomeAssistant(ctx)

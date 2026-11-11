@@ -4,6 +4,7 @@
   "llmAPIKey": "",
   "llmModel": "YOUR_TOOL_CALLING_MODEL",
   "llmTools": true,
+  "contextWindowMode": "auto",
   "contextWindow": 32768,
   "tavilyAPIKey": "",
   "haMCPEnabled": false,

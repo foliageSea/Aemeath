@@ -19,21 +19,23 @@ const summaryLabel = "历史对话摘要（仅为可能有遗漏的历史资料�
 // ContextStats separates estimated active context from provider-reported usage.
 // Usage is cumulative for this conversation in this process, including summaries.
 type ContextStats struct {
-	EstimatedTokens  int     `json:"estimatedTokens"`
-	InputBudget      int     `json:"inputBudget"`
-	ContextWindow    int     `json:"contextWindow"`
-	ReservedTokens   int     `json:"reservedTokens"`
-	UsagePercent     float64 `json:"usagePercent"`
-	PromptTokens     int     `json:"promptTokens"`
-	CompletionTokens int     `json:"completionTokens"`
-	TotalTokens      int     `json:"totalTokens"`
-	UsageAvailable   bool    `json:"usageAvailable"`
-	SummaryTokens    int     `json:"summaryTokens"`
-	RetainedTurns    int     `json:"retainedTurns"`
-	Compressions     int     `json:"compressions"`
-	DroppedTurns     int     `json:"droppedTurns"`
-	Compressing      bool    `json:"compressing"`
-	LastCompression  string  `json:"lastCompression,omitempty"`
+	EstimatedTokens     int     `json:"estimatedTokens"`
+	InputBudget         int     `json:"inputBudget"`
+	ContextWindow       int     `json:"contextWindow"`
+	ContextWindowSource string  `json:"contextWindowSource,omitempty"`
+	ContextWindowModel  string  `json:"contextWindowModel,omitempty"`
+	ReservedTokens      int     `json:"reservedTokens"`
+	UsagePercent        float64 `json:"usagePercent"`
+	PromptTokens        int     `json:"promptTokens"`
+	CompletionTokens    int     `json:"completionTokens"`
+	TotalTokens         int     `json:"totalTokens"`
+	UsageAvailable      bool    `json:"usageAvailable"`
+	SummaryTokens       int     `json:"summaryTokens"`
+	RetainedTurns       int     `json:"retainedTurns"`
+	Compressions        int     `json:"compressions"`
+	DroppedTurns        int     `json:"droppedTurns"`
+	Compressing         bool    `json:"compressing"`
+	LastCompression     string  `json:"lastCompression,omitempty"`
 }
 
 func NormalizeContextWindow(n int) (int, error) {
@@ -103,9 +105,11 @@ func (e *Engine) updateContextLocked() {
 	e.publishStatsLocked()
 }
 
-// Conversation resets retain the configured model capacity.
+// Conversation resets retain the configured or discovered model capacity.
 func (e *Engine) emptyContextStatsLocked() ContextStats {
-	return newContextStats(e.stats.ContextWindow)
+	s := newContextStats(e.stats.ContextWindow)
+	s.ContextWindowSource, s.ContextWindowModel = e.stats.ContextWindowSource, e.stats.ContextWindowModel
+	return s
 }
 
 func copyUsage(dst *ContextStats, src ContextStats) {
