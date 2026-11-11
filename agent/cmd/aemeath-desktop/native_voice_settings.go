@@ -8,30 +8,41 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-type nativeVoiceSettingsGroup struct {
+type nativeSettingsGroup struct {
 	key, title string
 	icon       *ui.SVG
 }
 
-var nativeVoiceSettingsGroups = []nativeVoiceSettingsGroup{
-	{"general", "基础设置", sidebarSettings},
+var nativeAssistantSettingsGroups = []nativeSettingsGroup{
+	{"general", "基础设置", voiceSettingsIcon},
 	{"conversation", "对话服务", sidebarSVG("<path d='M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-3 3V11.5A8.5 8.5 0 0 1 9.5 3h3A8.5 8.5 0 0 1 21 11.5Z'/><path d='M6 9h10M6 13h7'/>")},
+}
+
+var nativeVoiceSettingsGroups = []nativeSettingsGroup{
 	{"recognition", "语音识别", sidebarSVG("<path d='M3 10v4M7 6v12M12 3v18M17 6v12M21 10v4'/>")},
 	{"synthesis", "语音合成", sidebarSVG("<path d='m11 5-6 4H2v6h3l6 4V5ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14'/>")},
 	{"wake", "离线唤醒", sidebarVoice},
 	{"preview", "声音试听", sidebarSVG("<circle cx='12' cy='12' r='9'/><path d='m10 8 6 4-6 4V8Z'/>")},
 }
 
+func (a *nativeUI) assistantSettingsView(c *ui.Context) {
+	a.groupedSettingsView(c, "assistant", "助手", nativeAssistantSettingsGroups, &a.assistantSettingsSection, a.assistantSettingsScroll[:])
+}
+
 func (a *nativeUI) voiceSettingsView(c *ui.Context) {
+	a.groupedSettingsView(c, "voice", "语音", nativeVoiceSettingsGroups, &a.voiceSettingsSection, a.voiceSettingsScroll[:])
+}
+
+func (a *nativeUI) groupedSettingsView(c *ui.Context, key, title string, groups []nativeSettingsGroup, section *int, scroll []ui.ScrollState) {
 	t := c.Theme()
-	if a.voiceSettingsSection < 0 || a.voiceSettingsSection >= len(nativeVoiceSettingsGroups) {
-		a.voiceSettingsSection = 0
+	if *section < 0 || *section >= len(groups) {
+		*section = 0
 	}
-	ui.Row(c.Key("voice-settings-layout")).Label("语音设置分组").FillWidth().Grow(1).MinHeight(0).Gap(16).AlignItems(ui.Stretch).Children(func() {
-		ui.Column(c.Key("voice-settings-sidebar")).Label("语音设置导航").Width(128).Shrink(0).Padding(8).Gap(4).Radius(14).Background(t.Surface).Border(1, t.Border.Alpha(0.45)).Children(func() {
-			ui.Text(c, "语音配置").FontSize(11).TextColor(t.TextMuted).Padding(6, 8, 10)
-			for index, group := range nativeVoiceSettingsGroups {
-				selected := a.voiceSettingsSection == index
+	ui.Row(c.Key(key + "-settings-layout")).Label(title + "设置分组").FillWidth().Grow(1).MinHeight(0).Gap(16).AlignItems(ui.Stretch).Children(func() {
+		ui.Column(c.Key(key+"-settings-sidebar")).Label(title+"设置导航").Width(128).Shrink(0).Padding(8).Gap(4).Radius(14).Background(t.Surface).Border(1, t.Border.Alpha(0.45)).Children(func() {
+			ui.Text(c, title+"配置").FontSize(11).TextColor(t.TextMuted).Padding(6, 8, 10)
+			for index, group := range groups {
+				selected := *section == index
 				button := ui.Button(c.Key(group.key), "").Label(group.title).AccessSelected(selected).FillWidth().Height(36).Padding(7, 8).Gap(8).BorderWidth(0).Radius(8).AlignItems(ui.Center).Justify(ui.Start).Background(ui.Color{})
 				color := t.TextMuted
 				if selected {
@@ -43,27 +54,27 @@ func (a *nativeUI) voiceSettingsView(c *ui.Context) {
 				button.Children(func() {
 					ui.Icon(c, group.icon).Size(16, 16).Shrink(0).TextColor(color)
 					ui.Text(c, group.title).FontSize(12).TextColor(color).MinWidth(0).SingleLine()
-				}).OnClick(func() { a.voiceSettingsSection = index })
+				}).OnClick(func() { *section = index })
 			}
 		})
-		group := nativeVoiceSettingsGroups[a.voiceSettingsSection]
-		ui.Scroll(c.Key("voice-settings-" + group.key)).Label(group.title + "设置内容").Grow(1).MinWidth(0).MinHeight(0).TrackScroll(&a.voiceSettingsScroll[a.voiceSettingsSection]).Children(func() {
+		group := groups[*section]
+		ui.Scroll(c.Key(key + "-settings-" + group.key)).Label(group.title + "设置内容").Grow(1).MinWidth(0).MinHeight(0).TrackScroll(&scroll[*section]).Children(func() {
 			ui.Column(c).FillWidth().MinWidth(0).Gap(14).Children(func() {
 				ui.Text(c, group.title).FontSize(18).Bold()
 				ui.Column(c.Key(group.key + "-form")).FillWidth().MinWidth(0).Padding(18).Gap(12).Radius(14).Background(t.Surface).Children(func() {
-					switch a.voiceSettingsSection {
-					case 1:
-						a.voiceConversationSettingsView(c)
-					case 2:
-						a.voiceRecognitionSettingsView(c)
-					case 3:
-						a.voiceSynthesisSettingsView(c)
-					case 4:
-						a.voiceWakeSettingsView(c)
-					case 5:
-						a.voiceSoundSettingsView(c)
-					default:
+					switch group.key {
+					case "general":
 						a.voiceGeneralSettingsView(c)
+					case "conversation":
+						a.voiceConversationSettingsView(c)
+					case "recognition":
+						a.voiceRecognitionSettingsView(c)
+					case "synthesis":
+						a.voiceSynthesisSettingsView(c)
+					case "wake":
+						a.voiceWakeSettingsView(c)
+					case "preview":
+						a.voiceSoundSettingsView(c)
 					}
 				})
 			})
@@ -184,7 +195,7 @@ func (a *nativeUI) voiceSynthesisSettingsView(c *ui.Context) {
 		}
 	} else {
 		ui.Text(c, "MiMo 合成与语音识别共用服务地址和密钥。").FontSize(11).TextColor(t.TextMuted).Wrap()
-		ui.Button(c.Key("voice-configure-mimo"), "配置 MiMo 服务").OnClick(func() { a.voiceSettingsSection = 2 })
+		ui.Button(c.Key("voice-configure-mimo"), "配置 MiMo 服务").OnClick(func() { a.voiceSettingsSection = 0 })
 	}
 	a.voiceField(c, "voice-reference-path", "参考音频路径", "参考声音的 WAV 文件完整路径", &cfg.ReferenceAudio, false)
 }

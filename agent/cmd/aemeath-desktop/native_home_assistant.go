@@ -132,7 +132,7 @@ func (a *nativeUI) sidebarHomeAssistant(c *ui.Context) {
 		ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(color)
 		ui.Text(c, label).FontSize(12).TextColor(color).Grow(1).MinWidth(0).SingleLine()
 		ui.Icon(c, sidebarChevronRight).Size(14, 14).Shrink(0).TextColor(t.TextMuted)
-	}).OnClick(func() { a.page = "设置"; a.settingsTab = 4 })
+	}).OnClick(func() { a.page = "设置"; a.settingsTab = nativeSettingsHomeAssistantTab })
 }
 
 func (a *nativeUI) homeAssistantStatusView(c *ui.Context) {

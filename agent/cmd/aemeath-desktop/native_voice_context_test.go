@@ -207,7 +207,7 @@ func TestNativeModelsDevSettingsSaveAndManualMode(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(1000, 1000)
 	nativeClick(t, tt, "设置")
-	nativeClick(t, tt, "语音")
+	nativeClick(t, tt, "助手")
 	nativeClick(t, tt, "对话服务")
 	if a.draft.Voice.ModelsDevEnabled {
 		t.Fatal("models.dev should be opt-in")
@@ -282,7 +282,7 @@ func TestNativeContextWindowSettingsSurviveRefreshAndSave(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(760, 600)
 	nativeClick(t, tt, "设置")
-	nativeClick(t, tt, "语音")
+	nativeClick(t, tt, "助手")
 	nativeClick(t, tt, "对话服务")
 	nativeVoiceEdit(t, tt, "备用上下文容量（Tokens）", "131072")
 	tt.Key(0, ui.KeyTab)

@@ -161,7 +161,7 @@ func (a *nativeUI) recordVoice() {
 	}
 }
 
-func (a *nativeUI) openVoiceSettings() { a.page, a.settingsTab = "设置", 3 }
+func (a *nativeUI) openVoiceSettings() { a.page, a.settingsTab = "设置", nativeSettingsVoiceTab }
 
 func (a *nativeUI) voiceDisabled() bool {
 	_, supported := a.service.(nativeVoiceService)

@@ -22,49 +22,60 @@ type nativeService interface {
 	RefreshQuotas() error
 }
 
+const (
+	nativeSettingsConnectionTab = iota
+	nativeSettingsGeneralTab
+	nativeSettingsScreenTab
+	nativeSettingsAssistantTab
+	nativeSettingsVoiceTab
+	nativeSettingsHomeAssistantTab
+)
+
 type nativeUI struct {
-	service              nativeService
-	snapshot             desktop.State
-	draft                desktop.Settings
-	page                 string
-	notice               string
-	noticePending        bool
-	dirty                bool
-	revision             int
-	busy                 map[string]bool
-	update               func(func()) // Host must assign win.Update before displaying the view.
-	login                bool
-	loginRead            func() bool
-	loginWrite           func(bool) error
-	history              []nativeSample
-	details              bool
-	quotaList            ui.ListState
-	quotaUnsaved         bool
-	voiceHold            bool
-	voiceKeyDown         bool
-	voiceGlobalReady     bool
-	voiceGlobalKey       string
-	voiceGlobalError     string
-	voiceHoldSession     uint64
-	voiceHoldStartTurn   uint32
-	voicePreview         string
-	visibleKeys          map[string]bool
-	settingsTab          int
-	voiceSettingsSection int
-	voiceSettingsScroll  [6]ui.ScrollState
-	voiceHistory         []nativeVoiceTurn
-	voiceNextID          uint64
-	voiceScroll          ui.ScrollState
-	voiceCleared         bool
-	voiceClearConfirm    bool
-	voiceContextExpanded bool
-	voiceClearTurn       uint32
-	voiceClearSession    uint64
-	wakeAssets           nativeWakeAssets
-	wakeAssetOps         nativeWakeAssetOps
-	wakeAdvanced         bool
-	homeAssistant        nativeHAState
-	haProbe              func(context.Context, hamcp.Config) ([]hamcp.Tool, error)
+	service                  nativeService
+	snapshot                 desktop.State
+	draft                    desktop.Settings
+	page                     string
+	notice                   string
+	noticePending            bool
+	dirty                    bool
+	revision                 int
+	busy                     map[string]bool
+	update                   func(func()) // Host must assign win.Update before displaying the view.
+	login                    bool
+	loginRead                func() bool
+	loginWrite               func(bool) error
+	history                  []nativeSample
+	details                  bool
+	quotaList                ui.ListState
+	quotaUnsaved             bool
+	voiceHold                bool
+	voiceKeyDown             bool
+	voiceGlobalReady         bool
+	voiceGlobalKey           string
+	voiceGlobalError         string
+	voiceHoldSession         uint64
+	voiceHoldStartTurn       uint32
+	voicePreview             string
+	visibleKeys              map[string]bool
+	settingsTab              int
+	assistantSettingsSection int
+	assistantSettingsScroll  [2]ui.ScrollState
+	voiceSettingsSection     int
+	voiceSettingsScroll      [4]ui.ScrollState
+	voiceHistory             []nativeVoiceTurn
+	voiceNextID              uint64
+	voiceScroll              ui.ScrollState
+	voiceCleared             bool
+	voiceClearConfirm        bool
+	voiceContextExpanded     bool
+	voiceClearTurn           uint32
+	voiceClearSession        uint64
+	wakeAssets               nativeWakeAssets
+	wakeAssetOps             nativeWakeAssetOps
+	wakeAdvanced             bool
+	homeAssistant            nativeHAState
+	haProbe                  func(context.Context, hamcp.Config) ([]hamcp.Tool, error)
 }
 
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
@@ -223,24 +234,28 @@ func nativeProgress(c *ui.Context, v float64) {
 func (a *nativeUI) overview(c *ui.Context) { a.metricGrid(c) }
 func (a *nativeUI) settingsView(c *ui.Context) {
 	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Tabs(c.Key("settings-tabs"), &a.settingsTab, "连接", "通用", "屏幕", "语音", "智能家居").Grow(1)
+		ui.Tabs(c.Key("settings-tabs"), &a.settingsTab, "连接", "通用", "屏幕", "助手", "语音", "智能家居").Grow(1)
 		if a.dirty {
 			ui.Text(c, "未保存").FontSize(12).TextColor(c.Theme().Warning)
 		}
 		ui.PrimaryButton(c.Key("save-settings"), "保存设置").Disabled(a.busy["save"]).OnClick(a.save)
 	})
-	if a.settingsTab == 3 {
+	switch a.settingsTab {
+	case nativeSettingsAssistantTab:
+		a.assistantSettingsView(c)
+		return
+	case nativeSettingsVoiceTab:
 		a.voiceSettingsView(c)
 		return
 	}
 	ui.Scroll(c.Key(fmt.Sprintf("settings-tab-%d", a.settingsTab))).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().Gap(16).Children(func() {
 			switch a.settingsTab {
-			case 1:
+			case nativeSettingsGeneralTab:
 				a.generalSettingsView(c)
-			case 2:
+			case nativeSettingsScreenTab:
 				a.screenSettingsView(c)
-			case 4:
+			case nativeSettingsHomeAssistantTab:
 				a.homeAssistantSettingsView(c)
 			default:
 				a.connectionSettingsView(c)

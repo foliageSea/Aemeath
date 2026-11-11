@@ -52,7 +52,7 @@ func TestNativeHASettingsMaskedProbeSaveAndNavigation(t *testing.T) {
 	}
 	nativeClick(t, tt, "概览")
 	nativeClick(t, tt, "HA 连接详情")
-	if a.page != "设置" || a.settingsTab != 4 || !tt.HasText("Home Assistant") {
+	if a.page != "设置" || a.settingsTab != nativeSettingsHomeAssistantTab || !tt.HasText("Home Assistant") {
 		t.Fatal("HA sidebar entry did not open settings")
 	}
 }

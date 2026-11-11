@@ -72,7 +72,7 @@ func webSearchTool(search webSearchFunc) *deviceTool {
 				message := "Tavily 搜索暂不可用，请稍后重试；未获得可引用的搜索结果。"
 				switch {
 				case errors.Is(err, websearch.ErrAPIKey):
-					message = "请先在设置 → 语音 → 对话服务中填写 Tavily API 密钥并保存；CLI 可设置 TAVILY_API_KEY。"
+					message = "请先在设置 → 助手 → 对话服务中填写 Tavily API 密钥并保存；CLI 可设置 TAVILY_API_KEY。"
 				case errors.Is(err, websearch.ErrUnauthorized):
 					message = "Tavily API 密钥无效或权限不足，请检查配置。"
 				case errors.Is(err, websearch.ErrRateLimit):

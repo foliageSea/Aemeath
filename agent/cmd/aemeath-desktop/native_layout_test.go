@@ -13,7 +13,7 @@ func TestNativeSettingsTabsKeepDraftAndSaveAcrossTabs(t *testing.T) {
 	tt.SetSize(760, 600)
 	nativeClick(t, tt, "设置")
 	nativeVoiceEdit(t, tt, "设备地址", "draft.local")
-	for _, label := range []string{"通用", "屏幕", "语音"} {
+	for _, label := range []string{"通用", "屏幕", "助手", "语音", "智能家居"} {
 		nativeClick(t, tt, label)
 		info, ok := tt.AccessByRole(ui.RoleTab, label)
 		if !ok || !info.Selected {
@@ -40,64 +40,114 @@ func TestNativeSettingsTabsKeepDraftAndSaveAcrossTabs(t *testing.T) {
 		t.Fatal("voice configuration remains in conversation")
 	}
 	nativeClick(t, tt, "语音设置")
-	if a.page != "设置" || a.settingsTab != 3 {
+	if a.page != "设置" || a.settingsTab != nativeSettingsVoiceTab {
 		t.Fatal("voice settings shortcut did not select tab")
 	}
 }
 
-func TestNativeVoiceSectionsKeepDraftSelectionAndSaveAcrossGroups(t *testing.T) {
+func TestNativeAssistantAndVoiceSectionsKeepDraftSelectionAndSaveAcrossTabs(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(1100, 1600)
 	nativeClick(t, tt, "设置")
-	nativeClick(t, tt, "语音")
-	if a.voiceSettingsSection != 0 {
-		t.Fatalf("default voice section = %d, want 0", a.voiceSettingsSection)
+	nativeClick(t, tt, "助手")
+	if a.settingsTab != nativeSettingsAssistantTab || a.assistantSettingsSection != 0 {
+		t.Fatalf("default assistant navigation: tab=%d section=%d", a.settingsTab, a.assistantSettingsSection)
 	}
-	fields := [...]string{"角色设定", "对话模型", "MiMo 服务地址", "参考音频路径", "唤醒阈值", "试听文本"}
-	values := [...]string{"分组中的角色草稿。", "section-model", "https://asr.example/v1", "/tmp/section-reference.wav", "0.68", "保留试听草稿。"}
-	for section, title := range nativeVoiceSections {
-		nativeClick(t, tt, title)
-		if a.voiceSettingsSection != section {
-			t.Fatalf("clicked %s selected section %d", title, a.voiceSettingsSection)
-		}
-		for i, label := range nativeVoiceSections {
-			info, ok := tt.AccessByRole(ui.RoleButton, label)
-			if !ok || (info.Selected || info.Checked) != (i == section) {
-				t.Fatalf("navigation selection: %s %+v", label, info)
+	nativeClick(t, tt, "语音")
+	if a.settingsTab != nativeSettingsVoiceTab || a.voiceSettingsSection != 0 {
+		t.Fatalf("default voice navigation: tab=%d section=%d", a.settingsTab, a.voiceSettingsSection)
+	}
+	groups := []struct {
+		tab, title, field, value string
+		section                  int
+	}{
+		{"助手", "基础设置", "角色设定", "分组中的角色草稿。", 0},
+		{"助手", "对话服务", "对话模型", "section-model", 1},
+		{"语音", "语音识别", "MiMo 服务地址", "https://asr.example/v1", 0},
+		{"语音", "语音合成", "参考音频路径", "/tmp/section-reference.wav", 1},
+		{"语音", "离线唤醒", "唤醒阈值", "0.68", 2},
+		{"语音", "声音试听", "试听文本", "保留试听草稿。", 3},
+	}
+	assistantSelection, voiceSelection := 0, 0
+	assertNavigation := func(tab string, section int) {
+		t.Helper()
+		for _, group := range groups {
+			info, ok := tt.AccessByRole(ui.RoleButton, group.title)
+			if group.tab != tab {
+				if ok {
+					t.Fatalf("%s category leaked into %s tab: %s", group.tab, tab, group.title)
+				}
+				continue
+			}
+			if !ok || (info.Selected || info.Checked) != (group.section == section) {
+				t.Fatalf("navigation selection: %s %+v", group.title, info)
 			}
 		}
-		for i, field := range fields {
-			_, rendered := tt.AccessByRole(ui.RoleTextField, field)
-			if rendered != (i == section) {
-				t.Fatalf("section %s rendered field %s: %v", title, field, rendered)
+		for _, label := range []string{"连接", "通用", "屏幕", "助手", "语音", "智能家居"} {
+			info, ok := tt.AccessByRole(ui.RoleTab, label)
+			if !ok || info.Selected != (label == tab) {
+				t.Fatalf("top-level settings tab changed: %s %+v", label, info)
+			}
+		}
+		if a.assistantSettingsSection != assistantSelection || a.voiceSettingsSection != voiceSelection {
+			t.Fatalf("tab switch changed independent selections: assistant=%d voice=%d, want %d/%d", a.assistantSettingsSection, a.voiceSettingsSection, assistantSelection, voiceSelection)
+		}
+	}
+	for _, group := range groups {
+		nativeClick(t, tt, group.tab)
+		nativeClick(t, tt, group.title)
+		if group.tab == "助手" {
+			assistantSelection = group.section
+		} else {
+			voiceSelection = group.section
+		}
+		assertNavigation(group.tab, group.section)
+		for _, other := range groups {
+			_, rendered := tt.AccessByRole(ui.RoleTextField, other.field)
+			if rendered != (other.title == group.title) {
+				t.Fatalf("section %s rendered field %s: %v", group.title, other.field, rendered)
 			}
 		}
 		if _, ok := tt.AccessByRole(ui.RoleButton, "保存设置"); !ok {
-			t.Fatalf("missing unified save in %s", title)
+			t.Fatalf("missing unified save in %s", group.title)
 		}
 		if _, ok := tt.AccessByRole(ui.RoleButton, "保存语音设置"); ok {
 			t.Fatal("obsolete bottom voice save remains")
 		}
-		for _, label := range []string{"连接", "通用", "屏幕", "语音"} {
-			info, ok := tt.AccessByRole(ui.RoleTab, label)
-			if !ok || info.Selected != (label == "语音") {
-				t.Fatalf("top-level settings tab changed: %s %+v", label, info)
-			}
-		}
-		nativeVoiceEdit(t, tt, fields[section], values[section])
+		nativeVoiceEdit(t, tt, group.field, group.value)
 		tt.Key(0, ui.KeyTab)
 	}
 	before := a.draft.Voice
-	if before.Persona != values[0] || before.LLMModel != values[1] || before.MiMoBaseURL != values[2] || before.ReferenceAudio != values[3] || before.WakeThreshold != 0.68 || a.voicePreview != values[5] || !a.dirty {
+	if before.Persona != groups[0].value || before.LLMModel != groups[1].value || before.MiMoBaseURL != groups[2].value || before.ReferenceAudio != groups[3].value || before.WakeThreshold != 0.68 || a.voicePreview != groups[5].value || !a.dirty {
 		t.Fatal("section navigation lost edited draft")
 	}
-	for section := len(nativeVoiceSections) - 1; section >= 0; section-- {
-		nativeClick(t, tt, nativeVoiceSections[section])
-		info, ok := tt.AccessByRole(ui.RoleTextField, fields[section])
-		if !ok || (section != 4 && info.Value != values[section]) {
-			t.Fatalf("section roundtrip lost editor %s: %+v", fields[section], info)
+	// Switching through unrelated tabs must restore each tab's last category,
+	// not reset it or reinterpret the other tab's local section index.
+	for _, tab := range []string{"连接", "通用", "屏幕", "智能家居", "助手", "语音", "助手"} {
+		nativeClick(t, tt, tab)
+		if tab == "助手" {
+			assertNavigation(tab, assistantSelection)
+		} else if tab == "语音" {
+			assertNavigation(tab, voiceSelection)
 		}
-		if a.draft.Voice != before || a.voicePreview != values[5] {
+	}
+	a.refresh()
+	tt.Frame()
+	for i := len(groups) - 1; i >= 0; i-- {
+		group := groups[i]
+		nativeClick(t, tt, group.tab)
+		nativeClick(t, tt, group.title)
+		if group.tab == "助手" {
+			assistantSelection = group.section
+		} else {
+			voiceSelection = group.section
+		}
+		assertNavigation(group.tab, group.section)
+		info, ok := tt.AccessByRole(ui.RoleTextField, group.field)
+		if !ok || (group.field != "唤醒阈值" && info.Value != group.value) {
+			t.Fatalf("section roundtrip lost editor %s: %+v", group.field, info)
+		}
+		if a.draft.Voice != before || a.voicePreview != groups[5].value {
 			t.Fatal("section roundtrip replaced draft")
 		}
 	}
@@ -106,7 +156,66 @@ func TestNativeVoiceSectionsKeepDraftSelectionAndSaveAcrossGroups(t *testing.T) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.saves) != 1 || f.saves[0].Voice != before || a.dirty {
-		t.Fatal("unified save did not persist all voice groups")
+		t.Fatal("unified save did not persist assistant and voice groups")
+	}
+}
+
+func TestNativeSettingsTopTabsUsableAtMinimumWindow(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		a, _, _, tt := nativeTest(t)
+		tt.SetSize(760, 577)
+		tt.SetDark(dark)
+		nativeClick(t, tt, "设置")
+		for _, dirty := range []bool{false, true} {
+			if dirty {
+				a.draft.Address = "compact-draft.local"
+				a.edited()
+				tt.Frame()
+			}
+			for index, label := range []string{"连接", "通用", "屏幕", "助手", "语音", "智能家居"} {
+				info, ok := tt.AccessByRole(ui.RoleTab, label)
+				r := info.Bounds
+				if !ok || info.Disabled || r.W <= 0 || r.H <= 0 || r.X < 206 || r.X+r.W > 760 || r.Y < 0 || r.Y+r.H > 577 {
+					t.Fatalf("tab outside minimum window (dark=%v dirty=%v): %s %+v", dark, dirty, label, info)
+				}
+				nativeClick(t, tt, label)
+				info, ok = tt.AccessByRole(ui.RoleTab, label)
+				if !ok || !info.Selected || a.settingsTab != index {
+					t.Fatalf("tab not usable in expected order (dark=%v dirty=%v): %s tab=%d %+v", dark, dirty, label, a.settingsTab, info)
+				}
+				var previousRight float32
+				for i, tab := range []string{"连接", "通用", "屏幕", "助手", "语音", "智能家居"} {
+					other, found := tt.AccessByRole(ui.RoleTab, tab)
+					if !found || other.Selected != (i == index) || (i > 0 && other.Bounds.X < previousRight) {
+						t.Fatalf("tab order/selection overlaps: %s %+v", tab, other)
+					}
+					previousRight = other.Bounds.X + other.Bounds.W
+				}
+				save, ok := tt.AccessByRole(ui.RoleButton, "保存设置")
+				if !ok || save.Bounds.X < previousRight || save.Bounds.W <= 0 || save.Bounds.X+save.Bounds.W > 760 || save.Bounds.Y < 0 || save.Bounds.Y+save.Bounds.H > 577 {
+					t.Fatalf("save overlaps tabs or escapes minimum window (dark=%v dirty=%v): %+v", dark, dirty, save)
+				}
+			}
+		}
+	}
+}
+
+func TestNativeSettingsGroupDefinitionsAndBasicSliderIcon(t *testing.T) {
+	if len(nativeAssistantSettingsGroups) != len(nativeAssistantSections) || len(nativeVoiceSettingsGroups) != len(nativeVoiceSections) {
+		t.Fatal("assistant/voice category counts changed")
+	}
+	for i, title := range nativeAssistantSections {
+		if nativeAssistantSettingsGroups[i].title != title {
+			t.Fatalf("assistant category %d = %s, want %s", i, nativeAssistantSettingsGroups[i].title, title)
+		}
+	}
+	for i, title := range nativeVoiceSections {
+		if nativeVoiceSettingsGroups[i].title != title {
+			t.Fatalf("voice category %d = %s, want %s", i, nativeVoiceSettingsGroups[i].title, title)
+		}
+	}
+	if nativeAssistantSettingsGroups[0].icon != voiceSettingsIcon || nativeAssistantSettingsGroups[0].icon == sidebarSettings {
+		t.Fatal("basic assistant settings must use the slider icon, not the sidebar gear")
 	}
 }
 
