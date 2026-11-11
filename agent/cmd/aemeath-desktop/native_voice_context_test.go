@@ -13,13 +13,45 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestNativeContextPercentageFollowsProgressWithoutSummaryCapacity(t *testing.T) {
+	for _, size := range [][2]int{{760, 577}, {1100, 900}} {
+		for _, dark := range []bool{false, true} {
+			a, f, _, tt := nativeTest(t)
+			tt.SetSize(size[0], size[1])
+			tt.SetDark(dark)
+			f.state.Voice.Context = brain.ContextStats{ContextWindow: 1050000, InputBudget: 838976, EstimatedTokens: 5414, UsagePercent: 0.6, ContextWindowSource: "modelsdev"}
+			a.refresh()
+			nativeClick(t, tt, "语音助手")
+			for _, expanded := range []bool{false, true} {
+				if expanded {
+					nativeClick(t, tt, "上下文详情")
+				}
+				bar, ok := tt.Find("上下文占用（估算）")
+				if !ok {
+					t.Fatal("missing context progress bar")
+				}
+				percent, ok := tt.Find("0.6%")
+				if !ok || percent.X < bar.X+bar.W || percent.Y > bar.Y+bar.H || percent.Y+percent.H < bar.Y || percent.X+percent.W > float32(size[0]-20) {
+					t.Fatalf("percentage must follow bar on same row: bar=%+v percent=%+v", bar, percent)
+				}
+				if tt.HasText("容量 1,050,000") {
+					t.Fatal("redundant summary capacity remains")
+				}
+				if expanded && !tt.HasText("1,050,000 · models.dev") {
+					t.Fatal("expanded capacity detail was removed")
+				}
+			}
+		}
+	}
+}
+
 func TestNativeContextStatsRefreshWithoutVoiceEvent(t *testing.T) {
 	a, f, _, tt := nativeTest(t)
 	tt.SetSize(760, 600)
 	f.state.Voice.Context = brain.ContextStats{ContextWindowSource: "modelsdev", ContextWindowModel: strings.Repeat("very-long-request-model-id-", 8), EstimatedTokens: 21000, InputBudget: 28000, ContextWindow: 32768, UsagePercent: 75, Compressing: true, RetainedTurns: 4}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
-	for _, text := range []string{"75.0%", "正在压缩", "容量 32K"} {
+	for _, text := range []string{"75.0%", "正在压缩"} {
 		if !nativeContextHasText(tt.Texts(), text) {
 			t.Fatalf("missing context display: %s", text)
 		}
@@ -76,7 +108,7 @@ func TestNativeContextStatusesAndZeroLocalUsage(t *testing.T) {
 		f.state.Voice.Context = brain.ContextStats{LastCompression: tc.status, UsageAvailable: true, PromptTokens: 9000, CompletionTokens: 1000, TotalTokens: 10000}
 		a.refresh()
 		tt.Frame()
-		for _, text := range []string{"等待模型初始化", "容量 64K", tc.want, "输入 0 · 输出 0 · 总计 0 Tokens（本地估算）"} {
+		for _, text := range []string{"等待模型初始化", "64K · 使用备用值", tc.want, "输入 0 · 输出 0 · 总计 0 Tokens（本地估算）"} {
 			if !nativeContextHasText(tt.Texts(), text) {
 				t.Fatalf("incorrect pending statistics, missing %q: %v", text, tt.Texts())
 			}
@@ -135,7 +167,7 @@ func TestNativeContextDisplaysRestoredEstimateBeforeFirstReply(t *testing.T) {
 					t.Fatalf("startup configuration statistics lost saved local usage: %+v", stats)
 				}
 			}
-			want := []string{"Tokens（估算）", "容量 32K", "32K · 手动设置", usage}
+			want := []string{"Tokens（估算）", "32K · 手动设置", usage}
 			if tc.age > 0 {
 				want = append(want, "尚未压缩", "0 轮 · 压缩 0 次 · 丢弃 0 轮")
 				if stats.SummaryTokens != 0 || stats.RetainedTurns != 0 {

@@ -104,16 +104,15 @@ func (a *nativeUI) voiceContextView(c *ui.Context) {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Tooltip(estimateTooltip).Children(func() {
 					ui.Text(c, "上下文").FontSize(12).TextColor(t.TextMuted)
 					if stats.InputBudget > 0 {
-						ui.Text(c, fmt.Sprintf("%.1f%%", stats.UsagePercent)).FontSize(12).Bold().TextColor(occupancyColor)
 						fraction := max(0, min(1, stats.UsagePercent/100))
 						ui.Progress(c, fraction).Label("上下文占用（估算）").Size(64, 4).MinWidth(0).Shrink(0).Background(t.Border.Alpha(0.6)).Draw(func(p *ui.Painter, r ui.Rect) {
 							p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * float32(fraction), H: r.H}, occupancyColor, 2)
 						})
+						ui.Text(c, fmt.Sprintf("%.1f%%", stats.UsagePercent)).FontSize(12).Bold().TextColor(occupancyColor)
 					} else {
 						ui.Text(c, "等待初始化").FontSize(12).TextColor(t.TextMuted)
 					}
 				})
-				ui.Text(c, "容量 "+nativeContextCapacity(window)).FontSize(12).TextColor(t.TextMuted).Tooltip(fmt.Sprintf("%s Tokens\n%s", nativeContextNumber(window), sourceTooltip))
 				if summary != "尚未压缩" {
 					ui.Text(c, summary).FontSize(12).TextColor(summaryColor)
 				} else if stats.InputBudget > 0 && stats.UsagePercent >= 70 {
