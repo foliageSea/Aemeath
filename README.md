@@ -15,21 +15,21 @@ docs/       语音安装配置、通信协议与验证记录
 
 ## 版本与自动发版
 
-当前项目版本为 **0.2.0**。根目录 `VERSION` 是统一版本来源，Agent 安装包元数据同步到 `agent/mygo.json`，固件的 ESP-IDF `PROJECT_VER` 直接读取它。
+当前项目版本为 **0.0.3**。根目录 `VERSION` 是统一版本来源，Agent 安装包元数据同步到 `agent/mygo.json`，固件的 ESP-IDF `PROJECT_VER` 直接读取它。
 
-升级版本后提交改动，再为该提交创建并发布 GitHub Release（Tag 使用 `v0.2.0` 或 `0.2.0`，与项目版本一致）：
+升级版本后提交改动，再为该提交创建并发布 GitHub Release（Tag 使用 `v0.0.3` 或 `0.0.3`，与项目版本一致）：
 
 ```bash
-python3 scripts/version.py 0.2.0          # 下次发版替换为新的 X.Y.Z
-python3 scripts/version.py --check --tag v0.2.0
+python3 scripts/version.py 0.0.3          # 下次发版替换为新的 X.Y.Z
+python3 scripts/version.py --check --tag v0.0.3
 ```
 
 发布 Release 自动触发 `.github/workflows/release.yml`，并行构建 Windows x64、macOS Apple Silicon 与 ESP32-S3 固件，全部成功后上传以下附件及带版本号的 SHA-256 校验文件：
 
-- `Aemeath-Agent-0.2.0-windows-x64-setup.exe`：NSIS 安装包，包含语音原生运行库。
-- `Aemeath-Agent-0.2.0-macos-arm64.dmg`：macOS 13+ Apple Silicon 安装镜像，包含语音原生运行库。
-- `Aemeath-Firmware-0.2.0-esp32s3.bin`：从地址 `0x0` 烧录的合并镜像，会覆盖镜像间隙中的 NVS / Wi-Fi 配置；保留设置时使用 ZIP 内的分区烧录命令。
-- `Aemeath-Firmware-0.2.0-esp32s3.zip`：分区镜像、烧录参数与说明。
+- `Aemeath-Agent-0.0.3-windows-x64-setup.exe`：NSIS 安装包，包含语音原生运行库。
+- `Aemeath-Agent-0.0.3-macos-arm64.dmg`：macOS 13+ Apple Silicon 安装镜像，包含语音原生运行库。
+- `Aemeath-Firmware-0.0.3-esp32s3.bin`：从地址 `0x0` 烧录的合并镜像，会覆盖镜像间隙中的 NVS / Wi-Fi 配置；保留设置时使用 ZIP 内的分区烧录命令。
+- `Aemeath-Firmware-0.0.3-esp32s3.zip`：分区镜像、烧录参数与说明。
 
 推送 `ci/release-build/**` 测试分支会执行相同的全平台构建，并将安装包、固件和校验文件保存在 Actions Artifacts，不上传到 Release。只推送 Tag 或保存 Release 草稿不会触发构建。可在 Actions 手动运行此工作流，填写已有 Release 的 Tag 重建附件；同名附件会被替换。工作流校验 Tag 与项目版本，使用仓库自带的 `GITHUB_TOKEN` 上传，无需额外发布密钥。macOS 默认 ad-hoc 签名、未公证，Windows 默认未签名；离线唤醒模型仍在应用内安装。
 
@@ -161,7 +161,7 @@ cd agent
 脚本生成图标，强制 `CGO_ENABLED=0`，通过当前模块锁定版本的 MyGO 构建桌面应用和 NSIS 安装程序。额外参数传给 `mygo build`，例如 `-o` 修改输出目录（相对于 `agent`）。默认产物：
 
 - `agent/build/windows-amd64/Aemeath.exe`：桌面应用。直接运行时需保留同目录的资源文件。
-- `agent/build/windows-amd64/aemeath-setup-0.2.0-amd64.exe`：可分发的安装包，版本来自 `agent/mygo.json`。
+- `agent/build/windows-amd64/aemeath-setup-0.0.3-amd64.exe`：可分发的安装包，版本来自 `agent/mygo.json`。
 - ARM64 产物位于 `agent/build/windows-arm64/`，安装包名称中的架构为 `arm64`。
 
 安装程序默认安装到当前用户的 `%LOCALAPPDATA%\Programs\Aemeath`，创建开始菜单入口，提供桌面快捷方式选项，并可在系统“已安装的应用”中卸载，无需管理员权限。Windows 开机自启通过桌面设置页管理；温度与 GPU 采集的依赖见上文 Windows 说明。默认安装包未进行代码签名；签名可配置 `agent/mygo.json` 的 `windows.signCommand`，参见 [MyGO 分发文档](https://mygo.egoist.dev/docs/distribution)。
