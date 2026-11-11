@@ -133,7 +133,11 @@ func (s *Service) Snapshot() State {
 	// The UI polls snapshots once per second. Read live memory statistics so
 	// background compression and expiry are visible without a voice event.
 	if memory != nil {
-		state.Voice.Context = memory.ContextStats()
+		cfg := state.Settings.Voice
+		state.Voice.Context = memory.ContextStatsForConfig(brain.Config{
+			Model: cfg.LLMModel, Persona: cfg.Persona, Tools: cfg.LLMTools,
+			ContextWindow: cfg.ContextWindow, AutoContextWindow: cfg.ContextWindowMode != "manual",
+		})
 	}
 	return state
 }

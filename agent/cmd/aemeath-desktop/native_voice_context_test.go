@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"aemeath/agent/internal/brain"
 
@@ -83,6 +87,34 @@ func TestNativeContextStatusesAndMissingUsage(t *testing.T) {
 	summary := nativeContextSummary(brain.ContextStats{SummaryTokens: 300})
 	if !strings.Contains(summary, "已有摘要") {
 		t.Fatalf("restored summary reported as uncompressed: %s", summary)
+	}
+}
+
+func TestNativeContextDisplaysRestoredEstimateBeforeFirstReply(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "voice_history.json")
+	data, err := json.Marshal(map[string]any{
+		"version": 2, "updated_at": time.Now(), "summary": "用户喜欢清淡口味",
+		"turns":        []map[string]string{{"user": "推荐晚饭", "assistant": "可以喝粥"}},
+		"compressions": 2, "dropped_turns": 3, "last_compression": "compressed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, f, _, tt := nativeTest(t)
+	f.state.Voice.Context = brain.OpenMemory(path).ContextStatsForConfig(brain.Config{Model: "model", ContextWindow: 32768})
+	a.refresh()
+	nativeClick(t, tt, "语音助手")
+	nativeClick(t, tt, "上下文详情")
+	for _, text := range []string{"Tokens（估算）", "容量 32K", "32K · 手动设置", "已生成摘要", "1 轮 · 压缩 2 次 · 丢弃 3 轮", "服务商尚未上报"} {
+		if !nativeContextHasText(tt.Texts(), text) {
+			t.Fatalf("missing restored context display %q: %v", text, tt.Texts())
+		}
+	}
+	if nativeContextHasText(tt.Texts(), "等待初始化") || nativeContextHasText(tt.Texts(), "等待模型初始化") {
+		t.Fatalf("restored context still appears uninitialized: %v", tt.Texts())
 	}
 }
 

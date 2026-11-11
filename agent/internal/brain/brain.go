@@ -141,6 +141,7 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 		// Reconnects keep in-process cumulative usage; a process restart starts at zero.
 		e.stats.PromptTokens, e.stats.CompletionTokens, e.stats.TotalTokens, e.stats.UsageAvailable = e.memory.stats.PromptTokens, e.memory.stats.CompletionTokens, e.memory.stats.TotalTokens, e.memory.stats.UsageAvailable
 		e.stats.Compressions, e.stats.DroppedTurns = e.memory.stats.Compressions, e.memory.stats.DroppedTurns
+		e.stats.LastCompression = e.memory.stats.LastCompression
 		e.memory.mu.Unlock()
 	}
 	maxTokens := 1024
@@ -158,7 +159,7 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 			lifeCancel()
 			return nil, errors.New("brain: device tools require a host")
 		}
-		e.persona += "\n" + webSearchInstructions + "\n" + currentTimeInstructions
+		e.persona += contextToolInstructions
 		e.baseTools = append(deviceTools(host), webSearchTool(search), currentTimeTool(currentTime))
 		err = e.rebuildAgent(ctx, nil)
 		if err != nil {
@@ -318,28 +319,12 @@ func (e *Engine) rebuildAgent(ctx context.Context, extra []tool.BaseTool) error 
 	all := append(append([]tool.BaseTool(nil), e.baseTools...), extra...)
 	// Estimate tool schemas before the first request, including newly discovered
 	// Home Assistant tools, so history can be compacted before network submission.
-	wireTools := make([]any, 0, len(all))
-	for _, candidate := range all {
-		info, err := candidate.Info(ctx)
-		if err != nil {
-			return err
-		}
-		params, err := info.ParamsOneOf.ToJSONSchema()
-		if err != nil {
-			return err
-		}
-		wireTools = append(wireTools, map[string]any{"type": "function", "function": map[string]any{"name": info.Name, "description": info.Desc, "parameters": params}})
-	}
-	data, err := json.Marshal(wireTools)
+	tokens, err := estimateToolSchemas(ctx, all)
 	if err != nil {
 		return err
 	}
-	var payload any
-	if err = json.Unmarshal(data, &payload); err != nil {
-		return err
-	}
 	e.mu.Lock()
-	e.toolTokens = estimateJSON(payload)
+	e.toolTokens = tokens
 	e.mu.Unlock()
 	for i, candidate := range all {
 		if invokable, ok := candidate.(tool.InvokableTool); ok {
@@ -351,6 +336,30 @@ func (e *Engine) rebuildAgent(ctx context.Context, extra []tool.BaseTool) error 
 		e.agent = agent
 	}
 	return err
+}
+
+func estimateToolSchemas(ctx context.Context, all []tool.BaseTool) (int, error) {
+	wireTools := make([]any, 0, len(all))
+	for _, candidate := range all {
+		info, err := candidate.Info(ctx)
+		if err != nil {
+			return 0, err
+		}
+		params, err := info.ParamsOneOf.ToJSONSchema()
+		if err != nil {
+			return 0, err
+		}
+		wireTools = append(wireTools, map[string]any{"type": "function", "function": map[string]any{"name": info.Name, "description": info.Desc, "parameters": params}})
+	}
+	data, err := json.Marshal(wireTools)
+	if err != nil {
+		return 0, err
+	}
+	var payload any
+	if err = json.Unmarshal(data, &payload); err != nil {
+		return 0, err
+	}
+	return estimateJSON(payload), nil
 }
 
 // Close cancels active and queued replies and releases the HA connection.

@@ -90,3 +90,51 @@ func TestSnapshotReadsContextDirectlyFromMemory(t *testing.T) {
 		t.Fatal("new memory state mutated a retained value snapshot")
 	}
 }
+
+func TestSnapshotEstimatesRestoredContextBeforeVoiceStarts(t *testing.T) {
+	for _, mode := range []string{"manual", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			data, err := json.Marshal(map[string]any{
+				"version": 2, "updated_at": time.Now(), "summary": "用户喜欢清淡口味",
+				"turns":        []map[string]string{{"user": "推荐晚饭", "assistant": "可以喝粥"}},
+				"compressions": 3, "dropped_turns": 2, "last_compression": "compressed",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(filepath.Dir(path), "voice_history.json"), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			settings, err := normalizeSettings(Settings{Voice: voice.Config{LLMModel: "model", ContextWindowMode: mode, ContextWindow: 65536, LLMTools: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := newService(path, settings, testDeps())
+			defer service.Close()
+			state := service.Snapshot()
+			stats := state.Voice.Context
+			if state.Running || stats.EstimatedTokens <= 0 || stats.InputBudget <= 0 || stats.UsagePercent <= 0 || stats.ContextWindow != 65536 || stats.RetainedTurns != 1 || stats.SummaryTokens <= 0 || stats.Compressions != 3 || stats.DroppedTurns != 2 || stats.LastCompression != "compressed" || stats.UsageAvailable {
+				t.Fatalf("startup still needs a voice request to restore context: %+v", stats)
+			}
+			source := "manual"
+			if mode == "auto" {
+				source = "detecting"
+			}
+			if stats.ContextWindowSource != source {
+				t.Fatalf("startup claimed unverified model capacity: %+v", stats)
+			}
+			settings.Voice.ContextWindow = 32768
+			if err := service.SaveSettings(settings); err != nil {
+				t.Fatal(err)
+			}
+			if got := service.Snapshot().Voice.Context; got.ContextWindow != 32768 || got.InputBudget == stats.InputBudget || got.EstimatedTokens != stats.EstimatedTokens {
+				t.Fatalf("saved settings did not refresh startup estimate: %+v", got)
+			}
+			service.memory.Clear()
+			if got := service.Snapshot().Voice.Context; got.InputBudget <= 0 || got.RetainedTurns != 0 || got.SummaryTokens != 0 || got.Compressions != 0 || got.DroppedTurns != 0 {
+				t.Fatalf("cleared startup estimate retained history: %+v", got)
+			}
+		})
+	}
+}

@@ -23,10 +23,13 @@ type memoryTurn struct {
 	Assistant string `json:"assistant"`
 }
 type memoryFile struct {
-	Version   int          `json:"version"`
-	UpdatedAt time.Time    `json:"updated_at"`
-	Turns     []memoryTurn `json:"turns"`
-	Summary   string       `json:"summary,omitempty"`
+	Version         int          `json:"version"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+	Turns           []memoryTurn `json:"turns"`
+	Summary         string       `json:"summary,omitempty"`
+	Compressions    int          `json:"compressions,omitempty"`
+	DroppedTurns    int          `json:"dropped_turns,omitempty"`
+	LastCompression string       `json:"last_compression,omitempty"`
 }
 
 // Memory outlives individual Engines (one per voice connection) so that
@@ -73,6 +76,11 @@ func OpenMemory(path string) *Memory {
 	m.updated = f.UpdatedAt
 	if len(f.Summary) <= maxTextBytes {
 		m.summary = f.Summary
+	}
+	m.stats.Compressions, m.stats.DroppedTurns = max(0, f.Compressions), max(0, f.DroppedTurns)
+	switch f.LastCompression {
+	case "compressed", "fallback", "failed":
+		m.stats.LastCompression = f.LastCompression
 	}
 	return m
 }
@@ -127,7 +135,10 @@ func (m *Memory) persist() {
 	if m.path == "" {
 		return
 	}
-	b, err := json.Marshal(memoryFile{Version: memoryVersion, UpdatedAt: m.updated, Turns: m.turns, Summary: m.summary})
+	b, err := json.Marshal(memoryFile{
+		Version: memoryVersion, UpdatedAt: m.updated, Turns: m.turns, Summary: m.summary,
+		Compressions: m.stats.Compressions, DroppedTurns: m.stats.DroppedTurns, LastCompression: m.stats.LastCompression,
+	})
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(m.path), 0o700)
 	}
