@@ -1,14 +1,8 @@
 name: Web flasher (GitHub Pages)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'firmware/**'
-      - 'flasher/**'
-      - 'VERSION'
-      - '.github/workflows/flasher-pages.yml'
-  workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -25,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
       # Same entry point as the release workflow, so the site ships the release build
       # (fresh sdkconfig from sdkconfig.defaults in firmware/build-release).
@@ -50,6 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:

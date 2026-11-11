@@ -83,7 +83,7 @@ pnpm test
 pnpm build        # stage + 类型检查 + 生成 dist/
 ```
 
-推送到 `main` 后，[`.github/workflows/flasher-pages.yml`](.github/workflows/flasher-pages.yml) 会构建固件和网页并发布到 GitHub Pages；首次使用需在仓库 **Settings → Pages** 把 Source 设为 “GitHub Actions”。要打包发版构建的固件，可运行 `pnpm run stage -- --build-dir ../firmware/build-release`（先执行 `bash scripts/build-release.sh firmware`）。
+仅在发布 GitHub Release（`release.published`，包括预发布版本）时，[`.github/workflows/flasher-pages.yml`](.github/workflows/flasher-pages.yml) 才会构建该 Release Tag 对应的固件和网页并部署到 GitHub Pages；推送代码、推送 Tag 或保存 Release 草稿不会触发。首次使用需在仓库 **Settings → Pages** 把 Source 设为 “GitHub Actions”，并在 `github-pages` 环境中允许发布 Tag 部署。要打包发版构建的固件，可运行 `pnpm run stage -- --build-dir ../firmware/build-release`（先执行 `bash scripts/build-release.sh firmware`）。
 
 ## 采集端
 
