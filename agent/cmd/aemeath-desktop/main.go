@@ -122,8 +122,8 @@ func main() {
 			petDone = petHost.run(ctx)
 		}
 		menu := mygo.NewMenu([]*mygo.MenuItem{
-			petMenu,
 			{Label: "打开 Aemeath", Click: func(*mygo.MenuItem, *mygo.Window) { show() }},
+			petMenu,
 			{ID: "status", Label: "正在启动…", Disabled: true},
 			mygo.Separator(),
 			{ID: "start", Label: "启动服务", Disabled: true, Click: func(*mygo.MenuItem, *mygo.Window) { report(service.Start) }},
