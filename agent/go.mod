@@ -8,6 +8,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/egoist/mygo v0.8.3
 	github.com/eino-contrib/jsonschema v1.0.3
+	github.com/gen2brain/malgo v0.11.27
 	github.com/google/jsonschema-go v0.4.3
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/k2-fsa/sherpa-onnx-go/v2 v2.0.1

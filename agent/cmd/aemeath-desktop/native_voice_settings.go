@@ -249,6 +249,19 @@ func (a *nativeUI) voiceWakeSettingsView(c *ui.Context) {
 func (a *nativeUI) voiceSoundSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
 	nativeSettingsSection(c, "voice-sound-card", "", func() {
+		nativeSettingsField(c, "voice-playback-output-field", "播放位置", func() ui.Element {
+			output := 0
+			if cfg.PlaybackOutput == "console" {
+				output = 1
+			}
+			field := ui.Segmented(c.Key("voice-playback-output"), &output, "Agent", "监控台").Label("播放位置").FillWidth().MinWidth(0).Height(36)
+			if field.Changed() {
+				cfg.PlaybackOutput = []string{"agent", "console"}[output]
+				a.edited()
+			}
+			return field
+		})
+		ui.Text(c, "Agent 使用设备扬声器；监控台使用当前电脑的扬声器。保存后生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		nativeSettingsField(c, "voice-volume-field", "播放音量", func() ui.Element {
 			volume := float64(cfg.Volume)
 			field := ui.Slider(c.Key("voice-volume"), &volume, 0, 100).Label("播放音量").Tooltip(fmt.Sprintf("%d%%", cfg.Volume)).FillWidth()

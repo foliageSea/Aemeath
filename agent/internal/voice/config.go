@@ -45,6 +45,7 @@ type Config struct {
 	WakeModelDir      string  `json:"wakeModelDir"`
 	WakeThreshold     float64 `json:"wakeThreshold"`
 	Volume            int     `json:"volume"`
+	PlaybackOutput    string  `json:"playbackOutput"`
 	Persona           string  `json:"persona"`
 }
 
@@ -148,6 +149,13 @@ func NormalizeConfig(c Config) (Config, error) {
 	}
 	c.MiMoAPIKey = strings.TrimSpace(c.MiMoAPIKey)
 	c.LLMModel = strings.TrimSpace(c.LLMModel)
+	c.PlaybackOutput = strings.ToLower(strings.TrimSpace(c.PlaybackOutput))
+	if c.PlaybackOutput == "" {
+		c.PlaybackOutput = "agent"
+	}
+	if c.PlaybackOutput != "agent" && c.PlaybackOutput != "console" {
+		return c, fmt.Errorf("playback output must be agent or console")
+	}
 	c.TTSProvider = strings.ToLower(strings.TrimSpace(c.TTSProvider))
 	c.FishBaseURL = strings.TrimRight(strings.TrimSpace(c.FishBaseURL), "/")
 	c.FishAPIKey = strings.TrimSpace(c.FishAPIKey)

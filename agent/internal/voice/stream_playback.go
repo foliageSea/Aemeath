@@ -18,7 +18,7 @@ func (s *session) startAudioStream() error {
 	s.state.GeneratedSegments = 1
 	s.deadline = time.Now().Add(synthesisBudget + 15*time.Second)
 	s.emit(s.state)
-	return s.send(message{Type: "playback_start", Turn: s.state.Turn, Streaming: true, Volume: s.cfg.Volume})
+	return s.startPlayback(true, 0)
 }
 func (s *session) appendAudioStream(pcm []int16) error {
 	p := s.play

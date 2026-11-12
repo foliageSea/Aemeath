@@ -436,6 +436,8 @@ func TestNativeSettingsFormPreviews(t *testing.T) {
 				nativeClick(t, tt, "语音合成")
 				nativeClick(t, tt, "Fish")
 				capture("fish")
+				nativeClick(t, tt, "声音试听")
+				capture("sound")
 				nativeClick(t, tt, "离线唤醒")
 				nativeClick(t, tt, "模型目录与高级选项")
 				capture("wake")

@@ -59,6 +59,8 @@ type session struct {
 	toolStarted                map[uint64]time.Time
 	active                     bool
 	play                       *playback
+	newOutput                  func(Config) (consoleOutput, error)
+	output                     consoleOutput
 	deadline                   time.Time
 	stageStarted               time.Time
 	reprompted                 bool
@@ -94,7 +96,8 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	if emit == nil {
 		emit = func(State) {}
 	}
-	s := &session{cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16), responses: make(chan result, 1)}
+	s := &session{cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16), responses: make(chan result, 1), newOutput: d.newOutput}
+	defer s.closeOutput()
 	defer func() {
 		status := "canceled"
 		if retErr != nil && !errors.Is(retErr, context.Canceled) {
@@ -148,7 +151,7 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	if err = hello.validateHello(); err != nil {
 		return err
 	}
-	if cfg.TTSProvider == "fish" && !slices.Contains(hello.Capabilities, "stream_playback") {
+	if cfg.PlaybackOutput != "console" && cfg.TTSProvider == "fish" && !slices.Contains(hello.Capabilities, "stream_playback") {
 		return errors.New("设备固件不支持 Fish 流式播放，请更新固件或选择 MiMo")
 	}
 	s.epoch = hello.Epoch
@@ -212,6 +215,8 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 		workerWithResponses(sessionCtx, cfg, host, d, s.jobs, s.results, s.responses)
 	}()
 	defer func() {
+		// Stop host audio before waiting for cloud workers to acknowledge cancel.
+		s.closeOutput()
 		if s.cancelTurn != nil {
 			s.cancelTurn()
 		}
@@ -220,7 +225,11 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 		<-readerDone
 		<-workerDone
 	}()
-	tick := time.NewTicker(250 * time.Millisecond)
+	tickInterval := 250 * time.Millisecond
+	if cfg.PlaybackOutput == "console" {
+		tickInterval = 20 * time.Millisecond
+	}
+	tick := time.NewTicker(tickInterval)
 	defer tick.Stop()
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
@@ -253,6 +262,11 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 				return errors.New("voice ping timeout")
 			}
 		case <-tick.C:
+			if s.cfg.PlaybackOutput == "console" && s.play != nil {
+				if err = s.pumpConsole(); err != nil {
+					return err
+				}
+			}
 			if err = s.recordingTimeout(time.Now()); err != nil {
 				return err
 			}
@@ -450,6 +464,7 @@ func (s *session) abort(notify bool) error {
 	}
 	wasActive := s.active
 	s.active = false
+	s.closeOutput()
 	s.play = nil
 	s.queuedAudio = nil
 	s.generationDone = false
@@ -774,6 +789,9 @@ func (s *session) control(b []byte) error {
 			return s.phase("idle")
 		}
 	case "credit":
+		if s.cfg.PlaybackOutput == "console" {
+			return nil
+		}
 		if s.play == nil || m.Turn != s.wireTurn {
 			return nil
 		}
@@ -783,6 +801,9 @@ func (s *session) control(b []byte) error {
 		s.play.credits += m.Frames
 		return s.pump()
 	case "playing":
+		if s.cfg.PlaybackOutput == "console" {
+			return nil
+		}
 		if s.play != nil && m.Turn == s.wireTurn && s.play.seq > 0 && !s.play.playing {
 			s.play.playing = true
 			if s.state.FirstAudioMillis == 0 {
@@ -791,6 +812,9 @@ func (s *session) control(b []byte) error {
 			return s.phase("speaking")
 		}
 	case "played":
+		if s.cfg.PlaybackOutput == "console" {
+			return nil
+		}
 		if s.play != nil && m.Turn == s.wireTurn {
 			if !s.play.ended || !s.play.playing {
 				return s.fail("bad_played", errors.New("playback acknowledgement arrived before rendered audio"))
@@ -923,7 +947,7 @@ func (s *session) result(r result) error {
 		s.state.TTSMillis = r.millis
 		s.play = &playback{pcm: r.pcm}
 		s.deadline = time.Now().Add(time.Duration(len(r.pcm))*time.Second/sampleRate + 15*time.Second)
-		return s.send(message{Type: "playback_start", Turn: r.turn, Samples: len(r.pcm), Volume: s.cfg.Volume})
+		return s.startPlayback(false, len(r.pcm))
 	default:
 		if s.play != nil && (r.phase == "thinking" || r.phase == "synthesizing") {
 			return nil
@@ -932,6 +956,9 @@ func (s *session) result(r result) error {
 	}
 }
 func (s *session) pump() error {
+	if s.cfg.PlaybackOutput == "console" {
+		return s.pumpConsole()
+	}
 	p := s.play
 	for p.credits > 0 && p.offset < len(p.pcm) {
 		n := min(frameSamples, len(p.pcm)-p.offset)

@@ -49,7 +49,7 @@ func (s *session) nextSegment(drained bool) error {
 	s.play = &playback{pcm: pcm}
 	duration := time.Duration(len(pcm)) * time.Second / sampleRate
 	s.deadline = time.Now().Add(duration + 15*time.Second)
-	if err := s.send(message{Type: "playback_start", Turn: s.state.Turn, Samples: len(pcm), Volume: s.cfg.Volume}); err != nil {
+	if err := s.startPlayback(false, len(pcm)); err != nil {
 		return err
 	}
 	return s.send(message{Type: "response", Turn: s.state.Turn, Text: clip.text})
