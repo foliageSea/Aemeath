@@ -54,8 +54,10 @@ func TestNativeQuotaUsageCurrencyAndOriginalBalance(t *testing.T) {
 	a.refresh()
 	tt.Frame()
 	nativeClick(t, tt, "订阅")
-	if !tt.HasText("今日 1364 次 / 41.3534 USD · 近30天 13958 次 / 328.1980 USD") {
-		t.Fatal("usage costs missing currency or precision")
+	for _, text := range []string{"今日", "近30天", "1364", "13958", "费用 · 41.3534 USD", "费用 · 328.1980 USD"} {
+		if !tt.HasText(text) {
+			t.Fatalf("usage summary missing %q", text)
+		}
 	}
 	if !tt.HasText("余额 ¥88.50") || tt.HasText("¥88.50 USD") {
 		t.Fatal("gateway balance currency was changed")
@@ -66,6 +68,57 @@ func TestNativeQuotaUsageCurrencyAndOriginalBalance(t *testing.T) {
 		}
 	}
 }
+func TestNativeQuotaSummaryLayout(t *testing.T) {
+	for _, size := range [][2]int{{760, 600}, {1100, 800}} {
+		for _, dark := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%v/dark=%v", size, dark), func(t *testing.T) {
+				a, f, _, tt := nativeTest(t)
+				f.state.Quota.Usage = &proto.QuotaUsage{CallsToday: 1322, CostToday: 23.2855, Calls30d: 20221, Cost30d: 513.0855}
+				a.refresh()
+				tt.SetSize(size[0], size[1])
+				tt.SetDark(dark)
+				nativeClick(t, tt, "订阅")
+				today, ok := tt.Find("今日用量")
+				if !ok {
+					t.Fatal("today card missing")
+				}
+				month, ok := tt.Find("近30天用量")
+				if !ok {
+					t.Fatal("month card missing")
+				}
+				if today.Y != month.Y || today.X+today.W >= month.X || month.X+month.W > float32(size[0])-20 {
+					t.Fatalf("summary cards overlap or overflow: today=%+v month=%+v", today, month)
+				}
+				for _, text := range []string{"1322", "20221", "费用 · 23.2855 USD", "费用 · 513.0855 USD"} {
+					bounds, ok := tt.Find(text)
+					if !ok || bounds.X < today.X || bounds.X+bounds.W > month.X+month.W || bounds.Y+bounds.H > today.Y+today.H {
+						t.Fatalf("summary value clipped: %q %+v", text, bounds)
+					}
+				}
+				refresh, ok := tt.AccessByRole(ui.RoleButton, "刷新额度")
+				if !ok || refresh.Bounds.Y+refresh.Bounds.H > today.Y {
+					t.Fatal("refresh toolbar overlaps summary")
+				}
+				if _, ok := tt.AccessByRole(ui.RoleListItem, "A"); !ok {
+					t.Fatal("subscription list missing")
+				}
+				a.busy["quota"] = true
+				tt.Frame()
+				if !tt.HasText("刷新中…") {
+					t.Fatal("refresh progress missing")
+				}
+				a.busy["quota"] = false
+				f.state.Quota.TS = time.Now().Add(-4 * time.Minute).Unix()
+				a.refresh()
+				tt.Frame()
+				if !tt.HasText("历史额度（已过期）：") {
+					t.Fatal("stale quota warning missing")
+				}
+			})
+		}
+	}
+}
+
 func TestNativeQuotaPointerDragToFirstAndLast(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	nativeClick(t, tt, "订阅")
