@@ -250,18 +250,20 @@ func (a *nativeUI) voiceSoundSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
 	nativeSettingsSection(c, "voice-sound-card", "", func() {
 		nativeSettingsField(c, "voice-playback-output-field", "播放位置", func() ui.Element {
-			output := 0
+			// Preserve legacy config routes: "console" plays on the computer
+			// running Agent; "agent" (and the default) plays on the ESP32 monitor.
+			output := 1
 			if cfg.PlaybackOutput == "console" {
-				output = 1
+				output = 0
 			}
 			field := nativeSettingsSegmented(c, "voice-playback-output", &output, "播放位置", "Agent", "监控台")
 			if field.Changed() {
-				cfg.PlaybackOutput = []string{"agent", "console"}[output]
+				cfg.PlaybackOutput = []string{"console", "agent"}[output]
 				a.edited()
 			}
 			return field
 		})
-		ui.Text(c, "Agent 使用设备扬声器；监控台使用当前电脑的扬声器。保存后生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Text(c, "Agent 使用当前电脑的扬声器；监控台使用 ESP32 设备扬声器。保存后生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		nativeSettingsField(c, "voice-volume-field", "播放音量", func() ui.Element {
 			volume := float64(cfg.Volume)
 			field := ui.Slider(c.Key("voice-volume"), &volume, 0, 100).Label("播放音量").Tooltip(fmt.Sprintf("%d%%", cfg.Volume)).FillWidth()
