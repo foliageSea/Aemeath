@@ -35,6 +35,7 @@ func main() {
 	var win *mygo.Window
 	var quitting bool
 	var cancel context.CancelFunc
+	var voiceRefreshDone, slowRefreshDone <-chan struct{}
 	var cancelVoiceAssets func()
 	var stopVoiceHotkey func()
 	show := func() {
@@ -122,16 +123,24 @@ func main() {
 			mygo.Separator(),
 			{Label: "退出 Aemeath", Role: mygo.RoleQuit},
 		})
+		ctx, stop := context.WithCancel(context.Background())
+		cancel = stop
+		refreshed := make(chan struct{})
+		voiceRefreshDone = refreshed
+		go func() {
+			defer close(refreshed)
+			runVoiceRefresh(ctx, service.VoiceUpdates(), win.Update, native.refreshVoice)
+		}()
 		tray, err := mygo.NewTray(mygo.TrayOptions{ID: "aemeath-agent", Icon: trayPNG(), IconIsTemplate: true, ToolTip: "Aemeath", Menu: menu})
 		if err != nil {
 			log.Printf("tray: %v", err)
 			mygo.App.SetActivationPolicy(mygo.ActivationPolicyRegular)
 			show()
-			return
 		}
-		ctx, stop := context.WithCancel(context.Background())
-		cancel = stop
+		slowDone := make(chan struct{})
+		slowRefreshDone = slowDone
 		go func() {
+			defer close(slowDone)
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
 			for {
@@ -140,7 +149,17 @@ func main() {
 					return
 				case <-ticker.C:
 				}
-				win.Update(native.refresh)
+				win.Update(func() {
+					if ctx.Err() == nil {
+						native.refresh()
+					}
+				})
+				if ctx.Err() != nil {
+					return
+				}
+				if tray == nil {
+					continue
+				}
 				s := service.Snapshot()
 				label := "已暂停"
 				if s.Running {
@@ -176,6 +195,12 @@ func main() {
 	}
 	if cancel != nil {
 		cancel()
+	}
+	if voiceRefreshDone != nil {
+		<-voiceRefreshDone
+	}
+	if slowRefreshDone != nil {
+		<-slowRefreshDone
 	}
 	if service != nil {
 		service.Close()

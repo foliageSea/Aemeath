@@ -77,7 +77,9 @@ func (s *Service) homeAssistantLoop() {
 			s.mu.Lock()
 			// A save cancels this attempt; an old result must never replace new settings.
 			if ctx.Err() != context.Canceled && s.ctx.Err() == nil && cfg == homeAssistantConfig(s.state.Settings.Voice) {
-				s.state.Voice.HomeAssistant = status
+				state := s.state.Voice.Clone()
+				state.HomeAssistant = status
+				s.setVoiceLocked(state)
 			}
 			s.mu.Unlock()
 		} else {

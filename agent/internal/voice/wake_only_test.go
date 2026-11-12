@@ -76,6 +76,9 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 						return err
 					}
 					close(finished)
+					// Keep the socket alive until assertions finish; an early close
+					// races the snapshot check with a legitimate disconnect error.
+					<-d.ctx.Done()
 					return nil
 				}
 				for i := 0; i < 40; i++ {
@@ -148,6 +151,7 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 					return err
 				}
 				close(finished)
+				<-d.ctx.Done() // assertions inspect the live session, not disconnection
 				return nil
 			})
 			select {

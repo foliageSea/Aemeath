@@ -10,7 +10,7 @@ type streamingSpeech interface {
 	Stream(context.Context, <-chan string, func([]int16) error) error
 }
 
-// Forward the first sentence immediately; all later text shares one Fish session.
+// Use lightweight text batching in a single Fish session, independent of MiMo.
 // PCM callbacks are split into owned frame-sized results to bound backpressure.
 func streamSpeech(parent context.Context, speech streamingSpeech, parts <-chan string, emit func(context.Context, result) bool) error {
 	var first string
@@ -25,27 +25,11 @@ func streamSpeech(parent context.Context, speech streamingSpeech, parts <-chan s
 	}
 	ctx, cancel := context.WithTimeout(parent, synthesisBudget)
 	defer cancel()
-	input := make(chan string, maxSpeechSegments)
-	input <- first
+	input := make(chan string, streamTextQueueDepth)
 	forwarded := make(chan struct{})
 	go func() {
 		defer close(forwarded)
-		defer close(input)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case part, more := <-parts:
-				if !more {
-					return
-				}
-				select {
-				case input <- part:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
+		forwardFishText(ctx, first, parts, input, fishTextMaxWait)
 	}()
 	defer func() { cancel(); <-forwarded }()
 	start := time.Now()

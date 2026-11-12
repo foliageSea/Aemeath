@@ -91,6 +91,12 @@ type result struct {
 // One worker serializes all history access, including canceled Reply and Clear.
 // Its pending queue has one slot; the event loop replaces superseded work.
 func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-chan work, out chan<- result) {
+	workerWithResponses(ctx, cfg, host, d, jobs, out, nil)
+}
+
+// responses is a latest-value mailbox for provisional text. Final text stays in
+// the ordered result queue so completion/errors can never overtake it.
+func workerWithResponses(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-chan work, out chan<- result, responses chan result) {
 	var engine brainAPI
 	defer func() {
 		if closer, ok := engine.(interface{ Close() error }); ok {
@@ -114,6 +120,10 @@ func worker(ctx context.Context, cfg Config, host Host, d dependencies, jobs <-c
 		}
 		r.turn = w.turn
 		r.generation = w.generation
+		if r.phase == "response" && !r.final && responses != nil {
+			publishLatestResponse(responses, r)
+			return true
+		}
 		select {
 		case out <- r:
 			return true

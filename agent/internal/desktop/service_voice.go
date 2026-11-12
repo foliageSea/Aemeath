@@ -24,7 +24,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	s.mu.Lock()
 	cfg := s.state.Settings.Voice
 	if !cfg.Enabled {
-		s.state.Voice = voice.State{Phase: "disabled", HomeAssistant: s.state.Voice.HomeAssistant}
+		s.setVoiceLocked(voice.State{Phase: "disabled", HomeAssistant: s.state.Voice.HomeAssistant})
 		s.voiceCommands = nil
 		s.mu.Unlock()
 		close(done)
@@ -32,7 +32,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	}
 	commands := make(chan voice.Command, 8)
 	s.voiceCommands = commands
-	s.state.Voice = voice.State{Phase: "connecting", HomeAssistant: s.state.Voice.HomeAssistant}
+	s.setVoiceLocked(voice.State{Phase: "connecting", HomeAssistant: s.state.Voice.HomeAssistant})
 	s.mu.Unlock()
 	run := s.deps.voiceRun
 	if run == nil {
@@ -52,7 +52,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 			} else {
 				lastHA = state.HomeAssistant
 			}
-			s.state.Voice = state.Clone()
+			s.setVoiceLocked(state)
 		}
 		s.mu.Unlock()
 		if report {
@@ -66,7 +66,9 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 			s.mu.Lock()
 			if s.voiceCommands == commands {
 				s.voiceCommands = nil
-				s.state.Voice.Connected, s.state.Voice.WakeReady = false, false
+				state := s.state.Voice.Clone()
+				state.Connected, state.WakeReady = false, false
+				s.setVoiceLocked(state)
 			}
 			s.mu.Unlock()
 		}()

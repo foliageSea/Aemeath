@@ -22,9 +22,9 @@ type pipelineFailure struct {
 func (e *pipelineFailure) Error() string { return e.err.Error() }
 func (e *pipelineFailure) Unwrap() error { return e.err }
 
-// One LLM producer and one sequential TTS consumer overlap generation with
-// playback. Eight text slots cover the full segment budget without holding an
-// LLM stream open waiting for a slow TTS. PCM is capped across the entire reply.
+// LLM text updates are independent of TTS submission boundaries. MiMo uses
+// bounded sentence groups; streaming providers receive validated text deltas
+// through their own lightweight batching policy. PCM is capped per reply.
 func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, text, reference string, emit func(context.Context, result) bool) error {
 	// Tool events use the same bounded, cancellation-aware channel as the other
 	// worker results. They never enter the sentence splitter or speech input.
@@ -38,7 +38,15 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 	defer cancel(nil)
 	agentCtx, stopAgent := context.WithTimeout(ctx, agentBudget)
 	defer stopAgent()
-	parts := make(chan string, maxSpeechSegments)
+	stream, streaming := speech.(streamingSpeech)
+	queueSize := maxSpeechSegments
+	if streaming {
+		// Every nonempty delta consumes at least one of the response byte budget.
+		// This accommodates the entire bounded reply even if Fish stops reading,
+		// without blocking LLM text/UI updates on audio backpressure.
+		queueSize = maxSpeechTextBytes
+	}
+	parts := make(chan string, queueSize)
 	done := make(chan struct{})
 	var replyErr error
 	go func() {
@@ -46,12 +54,13 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 		defer close(parts)
 		start := time.Now()
 		var splitter sentenceSegmenter
+		var validated speechTextStream
 		var speechText speechTextFilter
 		var full strings.Builder
 		var visible strings.Builder
 		send := func(chunks []string) error {
 			for _, chunk := range chunks {
-				if strings.TrimSpace(chunk) == "" {
+				if chunk == "" || (!streaming && strings.TrimSpace(chunk) == "") {
 					continue
 				}
 				select {
@@ -62,6 +71,27 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 			}
 			return nil
 		}
+		push := func(clean string) error {
+			clean, err := validated.Push(clean)
+			if err != nil {
+				return err
+			}
+			if clean == "" {
+				return nil
+			}
+			visible.WriteString(clean)
+			if !emit(ctx, result{phase: "response", text: strings.TrimSpace(visible.String()), millis: time.Since(start).Milliseconds()}) {
+				return context.Canceled
+			}
+			if streaming {
+				return send([]string{clean})
+			}
+			chunks, err := splitter.Push(clean)
+			if err != nil {
+				return err
+			}
+			return send(chunks)
+		}
 		delta := func(s string) error {
 			if err := agentCtx.Err(); err != nil {
 				return err
@@ -70,18 +100,7 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 				return errors.New("agent response too long")
 			}
 			full.WriteString(s)
-			clean := speechText.Push(s)
-			visible.WriteString(clean)
-			chunks, err := splitter.Push(clean)
-			if err != nil {
-				return err
-			}
-			if len(chunks) > 0 {
-				if !emit(ctx, result{phase: "response", text: strings.TrimSpace(visible.String()), millis: time.Since(start).Milliseconds()}) {
-					return context.Canceled
-				}
-			}
-			return send(chunks)
+			return push(speechText.Push(s))
 		}
 		var response string
 		var err error
@@ -97,18 +116,18 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 			if strings.TrimSpace(response) == "" || len(response) > maxTextBytes {
 				err = errors.New("empty or oversized agent response")
 			} else {
-				var tail []string
-				tail, err = splitter.Push(speechText.Finish())
+				err = push(speechText.Finish())
 				if err == nil {
-					err = send(tail)
+					err = validated.Finish()
 				}
-				if err == nil {
+				if err == nil && !streaming {
+					var tail []string
 					tail, err = splitter.Finish()
+					if err == nil {
+						err = send(tail)
+					}
 				}
-				if err == nil {
-					err = send(tail)
-				}
-				if err == nil && !emit(ctx, result{phase: "response", text: cleanResponseText(response), millis: time.Since(start).Milliseconds()}) {
+				if err == nil && !emit(ctx, result{phase: "response", final: true, text: cleanResponseText(response), millis: time.Since(start).Milliseconds()}) {
 					err = context.Canceled
 				}
 			}
@@ -119,7 +138,7 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 		}
 	}()
 	defer func() { cancel(nil); <-done }()
-	if stream, ok := speech.(streamingSpeech); ok {
+	if streaming {
 		err := streamSpeech(ctx, stream, parts, emit)
 		if cause := context.Cause(ctx); cause != nil {
 			return cause

@@ -52,6 +52,8 @@ type session struct {
 	nextMic                    uint32
 	jobs                       chan work
 	results                    chan result
+	responses                  chan result
+	lastResponseWire           time.Time
 	cancelTurn                 context.CancelFunc
 	generation                 uint64
 	toolStarted                map[uint64]time.Time
@@ -92,7 +94,7 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	if emit == nil {
 		emit = func(State) {}
 	}
-	s := &session{cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16)}
+	s := &session{cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16), responses: make(chan result, 1)}
 	defer func() {
 		status := "canceled"
 		if retErr != nil && !errors.Is(retErr, context.Canceled) {
@@ -205,7 +207,10 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 		}
 	}()
 	workerDone := make(chan struct{})
-	go func() { defer close(workerDone); worker(sessionCtx, cfg, host, d, s.jobs, s.results) }()
+	go func() {
+		defer close(workerDone)
+		workerWithResponses(sessionCtx, cfg, host, d, s.jobs, s.results, s.responses)
+	}()
 	defer func() {
 		if s.cancelTurn != nil {
 			s.cancelTurn()
@@ -269,7 +274,14 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 			if err = s.command(cmd); err != nil {
 				return err
 			}
+		case r := <-s.responses:
+			if err = s.result(r); err != nil {
+				return err
+			}
 		case r := <-results:
+			if err = s.flushResponse(); err != nil {
+				return err
+			}
 			if err = s.result(r); err != nil {
 				return err
 			}
@@ -468,6 +480,7 @@ func (s *session) begin() error {
 	s.state.PlayedSegments = 0
 	s.state.Transcript = ""
 	s.state.Response = ""
+	s.lastResponseWire = time.Time{}
 	s.state.ASRMillis = 0
 	s.state.AgentMillis = 0
 	s.state.TTSMillis = 0
@@ -876,6 +889,12 @@ func (s *session) result(r result) error {
 		s.state.Response = r.text
 		s.state.AgentMillis = r.millis
 		s.emitState()
+		// Desktop snapshots update immediately; avoid flooding the device with
+		// a JSON message per token. Always deliver the authoritative final text.
+		if !r.final && time.Since(s.lastResponseWire) < responseWireInterval {
+			return nil
+		}
+		s.lastResponseWire = time.Now()
 		return s.send(message{Type: "response", Turn: r.turn, Text: r.text})
 	case "audio_stream_start":
 		return s.startAudioStream()

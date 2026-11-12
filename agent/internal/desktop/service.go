@@ -70,6 +70,7 @@ type Service struct {
 	quotaWake     chan struct{}
 	haWake        chan struct{}
 	haCancel      context.CancelFunc
+	voiceUpdates  chan struct{} // coalesced notifications for the desktop UI
 	voiceCommands chan voice.Command
 	memory        *brain.Memory // voice conversation; outlives each device connection
 	catalog       *brain.ModelCatalog
@@ -119,7 +120,7 @@ func New(configPath string) (*Service, error) {
 
 func newService(path string, settings Settings, deps dependencies) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1)}
+	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
 	memoryPath := ""
 	catalogPath := ""
 	if path != "" {
@@ -144,7 +145,7 @@ func (s *Service) Snapshot() State {
 	memory := s.memory
 	catalog := s.catalog
 	s.mu.RUnlock()
-	// The UI polls snapshots once per second. Read live memory statistics so
+	// The UI also reads periodic snapshots. Read live memory statistics so
 	// background compression and expiry are visible without a voice event.
 	if memory != nil {
 		cfg := state.Settings.Voice
@@ -206,8 +207,9 @@ func (s *Service) stop() {
 	s.state.Running, s.state.Connected, s.state.Status = false, false, "stopped"
 	s.state.Target, s.state.Error = "", ""
 	s.state.ScreenKnown = false
-	s.state.Voice.Connected, s.state.Voice.WakeReady = false, false
-	s.state.Voice.Phase = "stopped"
+	state := s.state.Voice.Clone()
+	state.Connected, state.WakeReady, state.Phase = false, false, "stopped"
+	s.setVoiceLocked(state)
 	s.mu.Unlock()
 }
 
@@ -232,7 +234,9 @@ func (s *Service) SaveSettings(settings Settings) error {
 	s.state.Settings = normalized
 	haChanged := homeAssistantConfig(old.Voice) != homeAssistantConfig(normalized.Voice)
 	if haChanged {
-		s.state.Voice.HomeAssistant = hamcp.Status{}
+		state := s.state.Voice.Clone()
+		state.HomeAssistant = hamcp.Status{}
+		s.setVoiceLocked(state)
 		if s.haCancel != nil {
 			s.haCancel()
 		}
@@ -414,6 +418,7 @@ func (s *Service) Close() {
 	s.deps.close()
 	s.mu.Lock()
 	s.state.Status = "closed"
+	close(s.voiceUpdates)
 	s.mu.Unlock()
 }
 

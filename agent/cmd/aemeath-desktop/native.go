@@ -107,6 +107,13 @@ func (a *nativeUI) refresh() {
 		a.login = a.loginRead()
 	}
 }
+
+// refreshVoice avoids chart sampling and native login queries on streaming updates.
+func (a *nativeUI) refreshVoice() {
+	a.snapshot.Voice = a.service.Snapshot().Voice
+	a.recordVoice()
+}
+
 func (a *nativeUI) notify(message string) {
 	a.notice = message
 	a.noticePending = true
