@@ -13,7 +13,7 @@ import (
 
 func init() {
 	mygo.App.OnWindowCreated(func(w *mygo.Window) {
-		if os.Getenv("AEMEATH_TEST_COMPACT") == "1" {
+		if os.Getenv("AEMEATH_TEST_COMPACT") == "1" && w.Title() == "Aemeath" {
 			w.SetSize(760, 700)
 		}
 	})

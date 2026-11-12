@@ -9,6 +9,8 @@ Waveshare **ESP32‑S3‑Touch‑LCD‑4B**（480×480 ST7701 + GT911），在 L
 
 → [语音助手安装、配置与运行](docs/voice-agent.md) · [协议约定](docs/voice-contract.md) · [验证记录与限制](docs/voice-validation.md)
 
+**爱弥斯桌宠（P0–P2）**：离线透明角色、点击挥手 / 双击跳跃 / 拖动与短距离散步，独立显示和置顶设置；连接现有 ESP32 助手后共享状态与短回复气泡，不新增麦克风或收费调用。右键或托盘「爱弥斯桌宠」可设置和找回角色。→ [使用说明](docs/desktop-pet.md) · [桌宠验收与平台限制](docs/desktop-pet-validation.md)
+
 ```
 agent/      Go 1.27.3+ 采集端 + MyGO 0.8.3 桌面管理端（gopsutil + cgo IOKit / WMI + NVML）
 firmware/   ESP-IDF v6.0.2 固件（LVGL 9、esp_lvgl_port、mDNS、esp_http_server WS）

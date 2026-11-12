@@ -32,6 +32,8 @@ func main() {
 		return
 	}
 	var win *mygo.Window
+	var petHost *nativePet
+	var petDone <-chan struct{}
 	var quitting bool
 	var cancel context.CancelFunc
 	var voiceRefreshDone, slowRefreshDone <-chan struct{}
@@ -52,6 +54,9 @@ func main() {
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
 		quitting = true
+		if petHost != nil {
+			petHost.close()
+		}
 		if stopVoiceHotkey != nil {
 			stopVoiceHotkey()
 		}
@@ -102,7 +107,22 @@ func main() {
 				}
 			}()
 		}
+		ctx, stop := context.WithCancel(context.Background())
+		cancel = stop
+		petHost, err = newNativePet(dir, service, func() {
+			native.page = "语音助手"
+			show()
+			win.Invalidate()
+		})
+		petMenu := &mygo.MenuItem{Label: "桌宠初始化失败，请查看日志", Disabled: true}
+		if err != nil {
+			log.Printf("pet: %v", err)
+		} else {
+			petMenu = petHost.trayItem()
+			petDone = petHost.run(ctx)
+		}
 		menu := mygo.NewMenu([]*mygo.MenuItem{
+			petMenu,
 			{Label: "打开 Aemeath", Click: func(*mygo.MenuItem, *mygo.Window) { show() }},
 			{ID: "status", Label: "正在启动…", Disabled: true},
 			mygo.Separator(),
@@ -122,19 +142,29 @@ func main() {
 			mygo.Separator(),
 			{Label: "退出 Aemeath", Role: mygo.RoleQuit},
 		})
-		ctx, stop := context.WithCancel(context.Background())
-		cancel = stop
+		if petHost != nil {
+			petHost.menu = menu
+		}
 		refreshed := make(chan struct{})
 		voiceRefreshDone = refreshed
 		go func() {
 			defer close(refreshed)
-			runVoiceRefresh(ctx, service.VoiceUpdates(), win.Update, native.refreshVoice)
+			runVoiceRefresh(ctx, service.VoiceUpdates(), win.Update, func() {
+				native.refreshVoice()
+				if petHost != nil {
+					petHost.refreshAssistant(time.Now())
+				}
+			})
 		}()
 		tray, err := mygo.NewTray(mygo.TrayOptions{ID: "aemeath-agent", Icon: trayPNG(), IconIsTemplate: true, ToolTip: "Aemeath", Menu: menu})
 		if err != nil {
 			log.Printf("tray: %v", err)
 			mygo.App.SetActivationPolicy(mygo.ActivationPolicyRegular)
 			show()
+		}
+		if petHost != nil {
+			petHost.canIgnoreMouse = tray != nil
+			petHost.updateMenu()
 		}
 		slowDone := make(chan struct{})
 		slowRefreshDone = slowDone
@@ -151,6 +181,9 @@ func main() {
 				win.Update(func() {
 					if ctx.Err() == nil {
 						native.refresh()
+						if petHost != nil {
+							petHost.refreshAssistant(time.Now())
+						}
 					}
 				})
 				if ctx.Err() != nil {
@@ -187,6 +220,18 @@ func main() {
 			}
 		}}}},
 		{Role: mygo.RoleEditMenu},
+		{Label: "桌宠", Submenu: []*mygo.MenuItem{
+			{Label: "显示桌宠 / 恢复鼠标交互", Click: func(*mygo.MenuItem, *mygo.Window) {
+				if petHost != nil {
+					petHost.recover()
+				}
+			}},
+			{Label: "隐藏桌宠", Click: func(*mygo.MenuItem, *mygo.Window) {
+				if petHost != nil {
+					petHost.setVisible(false)
+				}
+			}},
+		}},
 		{Role: mygo.RoleWindowMenu},
 	}))
 	if err := mygo.App.Run(); err != nil {
@@ -200,6 +245,9 @@ func main() {
 	}
 	if slowRefreshDone != nil {
 		<-slowRefreshDone
+	}
+	if petDone != nil {
+		<-petDone
 	}
 	if service != nil {
 		service.Close()
