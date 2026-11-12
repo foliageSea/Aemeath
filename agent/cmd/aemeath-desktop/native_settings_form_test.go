@@ -173,6 +173,26 @@ func TestNativeSettingsFormMaxWidthAndToggleAlignment(t *testing.T) {
 	}
 }
 
+func TestNativeSettingsSegmentedAdaptsToLabelWidth(t *testing.T) {
+	for _, width := range []int{640, 1100} {
+		for _, dark := range []bool{false, true} {
+			short, long := 0, 0
+			tt := ui.NewTester(func(c *ui.Context) {
+				ui.Column(c).Gap(8).Children(func() {
+					nativeSettingsSegmented(c, "short", &short, "Short choice", "MiMo", "Fish")
+					nativeSettingsSegmented(c, "long", &long, "Long choice", "MiMo", "Low latency")
+				})
+			}, width, 240)
+			tt.SetDark(dark)
+			narrow := nativeSettingsFormTestAccess(t, tt, ui.RoleRadioGroup, "Short choice").Bounds
+			wide := nativeSettingsFormTestAccess(t, tt, ui.RoleRadioGroup, "Long choice").Bounds
+			if narrow.W >= 160 || wide.W <= narrow.W || wide.X != narrow.X || wide.X+wide.W > float32(width) {
+				t.Fatalf("selector did not size to its labels: width=%d dark=%v short=%+v long=%+v", width, dark, narrow, wide)
+			}
+		}
+	}
+}
+
 func TestNativeSettingsFormSecretInputBounds(t *testing.T) {
 	for _, width := range []int{640, 320} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {

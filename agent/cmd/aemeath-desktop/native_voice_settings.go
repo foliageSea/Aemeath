@@ -156,7 +156,7 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 					effort = i
 				}
 			}
-			field := ui.Segmented(c.Key("voice-reasoning-effort"), &effort, "默认", "低", "中", "高").Label("思考强度").Width(224).Shrink(0).Height(36)
+			field := nativeSettingsSegmented(c, "voice-reasoning-effort", &effort, "思考强度", "默认", "低", "中", "高")
 			if field.Changed() {
 				cfg.ReasoningEffort = efforts[effort]
 				a.edited()
@@ -183,7 +183,7 @@ func (a *nativeUI) voiceSynthesisSettingsView(c *ui.Context) {
 			if cfg.TTSProvider == "fish" {
 				provider = 1
 			}
-			field := ui.Segmented(c.Key("voice-tts-provider"), &provider, "MiMo", "Fish").Label("语音合成提供方").Width(160).Shrink(0).Height(36)
+			field := nativeSettingsSegmented(c, "voice-tts-provider", &provider, "语音合成提供方", "MiMo", "Fish")
 			if field.Changed() {
 				cfg.TTSProvider = []string{"mimo", "fish"}[provider]
 				a.edited()
@@ -210,7 +210,7 @@ func (a *nativeUI) voiceSynthesisSettingsView(c *ui.Context) {
 				} else if cfg.FishLatency == "low" {
 					latency = 2
 				}
-				field := ui.Segmented(c.Key("voice-fish-latency"), &latency, "均衡", "标准", "低延迟").Label("Fish 延迟偏好").Width(224).Shrink(0).Height(36)
+				field := nativeSettingsSegmented(c, "voice-fish-latency", &latency, "Fish 延迟偏好", "均衡", "标准", "低延迟")
 				if field.Changed() {
 					cfg.FishLatency = []string{"balanced", "normal", "low"}[latency]
 					a.edited()
@@ -254,7 +254,7 @@ func (a *nativeUI) voiceSoundSettingsView(c *ui.Context) {
 			if cfg.PlaybackOutput == "console" {
 				output = 1
 			}
-			field := ui.Segmented(c.Key("voice-playback-output"), &output, "Agent", "监控台").Label("播放位置").Width(160).Shrink(0).Height(36)
+			field := nativeSettingsSegmented(c, "voice-playback-output", &output, "播放位置", "Agent", "监控台")
 			if field.Changed() {
 				cfg.PlaybackOutput = []string{"agent", "console"}[output]
 				a.edited()

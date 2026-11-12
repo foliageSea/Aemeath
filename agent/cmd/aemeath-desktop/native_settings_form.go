@@ -64,6 +64,19 @@ func nativeSettingsTextArea(c *ui.Context, key, title string, control func() ui.
 	})
 }
 
+// Size a segmented choice by its labels and the theme’s segment padding,
+// rather than stretching it across the settings form or fixing a pixel width.
+func nativeSettingsSegmented(c *ui.Context, key string, selected *int, title string, labels ...string) ui.Element {
+	t := c.Theme()
+	width := 2 + t.Space(1) // track border and horizontal padding
+	for _, label := range labels {
+		textWidth, _ := c.MeasureText(0, ui.Span{Text: label})
+		width += max(44, textWidth+2*t.Space(3)) // each segment stays easy to click
+	}
+	width += float32(max(0, len(labels)-1)) * t.Space(0.5)
+	return ui.Segmented(c.Key(key), selected, labels...).Label(title).Width(width).Shrink(0).Height(36)
+}
+
 func nativeSettingsActions(c *ui.Context, key string, content func()) {
 	ui.Row(c.Key(key)).FillWidth().MinWidth(0).Wrap().Gap(8).AlignItems(ui.Center).Children(content)
 }
