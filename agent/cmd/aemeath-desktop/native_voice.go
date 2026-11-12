@@ -280,7 +280,7 @@ func (a *nativeUI) voiceControlsView(c *ui.Context) {
 	card.Children(func() {
 		ui.Column(c.Key("voice-controls-tint")).FillWidth().MinWidth(0).Radius(16).Background(t.Surface.Alpha(0.72)).Children(func() {
 			a.voiceTextInputView(c)
-			a.voiceContextView(c)
+			a.voiceContextView(c, true)
 			_, supported := a.service.(nativeVoiceService)
 			if !supported || a.snapshot.Voice.Error != "" || a.voiceGlobalError != "" || a.snapshot.Voice.Notice != "" {
 				ui.Column(c.Key("voice-notices")).FillWidth().MinWidth(0).Padding(0, 16, 12).Gap(4).Children(func() { a.voiceNoticeView(c) })
@@ -319,7 +319,7 @@ func (a *nativeUI) voiceComposerStatus() string {
 }
 
 func (a *nativeUI) voiceTextInputView(c *ui.Context) {
-	t, state := c.Theme(), a.snapshot.Voice
+	state := a.snapshot.Voice
 	width, _ := c.Size()
 	ui.Column(c.Key("voice-text-composer")).FillWidth().MinWidth(0).Padding(14, 16, 10).Gap(8).Children(func() {
 		input := ui.TextArea(c.Key("voice-text-input"), &a.voiceText).Label("文本消息").Placeholder("输入消息…").FillWidth().MinWidth(0).Padding(0).BorderWidth(0).Background(ui.Color{}).Radius(0).FontSize(14).FixedLineHeight(20)
@@ -343,11 +343,7 @@ func (a *nativeUI) voiceTextInputView(c *ui.Context) {
 			a.voiceTextRevision++
 		}
 		ui.Row(c.Key("voice-composer-actions")).FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-				if width >= 900 {
-					ui.Text(c, "Enter 发送 · Shift+Enter 换行").Label("文本输入快捷键").FontSize(11).TextColor(t.TextMuted).SingleLine()
-				}
-			})
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() { a.voiceContextView(c, false) })
 			if state.Phase == "error" && state.Response != "" {
 				voiceIconButton(c, "voice-retry-response", "重试回复语音", voiceRetryIcon, false, a.voiceDisabled(), func() { a.voiceCommand("preview", state.Response) })
 			}

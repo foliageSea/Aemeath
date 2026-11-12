@@ -102,14 +102,14 @@ func TestNativeVoiceComposerAdaptiveLayout(t *testing.T) {
 			send, _ := tt.Find("发送文本消息")
 			mic, _ := tt.Find("手动唤醒")
 			status, _ := tt.Find("当前对话状态")
-			if card.H < 140 || card.H > 160 || input.Y >= send.Y || send.X <= mic.X || send.Y != mic.Y || send.H != mic.H || status.Y < send.Y+send.H {
+			if card.H < 95 || card.H > 135 || input.Y >= send.Y || send.X <= mic.X || send.Y != mic.Y || send.H != mic.H || status.Y < send.Y || status.Y+status.H > send.Y+send.H {
 				t.Fatalf("unexpected composer layout width=%d: card=%+v input=%+v send=%+v mic=%+v status=%+v", width, card, input, send, mic, status)
 			}
 			if tt.HasText("第 2 轮") {
 				t.Fatal("idle details leaked into footer")
 			}
-			if _, ok := tt.Find("文本输入快捷键"); ok != (width >= 900) {
-				t.Fatal("shortcut hint did not adapt to width")
+			if _, ok := tt.Find("文本输入快捷键"); ok {
+				t.Fatal("shortcut hint still visible")
 			}
 			if dir := os.Getenv("AEMEATH_COMPOSER_PREVIEW_DIR"); dir != "" {
 				if err := os.MkdirAll(dir, 0755); err != nil {
