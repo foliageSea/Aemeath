@@ -75,13 +75,10 @@ func (a *nativeUI) checkHomeAssistant() {
 
 func (a *nativeUI) homeAssistantSettingsView(c *ui.Context) {
 	t, cfg := c.Theme(), &a.draft.Voice
-	ui.Column(c.Key("ha-settings")).Label("智能家居设置").FillWidth().MinWidth(0).Padding(18).Gap(14).Radius(14).Background(t.Surface).Children(func() {
-		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-				ui.Text(c, "Home Assistant").FontSize(17).Bold()
-				ui.Text(c, "官方 MCP Server").FontSize(11).TextColor(t.TextMuted)
-			})
-			if ui.Switch(c.Key("ha-enabled"), &cfg.HAMCPEnabled).Label("启用 HA MCP").Changed() {
+	nativeSettingsSection(c, "ha-settings", "", func() {
+		ui.Row(c).FillWidth().MinWidth(0).Gap(16).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Home Assistant").FontSize(15).Bold().Grow(1).MinWidth(0)
+			if ui.Switch(c.Key("ha-enabled"), &cfg.HAMCPEnabled).Label("启用 HA MCP").Shrink(0).Changed() {
 				a.edited()
 			}
 		})
@@ -93,17 +90,12 @@ func (a *nativeUI) homeAssistantSettingsView(c *ui.Context) {
 				ui.Button(c.Key("ha-enable-tools"), "开启 Agent 工具").FontSize(11).OnClick(func() { cfg.LLMTools = true; a.edited() })
 			})
 		}
-		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+		nativeSettingsActions(c, "ha-actions", func() {
 			label := "测试连接 / 刷新工具"
 			if a.busy["ha-probe"] {
 				label = "正在连接…"
 			}
 			ui.Button(c.Key("ha-probe"), label).Label("测试 HA 连接").FontSize(12).Disabled(a.busy["ha-probe"]).OnClick(a.checkHomeAssistant)
-			hint := "使用所选 MCP 工具集及其权限"
-			if strings.HasSuffix(nativeHAConfig(*cfg).Endpoint, "/api/mcp/assist") {
-				hint = "Device control：管理 HA 中已暴露的实体"
-			}
-			ui.Text(c, hint).FontSize(11).TextColor(t.TextMuted).Grow(1).MinWidth(0).Wrap()
 		})
 		a.homeAssistantStatusView(c)
 	})

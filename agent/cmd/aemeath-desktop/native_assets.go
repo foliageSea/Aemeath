@@ -153,12 +153,11 @@ func (a *nativeUI) wakeModelsView(c *ui.Context) {
 			title, color = "模型校验或安装失败", t.Warning
 		}
 	}
-	ui.Column(c.Key("wake-model-card")).FillWidth().Padding(16).Gap(10).Radius(12).Border(1, t.Border).Children(func() {
-		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-				ui.Text(c, "离线唤醒模型").Bold()
-				ui.Text(c, title).FontSize(12).TextColor(color).Wrap()
-			})
+	nativeSettingsSection(c, "wake-model-card", "", func() {
+		ui.Text(c, "离线唤醒模型").FontSize(15).Bold()
+		ui.Text(c, title).FontSize(12).TextColor(color).Wrap()
+		a.wakeDirectoryView(c, busy)
+		nativeSettingsActions(c, "wake-model-actions", func() {
 			if busy && state.installing {
 				ui.Button(c.Key("wake-install-cancel"), "取消安装").OnClick(a.cancelWakeAssets)
 			} else {
@@ -185,6 +184,5 @@ func (a *nativeUI) wakeModelsView(c *ui.Context) {
 		if current && state.ready && filepath.Clean(a.snapshot.Settings.Voice.WakeModelDir) != target {
 			ui.Text(c, "保存设置后使用此模型目录。").FontSize(11).TextColor(t.TextMuted)
 		}
-		a.wakeDirectoryView(c, busy)
 	})
 }

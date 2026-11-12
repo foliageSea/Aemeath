@@ -244,7 +244,7 @@ func nativeProgress(c *ui.Context, v float64) {
 }
 func (a *nativeUI) overview(c *ui.Context) { a.metricGrid(c) }
 func (a *nativeUI) settingsView(c *ui.Context) {
-	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("settings-toolbar")).FillWidth().MinWidth(0).MaxWidth(nativeSettingsPageWidth).Shrink(0).Gap(12).AlignItems(ui.Center).Children(func() {
 		ui.Tabs(c.Key("settings-tabs"), &a.settingsTab, "连接", "通用", "屏幕", "助手", "语音", "智能家居").Grow(1)
 		if a.dirty {
 			ui.Text(c, "未保存").FontSize(12).TextColor(c.Theme().Warning)
@@ -259,8 +259,8 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 		a.voiceSettingsView(c)
 		return
 	}
-	ui.Scroll(c.Key(fmt.Sprintf("settings-tab-%d", a.settingsTab))).Grow(1).Children(func() {
-		ui.Column(c).FillWidth().Gap(16).Children(func() {
+	ui.Scroll(c.Key(fmt.Sprintf("settings-tab-%d", a.settingsTab))).Grow(1).MinWidth(0).MinHeight(0).Children(func() {
+		nativeSettingsBody(c, "settings-body", func() {
 			switch a.settingsTab {
 			case nativeSettingsGeneralTab:
 				a.generalSettingsView(c)
@@ -276,49 +276,43 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 }
 
 func (a *nativeUI) connectionSettingsView(c *ui.Context) {
-	ui.Column(c.Key("connection-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
-		ui.Text(c, "连接配置").Bold().FontSize(17)
-		ui.Text(c, "设备").Bold()
-		if ui.TextInput(c.Key("address"), &a.draft.Address).Label("设备地址").Placeholder("aemeath.local 或 192.168.1.20:80").FillWidth().Changed() {
-			a.edited()
-		}
-		ui.Text(c, "Magpie 网关").Bold()
-		if ui.TextInput(c.Key("magpie-url"), &a.draft.MagpieURL).Label("Magpie 网关").Placeholder("http://127.0.0.1:3425").FillWidth().Changed() {
-			a.edited()
-		}
+	nativeSettingsSection(c, "connection-card", "连接配置", func() {
+		nativeSettingsField(c, "address-field", "设备地址", func() ui.Element {
+			field := ui.TextInput(c.Key("address"), &a.draft.Address).Label("设备地址").Placeholder("aemeath.local 或 192.168.1.20:80").FillWidth().MinWidth(0).Height(36)
+			if field.Changed() {
+				a.edited()
+			}
+			return field
+		})
+		a.voiceField(c, "magpie-url", "Magpie 网关", "http://127.0.0.1:3425", &a.draft.MagpieURL, false)
 	})
 }
 
 func (a *nativeUI) generalSettingsView(c *ui.Context) {
-	ui.Column(c.Key("login-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
-		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "开机启动")
-			enabled := a.login
-			if ui.Switch(c.Key("open-at-login"), &enabled).Label("登录系统时启动").Disabled(a.busy["login"]).Changed() {
-				a.run("login", func() error { return a.loginWrite(enabled) }, func() { a.login = enabled })
-			}
-		})
+	nativeSettingsSection(c, "login-card", "", func() {
+		enabled := a.login
+		if nativeSettingsToggle(c, "open-at-login", "开机启动", &enabled, a.busy["login"], "登录系统时启动") {
+			a.run("login", func() error { return a.loginWrite(enabled) }, func() { a.login = enabled })
+		}
 	})
 }
 
 func (a *nativeUI) screenSettingsView(c *ui.Context) {
-	ui.Column(c.Key("screen-card")).FillWidth().Padding(20).Gap(12).Radius(18).Background(c.Theme().Surface).Children(func() {
-		ui.Text(c, "设备屏幕").Bold().FontSize(17)
-		// Controls wait for the device's own report: it is the source of truth.
+	nativeSettingsSection(c, "screen-card", "设备屏幕", func() {
 		screenDisabled := !a.snapshot.Connected || !a.snapshot.ScreenKnown || a.busy["screen"]
-		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "屏幕状态")
-			screenOn := a.snapshot.ScreenOn
-			if ui.Switch(c.Key("screen-on"), &screenOn).Label("亮屏").Disabled(screenDisabled).Changed() {
-				brightness := a.snapshot.Brightness
-				a.run("screen", func() error { return a.service.SetScreen(screenOn, brightness) }, func() { a.notify("屏幕指令已发送") })
-			}
-		})
-		ui.Text(c, "亮度")
-		brightness := float64(a.snapshot.Brightness)
-		if ui.Slider(c.Key("screen-brightness"), &brightness, 0, 100).Label("亮度").Disabled(screenDisabled || !a.snapshot.ScreenOn).FillWidth().Changed() {
-			on, level := a.snapshot.ScreenOn, int(brightness)
-			a.run("screen", func() error { return a.service.SetScreen(on, level) }, func() { a.notify("亮度指令已发送") })
+		screenOn := a.snapshot.ScreenOn
+		if nativeSettingsToggle(c, "screen-on", "屏幕状态", &screenOn, screenDisabled, "亮屏") {
+			brightness := a.snapshot.Brightness
+			a.run("screen", func() error { return a.service.SetScreen(screenOn, brightness) }, func() { a.notify("屏幕指令已发送") })
 		}
+		nativeSettingsField(c, "screen-brightness-field", "亮度", func() ui.Element {
+			brightness := float64(a.snapshot.Brightness)
+			field := ui.Slider(c.Key("screen-brightness"), &brightness, 0, 100).Label("亮度").Disabled(screenDisabled || !a.snapshot.ScreenOn).FillWidth()
+			if field.Changed() {
+				on, level := a.snapshot.ScreenOn, int(brightness)
+				a.run("screen", func() error { return a.service.SetScreen(on, level) }, func() { a.notify("亮度指令已发送") })
+			}
+			return field
+		})
 	})
 }

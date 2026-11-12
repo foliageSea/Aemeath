@@ -38,9 +38,8 @@ func (a *nativeUI) groupedSettingsView(c *ui.Context, key, title string, groups 
 	if *section < 0 || *section >= len(groups) {
 		*section = 0
 	}
-	ui.Row(c.Key(key + "-settings-layout")).Label(title + "设置分组").FillWidth().Grow(1).MinHeight(0).Gap(16).AlignItems(ui.Stretch).Children(func() {
-		ui.Column(c.Key(key+"-settings-sidebar")).Label(title+"设置导航").Width(128).Shrink(0).Padding(8).Gap(4).Radius(14).Background(t.Surface).Border(1, t.Border.Alpha(0.45)).Children(func() {
-			ui.Text(c, title+"配置").FontSize(11).TextColor(t.TextMuted).Padding(6, 8, 10)
+	ui.Row(c.Key(key + "-settings-layout")).Label(title + "设置分组").FillWidth().MaxWidth(nativeSettingsPageWidth).Grow(1).MinHeight(0).Gap(nativeSettingsNavigationGap).AlignItems(ui.Stretch).Children(func() {
+		ui.Column(c.Key(key+"-settings-sidebar")).Label(title+"设置导航").Width(nativeSettingsNavigationWidth).Shrink(0).Padding(8).Gap(4).Radius(14).Background(t.Surface).Border(1, t.Border.Alpha(0.45)).Children(func() {
 			for index, group := range groups {
 				selected := *section == index
 				button := ui.Button(c.Key(group.key), "").Label(group.title).AccessSelected(selected).FillWidth().Height(36).Padding(7, 8).Gap(8).BorderWidth(0).Radius(8).AlignItems(ui.Center).Justify(ui.Start).Background(ui.Color{})
@@ -59,9 +58,9 @@ func (a *nativeUI) groupedSettingsView(c *ui.Context, key, title string, groups 
 		})
 		group := groups[*section]
 		ui.Scroll(c.Key(key + "-settings-" + group.key)).Label(group.title + "设置内容").Grow(1).MinWidth(0).MinHeight(0).TrackScroll(&scroll[*section]).Children(func() {
-			ui.Column(c).FillWidth().MinWidth(0).Gap(14).Children(func() {
+			nativeSettingsBody(c, group.key+"-form", func() {
 				ui.Text(c, group.title).FontSize(18).Bold()
-				ui.Column(c.Key(group.key + "-form")).FillWidth().MinWidth(0).Padding(18).Gap(12).Radius(14).Background(t.Surface).Children(func() {
+				ui.Column(c).FillWidth().MinWidth(0).Gap(24).Children(func() {
 					switch group.key {
 					case "general":
 						a.voiceGeneralSettingsView(c)
@@ -84,152 +83,181 @@ func (a *nativeUI) groupedSettingsView(c *ui.Context, key, title string, groups 
 
 func (a *nativeUI) voiceGeneralSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
-	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "启用语音助手").Grow(1)
-		if ui.Switch(c.Key("voice-enabled"), &cfg.Enabled).Label("启用语音助手").Changed() {
+	nativeSettingsSection(c, "voice-general-card", "", func() {
+		if nativeSettingsToggle(c, "voice-enabled", "启用语音助手", &cfg.Enabled, false) {
 			a.edited()
 		}
+		nativeSettingsTextArea(c, "voice-persona", "角色设定", func() ui.Element {
+			field := ui.TextArea(c, &cfg.Persona).Label("角色设定").Placeholder("描述爱弥斯的性格、语气与回答偏好").FillWidth().MinWidth(0).Height(180)
+			if field.Changed() {
+				a.edited()
+			}
+			return field
+		})
 	})
-	ui.Field(c.Key("voice-persona"), "角色设定", func() {
-		if ui.TextArea(c, &cfg.Persona).Label("角色设定").Placeholder("描述爱弥斯的性格、语气与回答偏好").FillWidth().Height(180).Changed() {
-			a.edited()
-		}
-	}).FillWidth()
 }
 
 func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
-	ui.Text(c, "OpenAI 兼容接口").Bold()
-	a.voiceField(c, "voice-llm-url", "OpenAI 服务地址", "https://api.openai.com/v1", &cfg.LLMBaseURL, false)
-	a.voiceField(c, "voice-llm-key", "OpenAI API 密钥", "输入 API 密钥", &cfg.LLMAPIKey, true)
-	a.voiceField(c, "voice-llm-model", "对话模型", "填写服务提供的模型名称", &cfg.LLMModel, false)
-	autoContextWindow := cfg.ContextWindowMode != "manual"
-	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "自动读取模型上下文容量").Grow(1).MinWidth(0).Wrap()
-		if ui.Switch(c.Key("voice-context-auto"), &autoContextWindow).Label("自动读取模型上下文容量").Changed() {
+	nativeSettingsSection(c, "voice-service-card", "服务连接", func() {
+		a.voiceField(c, "voice-llm-url", "OpenAI 服务地址", "https://api.openai.com/v1", &cfg.LLMBaseURL, false)
+		a.voiceField(c, "voice-llm-key", "OpenAI API 密钥", "输入 API 密钥", &cfg.LLMAPIKey, true)
+		a.voiceField(c, "voice-llm-model", "对话模型", "填写服务提供的模型名称", &cfg.LLMModel, false)
+	})
+	nativeSettingsSection(c, "voice-context-card", "上下文", func() {
+		autoContextWindow := cfg.ContextWindowMode != "manual"
+		if nativeSettingsToggle(c, "voice-context-auto", "自动读取模型上下文容量", &autoContextWindow, false) {
 			cfg.ContextWindowMode = "manual"
 			if autoContextWindow {
 				cfg.ContextWindowMode = "auto"
 			}
 			a.edited()
 		}
-	})
-	if autoContextWindow {
-		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Tooltip("从 models.dev 公共目录读取容量，未匹配时使用备用值，不向对话服务查询容量。后台下载不发送密钥或对话；目录容量不保证等于当前服务实际上限。").Children(func() {
-			ui.Text(c, "使用 models.dev 查询上下文容量").Grow(1).MinWidth(0).Wrap()
-			if ui.Switch(c.Key("voice-models-dev"), &cfg.ModelsDevEnabled).Label("使用 models.dev 查询上下文容量").Changed() {
+		if autoContextWindow {
+			ui.Column(c).FillWidth().MinWidth(0).Gap(16).Tooltip("从 models.dev 公共目录读取容量，未匹配时使用备用值，不向对话服务查询容量。后台下载不发送密钥或对话；目录容量不保证等于当前服务实际上限。").Children(func() {
+				if nativeSettingsToggle(c, "voice-models-dev", "使用 models.dev 查询上下文容量", &cfg.ModelsDevEnabled, false) {
+					a.edited()
+				}
+				if cfg.ModelsDevEnabled {
+					a.voiceField(c, "voice-models-dev-provider", "models.dev 服务商 ID", "留空按服务地址精确匹配，如 openai", &cfg.ModelsDevProvider, false)
+					a.voiceField(c, "voice-models-dev-model", "models.dev 模型 ID", "留空使用请求模型 ID；别名映射需填写服务商 ID", &cfg.ModelsDevModel, false)
+				}
+			})
+		}
+		capacityLabel := "备用上下文容量（Tokens）"
+		capacityDescription := "自动读取失败时使用；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。"
+		if !autoContextWindow {
+			capacityLabel = "手动上下文容量（Tokens）"
+			capacityDescription = "手动设置模型上限；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。"
+		}
+		nativeSettingsNumberField(c, "voice-context-window", capacityLabel, func() ui.Element {
+			capacity := float64(cfg.ContextWindow)
+			if capacity == 0 {
+				capacity = 32768
+			}
+			field := ui.NumberInput(c, &capacity, 0, 2097152, 1024).Label(capacityLabel).FillWidth().MinWidth(0).Height(36).Tooltip(capacityDescription)
+			if field.Changed() {
+				cfg.ContextWindow = int(capacity)
 				a.edited()
 			}
-		})
-		if cfg.ModelsDevEnabled {
-			a.voiceField(c, "voice-models-dev-provider", "models.dev 服务商 ID", "留空按服务地址精确匹配，如 openai", &cfg.ModelsDevProvider, false)
-			a.voiceField(c, "voice-models-dev-model", "models.dev 模型 ID", "留空使用请求模型 ID；别名映射需填写服务商 ID", &cfg.ModelsDevModel, false)
-		}
-	}
-	capacityLabel := "备用上下文容量（Tokens）"
-	capacityDescription := "自动读取失败时使用；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。"
-	if !autoContextWindow {
-		capacityLabel = "手动上下文容量（Tokens）"
-		capacityDescription = "手动设置模型上限；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。"
-	}
-	ui.Field(c.Key("voice-context-window"), capacityLabel, func() {
-		capacity := float64(cfg.ContextWindow)
-		if capacity == 0 {
-			capacity = 32768
-		}
-		if ui.NumberInput(c, &capacity, 0, 2097152, 1024).FillWidth().Changed() {
-			cfg.ContextWindow = int(capacity)
-			a.edited()
-		}
-	}).FillWidth().Description(capacityDescription)
-	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "启用 Agent 工具").Grow(1).MinWidth(0).Wrap()
-		if ui.Switch(c.Key("voice-tools"), &cfg.LLMTools).Label("启用 Agent 工具").Changed() {
-			a.edited()
-		}
+			return field
+		}, capacityDescription)
 	})
-	ui.Text(c, "支持时间查询、网页搜索、查询系统与额度，以及控制设备和电脑锁屏。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
-	a.voiceField(c, "voice-tavily-key", "Tavily API 密钥", "tvly-…", &cfg.TavilyAPIKey, true)
-	ui.Text(c, "思考强度").FontSize(12).TextColor(c.Theme().TextMuted)
-	efforts := []string{"", "low", "medium", "high"}
-	effort := 0
-	for i, value := range efforts {
-		if cfg.ReasoningEffort == value {
-			effort = i
+	nativeSettingsSection(c, "voice-tools-card", "工具与推理", func() {
+		if nativeSettingsToggle(c, "voice-tools", "启用 Agent 工具", &cfg.LLMTools, false) {
+			a.edited()
 		}
-	}
-	if ui.Segmented(c.Key("voice-reasoning-effort"), &effort, "默认", "低", "中", "高").Label("思考强度").Changed() {
-		cfg.ReasoningEffort = efforts[effort]
-		a.edited()
-	}
+		ui.Text(c, "支持时间查询、网页搜索、查询系统与额度，以及控制设备和电脑锁屏。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+		nativeSettingsField(c, "voice-reasoning-field", "思考强度", func() ui.Element {
+			efforts := []string{"", "low", "medium", "high"}
+			effort := 0
+			for i, value := range efforts {
+				if cfg.ReasoningEffort == value {
+					effort = i
+				}
+			}
+			field := ui.Segmented(c.Key("voice-reasoning-effort"), &effort, "默认", "低", "中", "高").Label("思考强度").FillWidth().MinWidth(0).Height(36)
+			if field.Changed() {
+				cfg.ReasoningEffort = efforts[effort]
+				a.edited()
+			}
+			return field
+		})
+		a.voiceField(c, "voice-tavily-key", "Tavily API 密钥", "tvly-…", &cfg.TavilyAPIKey, true)
+	})
 }
 
 func (a *nativeUI) voiceRecognitionSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
-	ui.Text(c, "MiMo").Bold()
-	a.voiceField(c, "voice-mimo-url", "MiMo 服务地址", "填写 MiMo 服务地址", &cfg.MiMoBaseURL, false)
-	a.voiceField(c, "voice-mimo-key", "MiMo API 密钥", "输入 API 密钥", &cfg.MiMoAPIKey, true)
+	nativeSettingsSection(c, "voice-recognition-card", "MiMo", func() {
+		a.voiceField(c, "voice-mimo-url", "MiMo 服务地址", "填写 MiMo 服务地址", &cfg.MiMoBaseURL, false)
+		a.voiceField(c, "voice-mimo-key", "MiMo API 密钥", "输入 API 密钥", &cfg.MiMoAPIKey, true)
+	})
 }
 
 func (a *nativeUI) voiceSynthesisSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
-	t := c.Theme()
-	ui.Text(c, "语音合成提供方").Bold()
-	provider := 0
-	if cfg.TTSProvider == "fish" {
-		provider = 1
-	}
-	if ui.Segmented(c.Key("voice-tts-provider"), &provider, "MiMo", "Fish").Label("语音合成提供方").Changed() {
-		cfg.TTSProvider = []string{"mimo", "fish"}[provider]
-		a.edited()
-	}
-	if cfg.TTSProvider == "fish" {
-		a.voiceField(c, "voice-fish-url", "Fish 服务地址", "https://api.fish.audio", &cfg.FishBaseURL, false)
-		a.voiceField(c, "voice-fish-key", "Fish API 密钥", "输入 Fish API 密钥", &cfg.FishAPIKey, true)
-		a.voiceField(c, "voice-fish-model", "Fish 模型", "s2.1-pro", &cfg.FishModel, false)
-		a.voiceField(c, "voice-fish-reference-id", "Fish reference_id", "优先填写已创建的音色 ID", &cfg.FishReferenceID, false)
-		ui.Text(c, "填写音色 ID 后，无需参考音频或转写文本；留空时请提供 WAV 和对应的逐字转写。").FontSize(11).TextColor(t.TextMuted).Wrap()
-		ui.Field(c.Key("voice-fish-reference-text"), "Fish 参考音频转写", func() {
-			if ui.TextArea(c, &cfg.FishReferenceText).Label("Fish 参考音频转写").Placeholder("与参考音频逐字一致；使用 reference_id 时可留空").FillWidth().Height(90).Changed() {
+	nativeSettingsSection(c, "voice-synthesis-card", "", func() {
+		nativeSettingsField(c, "voice-provider-field", "语音合成提供方", func() ui.Element {
+			provider := 0
+			if cfg.TTSProvider == "fish" {
+				provider = 1
+			}
+			field := ui.Segmented(c.Key("voice-tts-provider"), &provider, "MiMo", "Fish").Label("语音合成提供方").FillWidth().MinWidth(0).Height(36)
+			if field.Changed() {
+				cfg.TTSProvider = []string{"mimo", "fish"}[provider]
 				a.edited()
 			}
-		}).FillWidth()
-		latency := 0
-		if cfg.FishLatency == "normal" {
-			latency = 1
-		} else if cfg.FishLatency == "low" {
-			latency = 2
+			return field
+		})
+		if cfg.TTSProvider == "fish" {
+			a.voiceField(c, "voice-fish-url", "Fish 服务地址", "https://api.fish.audio", &cfg.FishBaseURL, false)
+			a.voiceField(c, "voice-fish-key", "Fish API 密钥", "输入 Fish API 密钥", &cfg.FishAPIKey, true)
+			a.voiceField(c, "voice-fish-model", "Fish 模型", "s2.1-pro", &cfg.FishModel, false)
+			a.voiceField(c, "voice-fish-reference-id", "Fish reference_id", "优先填写已创建的音色 ID", &cfg.FishReferenceID, false)
+			ui.Text(c, "填写音色 ID 后，无需参考音频或转写文本；留空时请提供 WAV 和对应的逐字转写。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+			nativeSettingsTextArea(c, "voice-fish-reference-text", "Fish 参考音频转写", func() ui.Element {
+				field := ui.TextArea(c, &cfg.FishReferenceText).Label("Fish 参考音频转写").Placeholder("与参考音频逐字一致；使用 reference_id 时可留空").FillWidth().MinWidth(0).Height(90)
+				if field.Changed() {
+					a.edited()
+				}
+				return field
+			})
+			nativeSettingsField(c, "voice-fish-latency-field", "Fish 延迟偏好", func() ui.Element {
+				latency := 0
+				if cfg.FishLatency == "normal" {
+					latency = 1
+				} else if cfg.FishLatency == "low" {
+					latency = 2
+				}
+				field := ui.Segmented(c.Key("voice-fish-latency"), &latency, "均衡", "标准", "低延迟").Label("Fish 延迟偏好").FillWidth().MinWidth(0).Height(36)
+				if field.Changed() {
+					cfg.FishLatency = []string{"balanced", "normal", "low"}[latency]
+					a.edited()
+				}
+				return field
+			})
+		} else {
+			ui.Text(c, "MiMo 合成与语音识别共用服务地址和密钥。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		}
-		ui.Text(c, "Fish 延迟偏好").FontSize(12).TextColor(t.TextMuted)
-		if ui.Segmented(c.Key("voice-fish-latency"), &latency, "均衡", "标准", "低延迟").Label("Fish 延迟偏好").Changed() {
-			cfg.FishLatency = []string{"balanced", "normal", "low"}[latency]
-			a.edited()
+		a.voiceField(c, "voice-reference-path", "参考音频路径", "参考声音的 WAV 文件完整路径", &cfg.ReferenceAudio, false)
+		if cfg.TTSProvider != "fish" {
+			nativeSettingsActions(c, "voice-mimo-actions", func() {
+				ui.Button(c.Key("voice-configure-mimo"), "配置 MiMo 服务").OnClick(func() { a.voiceSettingsSection = 0 })
+			})
 		}
-	} else {
-		ui.Text(c, "MiMo 合成与语音识别共用服务地址和密钥。").FontSize(11).TextColor(t.TextMuted).Wrap()
-		ui.Button(c.Key("voice-configure-mimo"), "配置 MiMo 服务").OnClick(func() { a.voiceSettingsSection = 0 })
-	}
-	a.voiceField(c, "voice-reference-path", "参考音频路径", "参考声音的 WAV 文件完整路径", &cfg.ReferenceAudio, false)
+	})
 }
 
 func (a *nativeUI) voiceWakeSettingsView(c *ui.Context) {
-	a.voiceField(c, "voice-wake-phrase", "唤醒词", wake.Keyword, &a.draft.Voice.WakePhrase, false)
-	ui.Text(c, "留空使用默认唤醒词「你好小爱」。支持 2–12 个模型支持的中文汉字，自动生成拼音；多音字采用默认读音。保存后会重新连接并应用。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+	nativeSettingsSection(c, "voice-wake-card", "", func() {
+		a.voiceField(c, "voice-wake-phrase", "唤醒词", wake.Keyword, &a.draft.Voice.WakePhrase, false)
+		ui.Text(c, "留空使用默认唤醒词「你好小爱」。支持 2–12 个模型支持的中文汉字，自动生成拼音；多音字采用默认读音。保存后会重新连接并应用。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+	})
 	a.wakeModelsView(c)
-	ui.Field(c.Key("voice-wake-threshold"), "唤醒阈值", func() {
-		if ui.NumberInput(c, &a.draft.Voice.WakeThreshold, 0.01, 1, 0.05).FillWidth().Changed() {
-			a.edited()
-		}
-	}).FillWidth().Description("0.01–1，越高越严格。")
+	nativeSettingsSection(c, "voice-wake-threshold-card", "", func() {
+		nativeSettingsNumberField(c, "voice-wake-threshold", "唤醒阈值", func() ui.Element {
+			field := ui.NumberInput(c, &a.draft.Voice.WakeThreshold, 0.01, 1, 0.05).Label("唤醒阈值").FillWidth().MinWidth(0).Height(36).Tooltip("0.01–1，越高越严格。")
+			if field.Changed() {
+				a.edited()
+			}
+			return field
+		}, "0.01–1，越高越严格。")
+	})
 }
 
 func (a *nativeUI) voiceSoundSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
-	ui.Text(c, fmt.Sprintf("播放音量 · %d%%", cfg.Volume)).FontSize(12).TextColor(c.Theme().TextMuted)
-	volume := float64(cfg.Volume)
-	if ui.Slider(c.Key("voice-volume"), &volume, 0, 100).Label("播放音量").FillWidth().Changed() {
-		cfg.Volume = int(volume)
-		a.edited()
-	}
-	a.voicePreviewView(c)
+	nativeSettingsSection(c, "voice-sound-card", "", func() {
+		nativeSettingsField(c, "voice-volume-field", "播放音量", func() ui.Element {
+			volume := float64(cfg.Volume)
+			field := ui.Slider(c.Key("voice-volume"), &volume, 0, 100).Label("播放音量").Tooltip(fmt.Sprintf("%d%%", cfg.Volume)).FillWidth()
+			if field.Changed() {
+				cfg.Volume = int(volume)
+				a.edited()
+			}
+			return field
+		})
+		a.voicePreviewView(c)
+	})
 }

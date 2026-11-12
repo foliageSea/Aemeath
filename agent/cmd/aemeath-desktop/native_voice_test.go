@@ -58,6 +58,27 @@ func nativeVoiceClickRole(t *testing.T, tt *ui.Tester, role ui.Role, label strin
 	if !ok {
 		t.Fatalf("missing control: %s", label)
 	}
+	for _, title := range []string{"基础设置", "对话服务", "语音识别", "语音合成", "离线唤醒", "声音试听"} {
+		viewport, found := tt.Find(title + "设置内容")
+		if !found {
+			continue
+		}
+		r := info.Bounds
+		dy := float32(0)
+		if r.Y < viewport.Y+8 {
+			dy = r.Y - viewport.Y - 8
+		} else if r.Y+r.H > viewport.Y+viewport.H-8 {
+			dy = r.Y + r.H - viewport.Y - viewport.H + 8
+		}
+		if dy != 0 {
+			tt.Scroll(viewport.X+viewport.W/2, viewport.Y+viewport.H/2, 0, dy)
+			info, ok = tt.AccessByRole(role, label)
+			if !ok || info.Bounds.Y < viewport.Y || info.Bounds.Y+info.Bounds.H > viewport.Y+viewport.H {
+				t.Fatalf("control did not scroll into view: %s %+v", label, info)
+			}
+		}
+		break
+	}
 	r := info.Bounds
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 }

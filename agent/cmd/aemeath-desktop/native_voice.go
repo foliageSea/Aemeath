@@ -491,8 +491,10 @@ func (a *nativeUI) voiceHoldHintView(c *ui.Context) {
 func (a *nativeUI) voicePreviewView(c *ui.Context) {
 	t, state := c.Theme(), a.snapshot.Voice
 	disabled := a.voiceDisabled()
-	ui.TextInput(c.Key("voice-preview-text"), &a.voicePreview).Label("试听文本").Placeholder("输入试听文本，留空使用默认问候语").FillWidth()
-	ui.Row(c).Gap(8).Children(func() {
+	nativeSettingsTextArea(c, "voice-preview-field", "试听文本", func() ui.Element {
+		return ui.TextInput(c.Key("voice-preview-text"), &a.voicePreview).Label("试听文本").Placeholder("输入试听文本，留空使用默认问候语").FillWidth().MinWidth(0).Height(36)
+	})
+	nativeSettingsActions(c, "voice-preview-actions", func() {
 		ui.Button(c.Key("voice-preview"), "试听语音").Disabled(disabled).OnClick(func() { a.voiceCommand("preview", a.voicePreview) })
 		ui.Button(c.Key("voice-reference"), "播放参考音频").Disabled(disabled).OnClick(func() { a.voiceCommand("reference", "") })
 	})
@@ -512,10 +514,11 @@ var (
 )
 
 func (a *nativeUI) voiceField(c *ui.Context, key, label, placeholder string, value *string, secret bool) {
-	ui.Field(c.Key(key), label, func() {
-		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+	nativeSettingsField(c, key, label, func() ui.Element {
+		var field ui.Element
+		ui.Row(c).FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
 			visible := a.visibleKeys[key]
-			field := ui.TextInput(c.Key("input"), value).Label(label).Placeholder(placeholder).Grow(1).MinWidth(0)
+			field = ui.TextInput(c.Key("input"), value).Label(label).Placeholder(placeholder).Grow(1).MinWidth(0).Height(36)
 			if secret && !visible {
 				field = field.Password()
 			}
@@ -542,5 +545,6 @@ func (a *nativeUI) voiceField(c *ui.Context, key, label, placeholder string, val
 				})
 			}
 		})
-	}).FillWidth()
+		return field
+	})
 }
