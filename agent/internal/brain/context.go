@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/cloudwego/eino/components/model"
@@ -159,13 +158,7 @@ func (e *Engine) ContextStats() ContextStats {
 		}
 		e.memory.mu.Unlock()
 	}
-	s := e.stats
-	if !e.lastActive.IsZero() && time.Since(e.lastActive) > MemoryTTL {
-		s.EstimatedTokens, s.SummaryTokens, s.RetainedTurns, s.UsagePercent = 0, 0, 0, 0
-		s.Compressing = false
-		s.Compressions, s.DroppedTurns, s.LastCompression = 0, 0, ""
-	}
-	return s
+	return e.stats
 }
 
 func (m *Memory) ContextStats() ContextStats {
@@ -178,11 +171,6 @@ func (m *Memory) contextStatsLocked() ContextStats {
 	s := m.stats
 	s.RetainedTurns = len(m.turns)
 	s.SummaryTokens = estimateTokens(m.summary)
-	if !m.updated.IsZero() && time.Since(m.updated) > MemoryTTL {
-		s.EstimatedTokens, s.SummaryTokens, s.RetainedTurns, s.UsagePercent = 0, 0, 0, 0
-		s.Compressing = false
-		s.Compressions, s.DroppedTurns, s.LastCompression = 0, 0, ""
-	}
 	return s
 }
 
@@ -203,9 +191,6 @@ func (m *Memory) ContextStatsForConfig(cfg Config) ContextStats {
 	s.ContextWindow, s.InputBudget, s.ReservedTokens = budget.ContextWindow, budget.InputBudget, budget.ReservedTokens
 	s.ContextWindowModel, s.ContextWindowSource = budget.ContextWindowModel, budget.ContextWindowSource
 	s.ContextInputLimit, s.ContextWindowReference = budget.ContextInputLimit, budget.ContextWindowReference
-	if !m.updated.IsZero() && time.Since(m.updated) > MemoryTTL {
-		return s
-	}
 	persona := strings.TrimSpace(cfg.Persona)
 	if persona == "" {
 		persona = DefaultPersona
@@ -399,8 +384,9 @@ func (e *Engine) startCompression(parent context.Context) <-chan struct{} {
 			e.stats.Compressing = false
 			e.publishStatsLocked()
 		}
-		// Never apply an outdated prefix after Clear, TTL expiry, trimming or Close.
-		if e.closed || generation != e.generation || version != e.contextVersion || len(e.history) < count || (!e.lastActive.IsZero() && time.Since(e.lastActive) > MemoryTTL) {
+		// Never apply an outdated prefix after Clear, trimming or Close.
+		// Idle history remains eligible for compression, regardless of its age.
+		if e.closed || generation != e.generation || version != e.contextVersion || len(e.history) < count {
 			return
 		}
 		for i, m := range prefix {

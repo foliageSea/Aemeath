@@ -96,6 +96,56 @@ func TestContextRollingSummaryAndRestart(t *testing.T) {
 	}
 }
 
+func TestContextIdleHistoryStillCompressesAndContinues(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shared=%v", shared), func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				req := readRequest(t, r)
+				if isSummaryRequest(req) {
+					replyJSON(w, "用户喜欢简短回答。")
+					return
+				}
+				messages := req["messages"].([]any)
+				if len(messages) != 11 || !strings.Contains(messages[1].(map[string]any)["content"].(string), "用户喜欢简短回答") {
+					t.Errorf("idle compressed context not sent: %v", messages)
+				}
+				replyJSON(w, "继续回答")
+			}))
+			defer s.Close()
+			var memory *Memory
+			path := filepath.Join(t.TempDir(), "memory.json")
+			if shared {
+				memory = OpenMemory(path)
+			}
+			e := contextEngine(t, s, memory, false, nil)
+			seedContext(e, 10)
+			e.mu.Lock()
+			e.lastActive = time.Now().Add(-7 * 24 * time.Hour)
+			e.saveMemoryLocked()
+			e.mu.Unlock()
+			if stats := e.ContextStats(); stats.RetainedTurns != 10 || stats.EstimatedTokens <= 0 {
+				t.Fatalf("idle context disappeared before compression: %+v", stats)
+			}
+			awaitCompression(t, e.startCompression(e.lifeCtx))
+			if stats := e.ContextStats(); stats.RetainedTurns != 4 || stats.Compressions != 1 || stats.SummaryTokens <= 0 || stats.Compressing {
+				t.Fatalf("idle context was not compressed: %+v", stats)
+			}
+			if shared {
+				restored := OpenMemory(path)
+				if stats := restored.ContextStats(); len(restored.Turns()) != 4 || stats.SummaryTokens <= 0 || stats.Compressions != 1 {
+					t.Fatalf("idle compressed context not persisted: %+v", stats)
+				}
+			}
+			if _, err := e.Reply(context.Background(), "继续"); err != nil {
+				t.Fatal(err)
+			}
+			if stats := e.ContextStats(); stats.RetainedTurns != 5 || stats.Compressions != 1 || stats.SummaryTokens <= 0 {
+				t.Fatalf("idle compressed context lost on continuation: %+v", stats)
+			}
+		})
+	}
+}
+
 func TestContextBackgroundSummaryKeepsAppendedTurn(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -323,34 +373,49 @@ func TestContextUsageCountsJSONAndSSEOnce(t *testing.T) {
 	}
 }
 
-func TestContextSummaryTTLAndLegacyMemory(t *testing.T) {
+func TestContextSummaryAndLegacyMemorySurviveInactivity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memory.json")
-	legacy := memoryFile{Version: 1, UpdatedAt: time.Now(), Turns: []memoryTurn{{User: "旧偏好", Assistant: "已记录"}}}
-	data, _ := json.Marshal(legacy)
-	os.WriteFile(path, data, 0600)
-	if m := OpenMemory(path); len(m.Turns()) != 1 || m.ContextStats().RetainedTurns != 1 {
-		t.Fatal("legacy memory not read")
+	legacy := memoryFile{Version: 1, UpdatedAt: time.Now().Add(-7 * 24 * time.Hour), Turns: []memoryTurn{{User: "旧偏好", Assistant: "已记录"}}}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
 	}
-	expired := memoryFile{Version: 2, UpdatedAt: time.Now().Add(-MemoryTTL - time.Minute), Summary: "昨天的事实"}
-	data, _ = json.Marshal(expired)
-	os.WriteFile(path, data, 0600)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if m := OpenMemory(path); len(m.Turns()) != 1 || m.ContextStats().RetainedTurns != 1 {
+		t.Fatal("idle legacy memory not read")
+	}
+	idle := memoryFile{Version: 2, UpdatedAt: time.Now().Add(-7 * 24 * time.Hour), Summary: "用户喜欢清淡的食物"}
+	data, err = json.Marshal(idle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req := readRequest(t, r)
-		if len(req["messages"].([]any)) != 2 {
-			t.Error("expired summary sent")
+		messages := req["messages"].([]any)
+		if len(messages) != 3 || messages[1].(map[string]any)["role"] != "assistant" || !strings.Contains(messages[1].(map[string]any)["content"].(string), idle.Summary) {
+			t.Errorf("idle summary not sent: %v", messages)
 		}
-		replyJSON(w, "新会话")
+		replyJSON(w, "继续之前的对话")
 	}))
 	defer s.Close()
 	m := OpenMemory(path)
 	e := contextEngine(t, s, m, false, nil)
-	if m.ContextStats().SummaryTokens != 0 {
-		t.Fatal("expired summary shown")
+	if m.ContextStats().SummaryTokens == 0 || e.ContextStats().SummaryTokens == 0 {
+		t.Fatal("idle summary not shown")
 	}
-	if _, err := e.Reply(context.Background(), "今天的问题"); err != nil {
+	if _, err := e.Reply(context.Background(), "今天吃什么"); err != nil {
 		t.Fatal(err)
 	}
-	if m.summary != "" {
-		t.Fatal("expired summary persisted")
+	if saved := OpenMemory(path); saved.summary != idle.Summary || len(saved.Turns()) != 1 {
+		t.Fatal("idle summary or continued turn not persisted")
+	}
+	e.Clear()
+	if saved := OpenMemory(path); saved.summary != "" || len(saved.Turns()) != 0 {
+		t.Fatal("manual clear retained idle summary or history")
 	}
 }

@@ -56,27 +56,52 @@ func TestMemorySurvivesEngineAndRestart(t *testing.T) {
 	}
 }
 
-func TestMemoryExpiresAfterInactivity(t *testing.T) {
-	var counts []int
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		counts = append(counts, len(readRequest(t, r)["messages"].([]any)))
-		replyJSON(w, "好的")
-	}))
-	defer s.Close()
-	path := filepath.Join(t.TempDir(), "voice_history.json")
-	b, _ := json.Marshal(memoryFile{Version: memoryVersion, UpdatedAt: time.Now().Add(-MemoryTTL - time.Minute), Turns: []memoryTurn{{User: "旧问题", Assistant: "旧回答"}}})
-	if err := os.WriteFile(path, b, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	e := newMemoryEngine(t, s, OpenMemory(path))
-	if _, err := e.Reply(context.Background(), "新问题"); err != nil {
-		t.Fatal(err)
-	}
-	if len(counts) != 1 || counts[0] != 2 {
-		t.Fatalf("expired history sent: %v", counts)
-	}
-	if h, _ := OpenMemory(path).snapshot(); len(h) != 2 || h[0].Content != "新问题" {
-		t.Fatalf("persisted=%v", h)
+func TestMemorySurvivesInactivityAndRestart(t *testing.T) {
+	for _, age := range []time.Duration{5 * time.Hour, 7 * 24 * time.Hour} {
+		t.Run(age.String(), func(t *testing.T) {
+			var counts []int
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				messages := readRequest(t, r)["messages"].([]any)
+				counts = append(counts, len(messages))
+				if len(messages) < 4 || messages[1].(map[string]any)["content"] != "旧问题" || messages[2].(map[string]any)["content"] != "旧回答" {
+					t.Errorf("idle history missing from request: %v", messages)
+				}
+				replyJSON(w, "好的")
+			}))
+			defer s.Close()
+			path := filepath.Join(t.TempDir(), "voice_history.json")
+			b, err := json.Marshal(memoryFile{Version: memoryVersion, UpdatedAt: time.Now().Add(-age), Turns: []memoryTurn{{User: "旧问题", Assistant: "旧回答"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			memory := OpenMemory(path)
+			if turns := memory.Turns(); len(turns) != 1 || turns[0].User != "旧问题" {
+				t.Fatalf("idle history not restored for display: %v", turns)
+			}
+			e := newMemoryEngine(t, s, memory)
+			defer e.Close()
+			if stats := e.ContextStats(); stats.RetainedTurns != 1 || stats.EstimatedTokens <= 0 {
+				t.Fatalf("idle engine statistics not restored: %+v", stats)
+			}
+			if _, err := e.Reply(context.Background(), "新问题"); err != nil {
+				t.Fatal(err)
+			}
+			// A replacement Engine simulates a device reconnect.
+			next := newMemoryEngine(t, s, memory)
+			defer next.Close()
+			if _, err := next.Reply(context.Background(), "重连后的问题"); err != nil {
+				t.Fatal(err)
+			}
+			if len(counts) != 2 || counts[0] != 4 || counts[1] != 6 {
+				t.Fatalf("idle or reconnected history not sent: %v", counts)
+			}
+			if h, _ := OpenMemory(path).snapshot(); len(h) != 6 || h[0].Content != "旧问题" || h[4].Content != "重连后的问题" {
+				t.Fatalf("persisted=%v", h)
+			}
+		})
 	}
 }
 

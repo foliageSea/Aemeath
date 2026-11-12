@@ -141,8 +141,11 @@ func TestNativeContextDisplaysRestoredEstimateBeforeFirstReply(t *testing.T) {
 		localUsage bool
 	}{
 		{name: "saved_usage", localUsage: true},
-		{name: "expired_history_keeps_usage", age: 5 * time.Hour, localUsage: true},
+		{name: "five_hour_history_and_summary_with_usage", age: 5 * time.Hour, localUsage: true},
+		{name: "multi_day_history_and_summary_with_usage", age: 7 * 24 * time.Hour, localUsage: true},
 		{name: "legacy_history_without_usage"},
+		{name: "five_hour_history_and_summary_without_usage", age: 5 * time.Hour},
+		{name: "multi_day_history_and_summary_without_usage", age: 7 * 24 * time.Hour},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "voice_history.json")
@@ -163,7 +166,12 @@ func TestNativeContextDisplaysRestoredEstimateBeforeFirstReply(t *testing.T) {
 			}
 			a, f, _, tt := nativeTest(t)
 			// Startup configuration statistics must restore disk usage without a voice event or request.
-			stats := brain.OpenMemory(path).ContextStatsForConfig(brain.Config{Model: "model", ContextWindow: 32768})
+			memory := brain.OpenMemory(path)
+			turns := memory.Turns()
+			if len(turns) != 1 || turns[0].User != "推荐晚饭" || turns[0].Assistant != "可以喝粥" {
+				t.Fatalf("idle age %v discarded restored conversation text: %+v", tc.age, turns)
+			}
+			stats := memory.ContextStatsForConfig(brain.Config{Model: "model", ContextWindow: 32768})
 			f.state.Voice.Context = stats
 			a.refresh()
 			nativeClick(t, tt, "语音助手")
@@ -174,16 +182,13 @@ func TestNativeContextDisplaysRestoredEstimateBeforeFirstReply(t *testing.T) {
 				if stats.LocalPromptTokens != 12000 || stats.LocalCompletionTokens != 700 || stats.LocalTotalTokens != 12700 {
 					t.Fatalf("startup configuration statistics lost saved local usage: %+v", stats)
 				}
+			} else if stats.LocalPromptTokens != 0 || stats.LocalCompletionTokens != 0 || stats.LocalTotalTokens != 0 {
+				t.Fatalf("missing saved local usage must restore as zero: %+v", stats)
 			}
-			want := []string{"Tokens（估算）", "32K · 手动设置", usage}
-			if tc.age > 0 {
-				want = append(want, "尚未压缩", "0 轮 · 压缩 0 次 · 丢弃 0 轮")
-				if stats.SummaryTokens != 0 || stats.RetainedTurns != 0 {
-					t.Fatalf("expired context was restored alongside saved usage: %+v", stats)
-				}
-			} else {
-				want = append(want, "已生成摘要", "1 轮 · 压缩 2 次 · 丢弃 3 轮")
+			if stats.SummaryTokens <= 0 || stats.RetainedTurns != 1 || stats.Compressions != 2 || stats.DroppedTurns != 3 || stats.LastCompression != "compressed" {
+				t.Fatalf("idle age %v discarded restored history, summary or compression metadata: %+v", tc.age, stats)
 			}
+			want := []string{"Tokens（估算）", "32K · 手动设置", usage, "已生成摘要", "1 轮 · 压缩 2 次 · 丢弃 3 轮"}
 			for _, text := range want {
 				if !nativeContextHasText(tt.Texts(), text) {
 					t.Fatalf("missing restored context display %q: %v", text, tt.Texts())

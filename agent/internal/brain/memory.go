@@ -12,10 +12,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// MemoryTTL ends a conversation after this much inactivity, so a question
-// asked the next morning does not silently inherit yesterday's context.
-const MemoryTTL = 4 * time.Hour
-
 const memoryVersion = 2
 
 type memoryTurn struct {
@@ -23,7 +19,7 @@ type memoryTurn struct {
 	Assistant string `json:"assistant"`
 }
 
-// localUsageFile stores only cumulative estimates, independent of conversation TTL.
+// localUsageFile stores cumulative estimates independently of retained context.
 type localUsageFile struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
@@ -41,7 +37,7 @@ type memoryFile struct {
 }
 
 // Memory outlives individual Engines (one per voice connection) so that
-// reconnects and app restarts keep the conversation. An empty path keeps it
+// inactivity, reconnects and app restarts keep the conversation. An empty path keeps it
 // in process memory only. Safe for concurrent use.
 type Memory struct {
 	mu          sync.Mutex
@@ -52,7 +48,7 @@ type Memory struct {
 	stats       ContextStats
 	statsConfig contextConfigKey
 	revision    uint64
-	epoch       uint64 // changes only when the conversation is cleared or expires
+	epoch       uint64 // changes only when the conversation is manually cleared
 }
 
 // OpenMemory loads a persisted conversation. A missing, unreadable or
@@ -103,13 +99,10 @@ func OpenMemory(path string) *Memory {
 type MemoryTurn struct{ User, Assistant string }
 
 // Turns returns the conversation the next reply will continue, oldest first.
-// An expired conversation is reported empty, matching what the model sees.
+// Inactivity does not discard retained exchanges or their summary.
 func (m *Memory) Turns() []MemoryTurn {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.updated.IsZero() && time.Since(m.updated) > MemoryTTL {
-		return nil
-	}
 	out := make([]MemoryTurn, 0, len(m.turns))
 	for _, t := range m.turns {
 		out = append(out, MemoryTurn{User: t.User, Assistant: t.Assistant})
@@ -146,16 +139,6 @@ func (m *Memory) resetLocked() {
 	m.statsConfig = contextConfigKey{}
 	m.revision++
 	m.epoch++
-}
-
-// Expiration forgets conversational context without resetting lifetime usage.
-func (m *Memory) expire() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	previous := m.stats
-	m.resetLocked()
-	copyLocalUsage(&m.stats, previous)
-	m.persist()
 }
 
 // persist writes atomically with owner-only permissions; transcripts are private.

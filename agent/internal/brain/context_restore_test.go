@@ -108,16 +108,15 @@ func TestConversationStatisticsAndLocalUsagePersist(t *testing.T) {
 	}
 }
 
-func TestRestoredContextEstimateExpiryAndConfiguration(t *testing.T) {
+func TestRestoredContextEstimateSurvivesInactivityAndConfigurationChanges(t *testing.T) {
 	memory := OpenMemory("")
 	memory.turns = []memoryTurn{{User: "旧问题", Assistant: "旧回答"}}
-	memory.updated, memory.summary = time.Now().Add(-MemoryTTL-time.Minute), "旧摘要"
+	memory.updated, memory.summary = time.Now().Add(-7*24*time.Hour), "旧摘要"
 	memory.stats = ContextStats{Compressions: 2, DroppedTurns: 4, LastCompression: "failed"}
 	stats := memory.ContextStatsForConfig(Config{Model: "model"})
-	if stats.InputBudget <= 0 || stats.EstimatedTokens != 0 || stats.RetainedTurns != 0 || stats.SummaryTokens != 0 || stats.UsagePercent != 0 || stats.Compressions != 0 || stats.DroppedTurns != 0 || stats.LastCompression != "" {
-		t.Fatalf("expired context exposed historical statistics: %+v", stats)
+	if stats.InputBudget <= 0 || stats.EstimatedTokens <= 0 || stats.RetainedTurns != 1 || stats.SummaryTokens <= 0 || stats.UsagePercent <= 0 || stats.Compressions != 2 || stats.DroppedTurns != 4 || stats.LastCompression != "failed" {
+		t.Fatalf("idle context lost historical statistics: %+v", stats)
 	}
-	memory.updated = time.Now()
 	if got := memory.ContextStatsForConfig(Config{}); got.InputBudget != 0 {
 		t.Fatalf("unconfigured model appears initialized: %+v", got)
 	}

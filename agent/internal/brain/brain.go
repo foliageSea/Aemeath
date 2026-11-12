@@ -65,7 +65,7 @@ type Engine struct {
 	generation         uint64
 	streamCancel       context.CancelFunc
 	history            []*schema.Message // only complete user/final-assistant pairs, no dangling tool calls
-	lastActive         time.Time         // last committed turn; history expires after MemoryTTL
+	lastActive         time.Time         // last committed turn; persisted as metadata, not an expiry deadline
 	memory             *Memory
 	summary            string
 	stats              ContextStats
@@ -227,29 +227,6 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	}
 	e.mu.Lock()
 	e.syncMemoryLocked()
-	if !e.lastActive.IsZero() && time.Since(e.lastActive) > MemoryTTL {
-		e.history = nil
-		e.summary = ""
-		e.contextVersion++
-		if e.compCancel != nil {
-			e.compCancel()
-		}
-		previousUsage := e.stats
-		e.stats = e.emptyContextStatsLocked()
-		copyLocalUsage(&e.stats, previousUsage)
-		e.lastActive = time.Time{}
-		e.generation++
-		e.compDone = nil
-		e.compCancel = nil
-		if e.memory != nil {
-			e.memory.expire()
-			e.memory.mu.Lock()
-			e.memoryRevision = e.memory.revision
-			e.memoryEpoch = e.memory.epoch
-			copyUsage(&e.stats, e.memory.stats)
-			e.memory.mu.Unlock()
-		}
-	}
 	generation := e.generation
 	ctx = context.WithValue(ctx, requestScopeKey{}, requestScope{generation: generation, epoch: e.memoryEpoch})
 	e.mu.Unlock()

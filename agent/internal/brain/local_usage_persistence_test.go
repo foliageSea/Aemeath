@@ -74,41 +74,44 @@ func TestLocalUsagePersistsIncompleteTurnsAndClear(t *testing.T) {
 	}
 }
 
-func TestLocalUsageSurvivesExpiredConversation(t *testing.T) {
+func TestLocalUsageAndConversationSurviveInactivity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "voice_history.json")
 	memory := OpenMemory(path)
-	memory.updated = time.Now().Add(-MemoryTTL - time.Minute)
+	memory.updated = time.Now().Add(-7 * 24 * time.Hour)
 	memory.turns = []memoryTurn{{User: "旧问题", Assistant: "旧回答"}}
 	memory.stats.LocalPromptTokens, memory.stats.LocalCompletionTokens, memory.stats.LocalTotalTokens = 100, 10, 110
 	memory.persist()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req := readRequest(t, r)
-		if n := len(req["messages"].([]any)); n != 2 {
-			t.Errorf("expired context sent %d messages", n)
+		if n := len(req["messages"].([]any)); n != 4 {
+			t.Errorf("idle context missing: sent %d messages", n)
 		}
 		replyJSON(w, "新回答")
 	}))
 	defer server.Close()
 	restored := OpenMemory(path)
-	if got := restored.ContextStats(); got.RetainedTurns != 0 || got.LocalTotalTokens != 110 {
-		t.Fatalf("expiry hid cumulative usage: %+v", got)
+	if got := restored.ContextStats(); got.RetainedTurns != 1 || got.LocalTotalTokens != 110 {
+		t.Fatalf("inactivity lost context or cumulative usage: %+v", got)
 	}
 	engine := contextEngine(t, server, restored, false, nil)
-	stale := requestScope{generation: engine.generation, epoch: engine.memoryEpoch}
+	scope := requestScope{generation: engine.generation, epoch: engine.memoryEpoch}
 	if _, err := engine.Reply(context.Background(), "新问题"); err != nil {
 		t.Fatal(err)
 	}
 	after := engine.ContextStats()
-	if after.LocalPromptTokens <= 100 || after.LocalCompletionTokens != 16 {
-		t.Fatalf("expiry discarded accumulated usage: %+v", after)
+	if after.RetainedTurns != 2 || after.LocalPromptTokens <= 100 || after.LocalCompletionTokens != 16 {
+		t.Fatalf("idle continuation discarded context or accumulated usage: %+v", after)
 	}
-	engine.addLocalUsage(20, 20, stale)
-	if got := OpenMemory(path).ContextStats(); got.LocalTotalTokens != after.LocalTotalTokens {
-		t.Fatalf("late expired response changed persisted totals: %+v", got)
+	if got := OpenMemory(path).ContextStats(); got.RetainedTurns != 2 || got.LocalTotalTokens != after.LocalTotalTokens {
+		t.Fatalf("continued context or usage not persisted: %+v", got)
 	}
 	engine.Clear()
-	if got := OpenMemory(path).ContextStats(); got.LocalTotalTokens != 0 {
-		t.Fatalf("manual clear retained saved usage: %+v", got)
+	engine.addLocalUsage(20, 20, scope)
+	if got := OpenMemory(path).ContextStats(); got.LocalTotalTokens != 0 || got.RetainedTurns != 0 {
+		t.Fatalf("manual clear retained saved context or usage: %+v", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("late cleared response recreated memory file: %v", err)
 	}
 }
 

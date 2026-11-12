@@ -84,14 +84,18 @@ func TestCatalogCapacityAppliesBeforeCompressionAndSurvivesReset(t *testing.T) {
 	if got := e.ContextStats(); got.InputBudget != stats.InputBudget || got.ContextWindowReference != stats.ContextWindowReference {
 		t.Fatal("clear erased catalog input restriction")
 	}
+	if _, err := e.Reply(context.Background(), "清空后的问题"); err != nil {
+		t.Fatal(err)
+	}
 	e.mu.Lock()
-	e.lastActive = time.Now().Add(-MemoryTTL - time.Minute)
+	e.lastActive = time.Now().Add(-7 * 24 * time.Hour)
+	e.saveMemoryLocked()
 	e.mu.Unlock()
 	if _, err := e.Reply(context.Background(), "新问题"); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.ContextStats(); got.ContextWindow != 8192 || got.InputBudget != 4096 || got.ContextWindowSource != "modelsdev" {
-		t.Fatalf("TTL reset erased catalog capacity: %+v", got)
+	if got := e.ContextStats(); got.ContextWindow != 8192 || got.InputBudget != 4096 || got.ContextWindowSource != "modelsdev" || got.RetainedTurns != 2 {
+		t.Fatalf("idle continuation lost context or catalog capacity: %+v", got)
 	}
 }
 
