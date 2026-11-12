@@ -6,10 +6,11 @@ const (
 	nativeSettingsPageWidth       float32 = 760
 	nativeSettingsNavigationWidth float32 = 128
 	nativeSettingsNavigationGap   float32 = 16
+	nativeSettingsScrollbarGutter float32 = 16
 )
 
 func nativeSettingsBody(c *ui.Context, key string, content func()) {
-	ui.Column(c.Key(key)).FillWidth().MinWidth(0).MaxWidth(nativeSettingsPageWidth).Gap(24).Children(content)
+	ui.Column(c.Key(key)).FillWidth().MinWidth(0).MaxWidth(nativeSettingsPageWidth).Padding(0, nativeSettingsScrollbarGutter, 0, 0).Gap(24).Children(content)
 }
 
 func nativeSettingsSection(c *ui.Context, key, title string, content func()) {
