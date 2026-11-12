@@ -164,8 +164,8 @@ static void timer_cb(lv_timer_t *timer)
 void voice_page_create(lv_obj_t *parent)
 {
     s_root = parent;
-    lv_obj_set_style_bg_color(parent, lv_color_hex(0x101923), 0);
-    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    // Reveal the shared dashboard background beneath the tileview.
+    lv_obj_set_style_bg_opa(parent, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(parent, 0, 0);
     // Two native-size ARGB decoded frames plus metadata, never the whole atlas.
     // A new decode can temporarily coexist with the two cached frames.
