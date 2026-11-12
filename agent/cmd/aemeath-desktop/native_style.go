@@ -55,14 +55,7 @@ var (
 func (a *nativeUI) header(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
-			ui.Text(c, a.page).FontSize(25).Bold()
-			host := "本机实时监控"
-			if a.snapshot.Metrics != nil {
-				host = a.snapshot.Metrics.Host
-			}
-			ui.Text(c, host).FontSize(12).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-		})
+		ui.Text(c, a.page).FontSize(25).Bold().Grow(1).MinWidth(0)
 		pageIndex := 0
 		for i, page := range nativePageNames {
 			if a.snapshot.Page == page {

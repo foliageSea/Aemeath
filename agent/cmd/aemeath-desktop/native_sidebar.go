@@ -14,7 +14,7 @@ var (
 	sidebarOverview      = sidebarSVG("<rect x='3' y='3' width='7' height='7' rx='1'/><rect x='14' y='3' width='7' height='7' rx='1'/><rect x='3' y='14' width='7' height='7' rx='1'/><rect x='14' y='14' width='7' height='7' rx='1'/>")
 	sidebarSubscriptions = sidebarSVG("<path d='M9 5h11M9 12h11M9 19h11'/><circle cx='4' cy='5' r='0.7'/><circle cx='4' cy='12' r='0.7'/><circle cx='4' cy='19' r='0.7'/>")
 	sidebarVoice         = sidebarSVG("<rect x='9' y='2' width='6' height='13' rx='3'/><path d='M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8'/>")
-	sidebarSettings      = sidebarSVG("<circle cx='12' cy='12' r='4'/><path d='M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2'/>")
+	sidebarSettings      = sidebarSVG("<path d='M21.93 10.78 21.93 13.22 19.32 14.03 18.61 15.74 19.88 18.16 18.16 19.88 15.74 18.61 14.03 19.32 13.22 21.93 10.78 21.93 9.97 19.32 8.26 18.61 5.84 19.88 4.12 18.16 5.39 15.74 4.68 14.03 2.07 13.22 2.07 10.78 4.68 9.97 5.39 8.26 4.12 5.84 5.84 4.12 8.26 5.39 9.97 4.68 10.78 2.07 13.22 2.07 14.03 4.68 15.74 5.39 18.16 4.12 19.88 5.84 18.61 8.26 19.32 9.97Z'/><circle cx='12' cy='12' r='3.5'/>")
 	sidebarCPU           = sidebarSVG("<rect x='6' y='6' width='12' height='12' rx='2'/><rect x='9' y='9' width='6' height='6' rx='1'/><path d='M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4'/>")
 	sidebarMemory        = sidebarSVG("<rect x='3' y='6' width='18' height='12' rx='2'/><path d='M7 10v4M12 10v4M17 10v4M7 18v3M12 18v3M17 18v3'/>")
 	sidebarGPU           = sidebarSVG("<path d='M12 2 21 7v10l-9 5-9-5V7l9-5ZM3 7l9 5 9-5M12 12v10M8 4.2l9 5'/>")
