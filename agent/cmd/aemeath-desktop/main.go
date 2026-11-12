@@ -16,7 +16,6 @@ import (
 	"aemeath/agent/internal/desktop"
 	"aemeath/agent/internal/holdkey"
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 )
 
 func main() {
@@ -84,7 +83,7 @@ func main() {
 		mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 		native := newNativeUI(service)
 		cancelVoiceAssets = native.cancelWakeAssets
-		win = mygo.NewWindow(mygo.WindowOptions{Title: "Aemeath", Content: ui.View(native.view), Width: 1100, Height: 800, MinWidth: 760, MinHeight: 600, Hidden: mygo.App.WasOpenedAtLogin(), StateKey: "main-native"})
+		win = mygo.NewWindow(nativeWindowOptions(native.view, mygo.App.WasOpenedAtLogin()))
 		native.update = win.Update
 		stopVoiceHotkey = native.installGlobalVoiceHold(holdkey.Start, holdkey.StartAlternate)
 		if native.voiceGlobalError != "" {
