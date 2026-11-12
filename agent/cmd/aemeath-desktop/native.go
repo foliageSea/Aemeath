@@ -190,26 +190,34 @@ func (a *nativeUI) view(c *ui.Context) {
 		a.snapshot = a.service.Snapshot()
 		a.endVoiceHold(true)
 	}
-	root := ui.Row(c.Key("app-root")).Fill().AlignItems(ui.Stretch).Background(t.Background)
-	root.Children(func() {
-		a.sidebar(c)
-		ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Padding(20).Gap(14).Children(func() {
-			a.header(c)
-			if a.page == "订阅" {
-				a.quotaListView(c)
-				return
-			}
-			if a.page == "设置" {
-				a.settingsView(c)
-				return
-			}
-			if a.page == "语音助手" {
-				a.voiceView(c)
-				return
-			}
-			ui.Scroll(c.Key(a.page)).Grow(1).Children(func() {
-				ui.Column(c).FillWidth().Gap(16).Children(func() {
-					a.overview(c)
+	// Clear the implicit UI root as well as our layout so the native blur
+	// remains visible only through the title bar and sidebar.
+	c.Root().Background(t.Background)
+	if c.Vibrancy() {
+		c.Root().Background(ui.Transparent)
+	}
+	ui.Column(c.Key("app-root")).Fill().Children(func() {
+		a.titleBar(c)
+		ui.Row(c.Key("app-body")).FillWidth().Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+			a.sidebar(c)
+			ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Background(t.Background).Padding(20).Gap(14).Children(func() {
+				a.header(c)
+				if a.page == "订阅" {
+					a.quotaListView(c)
+					return
+				}
+				if a.page == "设置" {
+					a.settingsView(c)
+					return
+				}
+				if a.page == "语音助手" {
+					a.voiceView(c)
+					return
+				}
+				ui.Scroll(c.Key(a.page)).Grow(1).Children(func() {
+					ui.Column(c).FillWidth().Gap(16).Children(func() {
+						a.overview(c)
+					})
 				})
 			})
 		})

@@ -71,6 +71,9 @@ func TestNativeTimeCardKeepsCompactControlsVisible(t *testing.T) {
 	f.state.Voice = voice.State{Turn: 1, Phase: "thinking", Transcript: "查询现在时间", ToolCalls: []brain.ToolCall{{ID: 1, Name: "get_current_time", Status: "succeeded", Result: string(data), Millis: 4000}}}
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
+	// The custom title bar takes part of this compact window. Scroll back
+	// from the latest thinking bubble to the earlier tool details.
+	tt.Scroll(600, 260, 0, -140)
 	nativeClick(t, tt, "第 1 轮工具详情 查询当前时间 #1")
 	for _, label := range []string{"语音操作栏", "手动唤醒", "取消对话"} {
 		r, ok := tt.Find(label)

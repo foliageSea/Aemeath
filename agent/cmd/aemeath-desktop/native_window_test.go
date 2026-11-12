@@ -4,8 +4,26 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
+
+func TestNativeWindowUsesCustomTitleBarAndNativeControls(t *testing.T) {
+	opts := nativeWindowOptions(func(*ui.Context) {}, false)
+	if opts.TitleBarStyle != mygo.TitleBarHiddenInset || opts.Frameless || opts.HideWindowButtons {
+		t.Fatal("custom title bar must retain native window controls and shadow")
+	}
+	if opts.TitleBarHeight != nativeTitleBarHeight || opts.TrafficLightPosition == nil {
+		t.Fatal("system buttons must be positioned inside the custom title bar")
+	}
+	p := opts.TrafficLightPosition
+	if p.X < 0 || p.Y < 0 || p.Y+14 > nativeTitleBarHeight {
+		t.Fatalf("traffic lights fall outside title bar: %+v", p)
+	}
+	if !opts.Transparent || opts.Vibrancy != mygo.VibrancySidebar {
+		t.Fatal("title bar and sidebar must reveal the native blurred material")
+	}
+}
 
 func TestNativeWindowDisablesUserResizeMaximizeAndFullscreen(t *testing.T) {
 	for _, hidden := range []bool{false, true} {

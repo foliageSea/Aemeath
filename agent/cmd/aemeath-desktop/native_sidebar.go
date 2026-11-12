@@ -82,7 +82,7 @@ func (a *nativeUI) sidebarValues() [5]string {
 
 func (a *nativeUI) sidebar(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c.Key("sidebar")).Width(206).Shrink(0).Padding(12, 10).Gap(3).Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(0.5)).Children(func() {
+	ui.Column(c.Key("sidebar")).Width(206).Shrink(0).Padding(12, 10).Gap(3).Background(nativeChromeBackground(c)).BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(0.5)).Children(func() {
 		ui.Scroll(c.Key("sidebar-navigation")).Grow(1).MinHeight(0).Children(func() {
 			ui.Column(c).FillWidth().Gap(3).Children(func() {
 				a.sidebarItem(c, "nav-overview", "概览", sidebarOverview, "")
