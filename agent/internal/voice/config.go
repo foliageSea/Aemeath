@@ -20,6 +20,7 @@ type Config struct {
 	LLMBaseURL        string  `json:"llmBaseURL"`
 	LLMAPIKey         string  `json:"llmAPIKey"`
 	LLMModel          string  `json:"llmModel"`
+	ReasoningEffort   string  `json:"reasoningEffort,omitempty"`
 	LLMTools          bool    `json:"llmTools"`
 	ContextWindowMode string  `json:"contextWindowMode"`
 	ContextWindow     int     `json:"contextWindow"`
@@ -104,6 +105,11 @@ type ModelCatalogHost interface {
 // NormalizeConfig applies local defaults. Credentials and installed assets are
 // checked only when an operation needs them, keeping audio diagnostics usable.
 func NormalizeConfig(c Config) (Config, error) {
+	var reasoningErr error
+	c.ReasoningEffort, reasoningErr = brain.NormalizeReasoningEffort(c.ReasoningEffort)
+	if reasoningErr != nil {
+		return c, reasoningErr
+	}
 	c.ContextWindowMode = strings.ToLower(strings.TrimSpace(c.ContextWindowMode))
 	if c.ContextWindowMode == "" {
 		c.ContextWindowMode = "auto"

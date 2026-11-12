@@ -23,6 +23,7 @@ import (
 
 type Config struct {
 	BaseURL, APIKey, Model, Persona string
+	ReasoningEffort                 string
 	Tools                           bool
 	TavilyAPIKey                    string
 	HomeAssistant                   hamcp.Config
@@ -96,6 +97,11 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	effort, err := NormalizeReasoningEffort(cfg.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ReasoningEffort = effort
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	if cfg.Model == "" || len(cfg.Model) > 256 {
 		return nil, errors.New("brain: configure an OpenAI-compatible model")
@@ -141,7 +147,7 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 		e.memory.mu.Unlock()
 	}
 	maxTokens := 1024
-	cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{BaseURL: cfg.BaseURL, APIKey: strings.TrimSpace(cfg.APIKey), Model: cfg.Model, MaxTokens: &maxTokens, HTTPClient: &http.Client{Timeout: 45 * time.Second, Transport: boundedTransport{engine: e}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}})
+	cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{BaseURL: cfg.BaseURL, APIKey: strings.TrimSpace(cfg.APIKey), Model: cfg.Model, ReasoningEffort: openai.ReasoningEffortLevel(cfg.ReasoningEffort), MaxTokens: &maxTokens, HTTPClient: &http.Client{Timeout: 45 * time.Second, Transport: boundedTransport{engine: e}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}})
 	if err != nil {
 		lifeCancel()
 		return nil, errors.New("brain: cannot initialize OpenAI model")

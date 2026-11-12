@@ -196,6 +196,7 @@ CC=x86_64-w64-mingw32-gcc bash agent/scripts/build-windows-voice.sh windows/amd6
 - **文本输入**：在语音助手页底部输入消息，按 **Enter** 或点击“发送”开始对话，**Shift + Enter** 换行。文字直接交给 Agent，沿用现有上下文、工具调用和设备语音回复；需启用助手并连接设备语音通道，无需唤醒词或麦克风录音。发送失败会保留草稿。
 - **对话与历史**：桌面端显示识别文字、回复、阶段耗时及可展开的工具执行记录；最近完整文字对话会持久化并在重启后恢复，可清空上下文。语音合成失败后可仅重试回复语音，避免重复运行工具。
 - **语音合成**：MiMo 使用 `mimo-v2.5-tts-voiceclone` 分句合成；Fish 支持双向流式音频，可配置 `reference_id` 或参考 WAV 与对应转写文字。语音问题识别均使用 MiMo ASR；Fish 流式播放需要支持 `stream_playback` 的固件。
+- **思考强度**：在“设置 → 助手 → 对话服务”选择“默认 / 低 / 中 / 高”，保存后重连生效。低强度优先响应速度，高强度适合复杂分析，实际效果取决于模型与服务支持。该设置同时用于工具决策和最终回复；JSON `voice.reasoningEffort` 使用 `low`、`medium`、`high`，留空或省略时不发送 `reasoning_effort`，沿用服务端默认。
 - **Agent 工具**：支持查询性能与订阅额度、切页、屏幕电源/亮度、锁定电脑、Tavily 网页搜索和当前时间。需启用“Agent 工具”并使用支持 tool calling 的模型；网页搜索另需 Tavily API Key。
 - **智能家居**：可接入 Home Assistant 官方 MCP Server，通过语音调用 HA 暴露的工具。在“智能家居”配置 MCP 地址、长期访问令牌并测试连接，再保存设置；同时需要开启 Agent 工具。
 

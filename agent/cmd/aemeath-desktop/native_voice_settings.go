@@ -150,6 +150,18 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 	})
 	ui.Text(c, "支持时间查询、网页搜索、查询系统与额度，以及控制设备和电脑锁屏。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 	a.voiceField(c, "voice-tavily-key", "Tavily API 密钥", "tvly-…", &cfg.TavilyAPIKey, true)
+	ui.Text(c, "思考强度").FontSize(12).TextColor(c.Theme().TextMuted)
+	efforts := []string{"", "low", "medium", "high"}
+	effort := 0
+	for i, value := range efforts {
+		if cfg.ReasoningEffort == value {
+			effort = i
+		}
+	}
+	if ui.Segmented(c.Key("voice-reasoning-effort"), &effort, "默认", "低", "中", "高").Label("思考强度").Changed() {
+		cfg.ReasoningEffort = efforts[effort]
+		a.edited()
+	}
 }
 
 func (a *nativeUI) voiceRecognitionSettingsView(c *ui.Context) {

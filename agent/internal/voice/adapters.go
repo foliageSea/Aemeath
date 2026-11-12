@@ -61,7 +61,7 @@ func productionDependencies() dependencies {
 					catalog = brain.DefaultModelCatalog()
 				}
 			}
-			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, ContextWindow: c.ContextWindow, AutoContextWindow: c.ContextWindowMode != "manual", ModelsDev: catalog, ModelsDevProvider: c.ModelsDevProvider, ModelsDevModel: c.ModelsDevModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey, HomeAssistant: hamcp.Config{Enabled: c.HAMCPEnabled, Endpoint: c.HAMCPURL, Token: c.HAAccessToken}, Memory: memory}, h)
+			return brain.New(ctx, brain.Config{BaseURL: c.LLMBaseURL, APIKey: c.LLMAPIKey, Model: c.LLMModel, ReasoningEffort: c.ReasoningEffort, ContextWindow: c.ContextWindow, AutoContextWindow: c.ContextWindowMode != "manual", ModelsDev: catalog, ModelsDevProvider: c.ModelsDevProvider, ModelsDevModel: c.ModelsDevModel, Persona: c.Persona, Tools: c.LLMTools, TavilyAPIKey: c.TavilyAPIKey, HomeAssistant: hamcp.Config{Enabled: c.HAMCPEnabled, Endpoint: c.HAMCPURL, Token: c.HAAccessToken}, Memory: memory}, h)
 		},
 		reference: managedReference,
 	}
