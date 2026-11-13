@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata"
+
+	"aemeath/agent/internal/netproxy"
 )
 
 const (
@@ -51,7 +53,7 @@ type Client struct {
 // New constructs a client using a fixed HTTPS provider and the machine's local timezone.
 func New() *Client {
 	return &Client{
-		httpClient: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		httpClient: &http.Client{Transport: netproxy.Transport(nil), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		now:        time.Now, endpoint: endpoint, local: time.Local, timeout: requestTimeout,
 	}
 }

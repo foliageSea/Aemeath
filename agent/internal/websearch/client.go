@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"aemeath/agent/internal/netproxy"
 	"golang.org/x/net/html"
 )
 
@@ -62,7 +63,7 @@ func New(apiKey string) *Client {
 	if len(apiKey) > 4096 || strings.ContainsAny(apiKey, "\r\n") {
 		apiKey = ""
 	}
-	return &Client{apiKey: strings.TrimSpace(apiKey), endpoint: defaultEndpoint, httpClient: &http.Client{Timeout: requestTimeout}}
+	return &Client{apiKey: strings.TrimSpace(apiKey), endpoint: defaultEndpoint, httpClient: &http.Client{Transport: netproxy.Transport(nil), Timeout: requestTimeout}}
 }
 
 func normalizeQuery(query string) (string, error) {

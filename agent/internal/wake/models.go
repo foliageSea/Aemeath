@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"aemeath/agent/internal/netproxy"
 )
 
 // InstallProgress describes synchronous installation progress. Stage is checking,
@@ -63,7 +65,7 @@ func verifyWakeModels(ctx context.Context, dir string, models []asset, vad asset
 // a partial model directory. A nil progress callback is allowed.
 func InstallWakeModels(ctx context.Context, modelDir string, progress func(InstallProgress)) error {
 	return installWakeModels(ctx, modelDir, progress, modelInstallSource{
-		client: &http.Client{Timeout: 3 * time.Minute}, modelURL: modelURL, vadURL: vadURL,
+		client: &http.Client{Transport: netproxy.Transport(nil), Timeout: 3 * time.Minute}, modelURL: modelURL, vadURL: vadURL,
 		archive: asset{"archive", archiveSHA, 32654866}, models: modelAssets, vad: vadAsset,
 		decode: func(r io.Reader) io.Reader { return bzip2.NewReader(r) },
 	})

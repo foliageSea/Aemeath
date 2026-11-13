@@ -300,7 +300,6 @@ func (a *nativeUI) connectionSettingsView(c *ui.Context) {
 			}
 			return field
 		})
-		ui.Text(c, "独立模式使用本机麦克风和扬声器，无需 ESP32 设备。保存后生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		nativeSettingsField(c, "address-field", "设备地址", func() ui.Element {
 			field := ui.TextInput(c.Key("address"), &a.draft.Address).Label("设备地址").Placeholder("aemeath.local 或 192.168.1.20:80").Disabled(a.draft.RunMode == desktop.RunModeStandalone).FillWidth().MinWidth(0).Height(36)
 			if field.Changed() {
@@ -310,6 +309,7 @@ func (a *nativeUI) connectionSettingsView(c *ui.Context) {
 		})
 		a.voiceField(c, "magpie-url", "Magpie 网关", "http://127.0.0.1:3425", &a.draft.MagpieURL, false)
 	})
+	a.networkSettingsView(c)
 }
 
 func (a *nativeUI) generalSettingsView(c *ui.Context) {

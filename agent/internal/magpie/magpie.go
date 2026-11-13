@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"aemeath/agent/internal/netproxy"
 	"aemeath/agent/internal/proto"
 )
 
@@ -27,7 +28,7 @@ type Client struct {
 }
 
 func New(base string) *Client {
-	return &Client{Base: strings.TrimRight(base, "/"), HTTP: &http.Client{Timeout: 5 * time.Second}}
+	return &Client{Base: strings.TrimRight(base, "/"), HTTP: &http.Client{Transport: netproxy.Transport(nil), Timeout: 5 * time.Second}}
 }
 
 type quotasResp struct {

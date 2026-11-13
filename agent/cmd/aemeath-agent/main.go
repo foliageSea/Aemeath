@@ -18,11 +18,13 @@ import (
 	"aemeath/agent/internal/discover"
 	"aemeath/agent/internal/link"
 	"aemeath/agent/internal/magpie"
+	"aemeath/agent/internal/netproxy"
 )
 
 const quotaInterval = 30 * time.Second
 
 type cliOptions struct {
+	network      netproxy.Config
 	addr         string
 	magpieURL    string
 	voiceConfig  string
@@ -37,6 +39,8 @@ func parseArgs(args []string, output io.Writer) (cliOptions, error) {
 	var opts cliOptions
 	flags := flag.NewFlagSet("aemeath-agent", flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.StringVar(&opts.network.Mode, "proxy-mode", netproxy.ModeSystem, "network proxy mode: system, proxy, or direct; direct ignores environment and system proxies")
+	flags.StringVar(&opts.network.ProxyURL, "proxy-url", "", "manual proxy URL for proxy mode (http, https, socks5; failure never falls back to direct)")
 	flags.StringVar(&opts.addr, "addr", "", "device host:port (skips mDNS discovery)")
 	flags.DurationVar(&opts.interval, "interval", time.Second, "sample interval")
 	flags.BoolVar(&opts.verbose, "v", false, "log every frame")
@@ -67,6 +71,11 @@ func parseArgs(args []string, output io.Writer) (cliOptions, error) {
 		return opts, errors.New("--standalone cannot be combined with --dry-run")
 	}
 	opts.voiceEnabled = opts.voiceEnabled || opts.standalone
+	network, err := netproxy.Normalize(opts.network)
+	if err != nil {
+		return opts, fmt.Errorf("proxy configuration: %w", err)
+	}
+	opts.network = network
 	return opts, nil
 }
 
@@ -78,6 +87,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	router, err := netproxy.New(opts.network)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer router.Close()
+
 	vcfg, err := loadVoiceConfig(opts.voiceConfig, opts.voiceEnabled)
 	if err != nil {
 		log.Fatal(err)
@@ -85,6 +100,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	ctx = netproxy.WithRouter(ctx, router)
 
 	c := collect.New()
 	defer c.Close()

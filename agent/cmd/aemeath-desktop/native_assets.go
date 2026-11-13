@@ -32,6 +32,11 @@ type nativeWakeAssets struct {
 
 type nativeWakeReloader interface{ ReloadWakeModels(string) error }
 
+// Resource installation uses the saved service policy, never the settings draft.
+type nativeNetworkService interface {
+	NetworkContext(context.Context) context.Context
+}
+
 func (a *nativeUI) wakeModelPath() string {
 	path := strings.TrimSpace(a.draft.Voice.WakeModelDir)
 	if path == "" {
@@ -58,7 +63,11 @@ func (a *nativeUI) startWakeAssets(install bool) {
 	if installer == nil {
 		installer = wake.InstallWakeModels
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	parent := context.Background()
+	if service, ok := a.service.(nativeNetworkService); ok {
+		parent = service.NetworkContext(parent)
+	}
+	ctx, cancel := context.WithCancel(parent)
 	generation := a.wakeAssets.generation + 1
 	a.wakeAssets = nativeWakeAssets{initialCheck: true, path: target, installing: install, cancel: cancel, generation: generation, progress: wake.InstallProgress{Stage: "checking"}}
 	a.busy["wake-assets"] = true

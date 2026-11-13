@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"aemeath/agent/internal/magpie"
+	"aemeath/agent/internal/netproxy"
 	"aemeath/agent/internal/voice"
 )
 
@@ -27,11 +28,12 @@ const (
 )
 
 type Settings struct {
-	RunMode       string         `json:"runMode"`
-	Address       string         `json:"address"`
-	MagpieURL     string         `json:"magpieURL"`
-	Subscriptions []Subscription `json:"subscriptions"`
-	Voice         voice.Config   `json:"voice"`
+	RunMode       string          `json:"runMode"`
+	Address       string          `json:"address"`
+	MagpieURL     string          `json:"magpieURL"`
+	Subscriptions []Subscription  `json:"subscriptions"`
+	Voice         voice.Config    `json:"voice"`
+	Network       netproxy.Config `json:"network"`
 }
 
 func normalizeSettings(in Settings) (Settings, error) {
@@ -44,6 +46,10 @@ func normalizeSettings(in Settings) (Settings, error) {
 		return Settings{}, fmt.Errorf("invalid run mode %q: expected device or standalone", in.RunMode)
 	}
 	var err error
+	in.Network, err = netproxy.Normalize(in.Network)
+	if err != nil {
+		return Settings{}, fmt.Errorf("network settings: %w", err)
+	}
 	in.Voice, err = voice.NormalizeConfig(in.Voice)
 	if err != nil {
 		return Settings{}, fmt.Errorf("voice settings: %w", err)

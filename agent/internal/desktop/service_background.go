@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"aemeath/agent/internal/background"
+	"aemeath/agent/internal/netproxy"
 )
 
 var (
@@ -140,9 +141,12 @@ func (b *backgroundClient) beginBackground(request context.Context) (*background
 		s.mu.Unlock()
 		return nil, err
 	}
-	client := http.Client{}
+	client := http.Client{Transport: netproxy.DirectTransport()}
 	if s.deps.backgroundHTTP != nil {
 		client = *s.deps.backgroundHTTP
+		if client.Transport == nil {
+			client.Transport = netproxy.DirectTransport()
+		}
 	}
 	if client.Timeout <= 0 || client.Timeout > 30*time.Second {
 		client.Timeout = 30 * time.Second

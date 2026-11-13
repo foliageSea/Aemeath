@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"aemeath/agent/internal/netproxy"
 )
 
 const (
@@ -40,16 +42,22 @@ type Client struct {
 	asrTimeout, ttsTimeout, bodyTimeout time.Duration
 }
 
-func New(baseURL, key string) *Client {
+// Reuse one immutable template so routers can share bounded connection pools
+// across voice sessions. Tests may clone it to inject shorter phase deadlines.
+var transportTemplate = func() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second}).DialContext
 	transport.TLSHandshakeTimeout = connectTimeout
 	transport.ResponseHeaderTimeout = TTSRequestTimeout
+	return transport
+}()
+
+func New(baseURL, key string) *Client {
 	c := &Client{
 		key: strings.TrimSpace(key),
 		// A shared 60s http.Client.Timeout also cuts off a partly downloaded TTS WAV.
 		// Operation contexts below supply bounded, phase-specific overall deadlines.
-		http:       &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		http:       &http.Client{Transport: netproxy.Transport(transportTemplate), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		asrTimeout: ASRRequestTimeout, ttsTimeout: TTSRequestTimeout, bodyTimeout: responseBodyTimeout,
 	}
 	if strings.TrimSpace(baseURL) == "" {

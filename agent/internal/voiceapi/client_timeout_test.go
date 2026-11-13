@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"aemeath/agent/internal/netproxy"
 )
 
 type testRoundTripper func(*http.Request) (*http.Response, error)
@@ -27,8 +29,7 @@ func TestMiMoOperationDeadlinesAndTransportBounds(t *testing.T) {
 	if c.http.Timeout != 0 {
 		t.Fatalf("whole-client timeout can truncate batch TTS: %s", c.http.Timeout)
 	}
-	transport := c.http.Transport.(*http.Transport)
-	if transport.DialContext == nil || transport.TLSHandshakeTimeout != 10*time.Second || transport.ResponseHeaderTimeout != TTSRequestTimeout {
+	if c.http.Transport == nil || transportTemplate.DialContext == nil || transportTemplate.TLSHandshakeTimeout != 10*time.Second || transportTemplate.ResponseHeaderTimeout != TTSRequestTimeout {
 		t.Fatal("missing bounded connection/header transport")
 	}
 	if ASRRequestTimeout != 60*time.Second || TTSRequestTimeout != 180*time.Second || c.bodyTimeout != TTSRequestTimeout {
@@ -275,7 +276,9 @@ func TestHeaderTimeoutNeverReplays(t *testing.T) {
 	defer s.Close()
 	c := New(s.URL, "synthetic-key")
 	c.asrTimeout = time.Second
-	c.http.Transport.(*http.Transport).ResponseHeaderTimeout = 30 * time.Millisecond
+	transport := transportTemplate.Clone()
+	transport.ResponseHeaderTimeout = 30 * time.Millisecond
+	c.http.Transport = netproxy.Transport(transport)
 	start := time.Now()
 	_, err := c.Recognize(context.Background(), []int16{1})
 	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "before response headers") || calls.Load() != 1 || time.Since(start) > time.Second {

@@ -4,8 +4,10 @@ package link
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"time"
 
+	"aemeath/agent/internal/netproxy"
 	"github.com/coder/websocket"
 )
 
@@ -17,7 +19,7 @@ type Conn struct {
 func Dial(ctx context.Context, addr string) (*Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	ws, _, err := websocket.Dial(ctx, "ws://"+addr+"/ws", nil)
+	ws, _, err := websocket.Dial(ctx, "ws://"+addr+"/ws", &websocket.DialOptions{HTTPClient: &http.Client{Transport: netproxy.DirectTransport()}})
 	if err != nil {
 		return nil, err
 	}

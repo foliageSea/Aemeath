@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"aemeath/agent/internal/netproxy"
 )
 
 const ModelVersion = "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01"
@@ -119,7 +121,7 @@ func InstallAssets(ctx context.Context, dir string, referenceOnly bool) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	client := &http.Client{Timeout: 3 * time.Minute}
+	client := &http.Client{Transport: netproxy.Transport(nil), Timeout: 3 * time.Minute}
 	if !referenceOnly {
 		if err := InstallWakeModels(ctx, filepath.Join(dir, "models"), nil); err != nil {
 			return err

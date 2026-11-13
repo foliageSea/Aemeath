@@ -20,6 +20,7 @@ import (
 	"aemeath/agent/internal/hamcp"
 	"aemeath/agent/internal/link"
 	"aemeath/agent/internal/magpie"
+	"aemeath/agent/internal/netproxy"
 	"aemeath/agent/internal/proto"
 	"aemeath/agent/internal/voice"
 )
@@ -61,6 +62,8 @@ type Service struct {
 	path            string
 	deps            dependencies
 	ctx             context.Context
+	network         *netproxy.Router
+	networkRevision uint64 // rejects quota results started before a routing change
 	cancel          context.CancelFunc
 	closed          bool
 	wg              sync.WaitGroup
@@ -124,8 +127,13 @@ func New(configPath string) (*Service, error) {
 }
 
 func newService(path string, settings Settings, deps dependencies) *Service {
-	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), runWake: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
+	// Public construction loads normalized settings before any network worker starts.
+	network, err := netproxy.New(settings.Network)
+	if err != nil {
+		panic("desktop: invalid normalized network settings")
+	}
+	ctx, cancel := context.WithCancel(netproxy.WithRouter(context.Background(), network))
+	s := &Service{path: path, deps: deps, ctx: ctx, network: network, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), runWake: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
 	memoryPath := ""
 	catalogPath := ""
 	if path != "" {
@@ -236,6 +244,15 @@ func (s *Service) SaveSettings(settings Settings) error {
 	}
 	s.mu.Lock()
 	old := s.state.Settings
+	networkChanged := old.Network != normalized.Network
+	if networkChanged {
+		// Normalize already succeeded; lifeMu prevents Close during publication.
+		if err := s.network.Update(normalized.Network); err != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("apply network settings: %w", err)
+		}
+		s.networkRevision++
+	}
 	s.state.Settings = normalized
 	haChanged := homeAssistantConfig(old.Voice) != homeAssistantConfig(normalized.Voice)
 	if haChanged {
@@ -246,7 +263,7 @@ func (s *Service) SaveSettings(settings Settings) error {
 			s.haCancel()
 		}
 	}
-	if old.RunMode != normalized.RunMode || old.Address != normalized.Address || old.Voice != normalized.Voice {
+	if networkChanged || old.RunMode != normalized.RunMode || old.Address != normalized.Address || old.Voice != normalized.Voice {
 		if s.attemptCancel != nil {
 			s.attemptCancel()
 			state := s.state.Voice.Clone()
@@ -258,16 +275,20 @@ func (s *Service) SaveSettings(settings Settings) error {
 		}
 		signal(s.runWake)
 	}
-	if old.MagpieURL != normalized.MagpieURL {
+	if networkChanged || old.MagpieURL != normalized.MagpieURL {
 		s.state.Quota, s.state.QuotaError = nil, ""
 	}
 	s.mu.Unlock()
 	if haChanged {
 		signal(s.haWake)
 	}
-	s.refreshModelCatalog(normalized.Voice)
+	if networkChanged && normalized.Voice.ModelsDevEnabled && normalized.Voice.ContextWindowMode != "manual" {
+		s.catalog.RefreshAfterNetworkChange(s.ctx)
+	} else {
+		s.refreshModelCatalog(normalized.Voice)
+	}
 	signal(s.updates)
-	if old.MagpieURL != normalized.MagpieURL {
+	if networkChanged || old.MagpieURL != normalized.MagpieURL {
 		signal(s.quotaWake)
 	}
 	return nil
@@ -397,11 +418,11 @@ func (s *Service) RefreshQuotas() error {
 		return ErrClosed
 	}
 	s.mu.RLock()
-	base := s.state.Settings.MagpieURL
+	base, revision := s.state.Settings.MagpieURL, s.networkRevision
 	s.mu.RUnlock()
 	frame, err := s.deps.quota(s.ctx, base)
 	s.mu.Lock()
-	if s.ctx.Err() == nil && s.state.Settings.MagpieURL == base {
+	if s.ctx.Err() == nil && s.state.Settings.MagpieURL == base && s.networkRevision == revision {
 		if err != nil {
 			s.state.QuotaError = err.Error()
 		} else {
@@ -429,6 +450,7 @@ func (s *Service) Close() {
 	s.mu.Unlock()
 	s.stop()
 	s.wg.Wait()
+	s.network.Close()
 	s.deps.close()
 	s.mu.Lock()
 	s.state.Status = "closed"

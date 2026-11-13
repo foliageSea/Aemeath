@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"aemeath/agent/internal/hamcp"
+	"aemeath/agent/internal/netproxy"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -122,7 +123,7 @@ func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSear
 	if _, err := NormalizeContextWindow(cfg.ContextWindow); err != nil {
 		return nil, err
 	}
-	lifeCtx, lifeCancel := context.WithCancel(context.Background())
+	lifeCtx, lifeCancel := context.WithCancel(context.WithoutCancel(ctx))
 	config := contextConfigFor(cfg)
 	e := &Engine{persona: persona, timeNow: time.Now, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory, stats: contextCapacityStats(config), contextConfig: config, compressionTimeout: 20 * time.Second}
 	if e.memory != nil {
@@ -406,7 +407,7 @@ func (t boundedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 	}
-	res, err := http.DefaultTransport.RoundTrip(req)
+	res, err := netproxy.Transport(nil).RoundTrip(req)
 	if err != nil {
 		failure := safeRequestFailure(err, "")
 		var classified *requestFailure

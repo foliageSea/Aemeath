@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"aemeath/agent/internal/netproxy"
 )
 
 const modelsCatalogURL = "https://models.dev/api.json"
@@ -47,13 +49,14 @@ type catalogMatch struct {
 // ModelCatalog contains public metadata only. Matching happens locally, and
 // downloads never include a configured service URL, model ID or credentials.
 type ModelCatalog struct {
-	mu         sync.RWMutex
-	path       string
-	endpoint   string
-	providers  map[string]catalogProvider
-	updated    time.Time
-	attempted  time.Time
-	refreshing chan struct{}
+	mu            sync.RWMutex
+	path          string
+	endpoint      string
+	providers     map[string]catalogProvider
+	updated       time.Time
+	attempted     time.Time
+	refreshing    chan struct{}
+	refreshCancel context.CancelFunc
 }
 
 func NewModelCatalog(path string) *ModelCatalog {
@@ -91,6 +94,25 @@ var defaultModelCatalog = sync.OnceValue(func() *ModelCatalog {
 func (c *ModelCatalog) RefreshAsync(parent context.Context) <-chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.refreshAsyncLocked(parent)
+}
+
+// RefreshAfterNetworkChange retries stale metadata immediately on a new route,
+// without evicting a fresh valid cache. Superseded downloads cannot publish data
+// or clear the replacement job; their existing waiters still receive completion.
+func (c *ModelCatalog) RefreshAfterNetworkChange(parent context.Context) <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.refreshCancel != nil {
+		c.refreshCancel()
+		c.refreshCancel = nil
+	}
+	c.refreshing = nil
+	c.attempted = time.Time{}
+	return c.refreshAsyncLocked(parent)
+}
+
+func (c *ModelCatalog) refreshAsyncLocked(parent context.Context) <-chan struct{} {
 	if c.refreshing != nil {
 		return c.refreshing
 	}
@@ -101,20 +123,25 @@ func (c *ModelCatalog) RefreshAsync(parent context.Context) <-chan struct{} {
 	}
 	c.attempted = time.Now()
 	done := make(chan struct{})
-	c.refreshing = done
+	ctx, cancel := context.WithTimeout(parent, modelsCatalogTimeout)
+	c.refreshing, c.refreshCancel = done, cancel
 	go func() {
-		ctx, cancel := context.WithTimeout(parent, modelsCatalogTimeout)
 		defer cancel()
 		providers, err := c.fetch(ctx)
-		if err == nil && ctx.Err() == nil {
-			updated := time.Now()
-			c.mu.Lock()
+		updated := time.Now()
+		c.mu.Lock()
+		publish := err == nil && ctx.Err() == nil && c.refreshing == done
+		if publish {
 			c.providers, c.updated = providers, updated
-			c.mu.Unlock()
+		}
+		c.mu.Unlock()
+		if publish {
 			c.persist(providers, updated)
 		}
 		c.mu.Lock()
-		c.refreshing = nil
+		if c.refreshing == done {
+			c.refreshing, c.refreshCancel = nil, nil
+		}
 		close(done)
 		c.mu.Unlock()
 	}()
@@ -123,7 +150,7 @@ func (c *ModelCatalog) RefreshAsync(parent context.Context) <-chan struct{} {
 
 func (c *ModelCatalog) fetch(ctx context.Context) (map[string]catalogProvider, error) {
 	// Do not reuse the authenticated provider client or follow redirects.
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Transport: netproxy.Transport(nil), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint, nil)
 	if err != nil {
 		return nil, err

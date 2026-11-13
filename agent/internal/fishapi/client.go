@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"aemeath/agent/internal/netproxy"
 	"aemeath/agent/internal/voiceapi"
 	"github.com/coder/websocket"
 	"github.com/vmihailenco/msgpack/v5"
@@ -93,7 +94,7 @@ func New(cfg Config) (*Client, error) {
 			return nil, errors.New("Fish: provide a reference ID or a WAV sample with its exact transcript")
 		}
 	}
-	return &Client{cfg: cfg, endpoint: u.String(), http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{cfg: cfg, endpoint: u.String(), http: &http.Client{Transport: netproxy.Transport(nil), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 type reference struct {

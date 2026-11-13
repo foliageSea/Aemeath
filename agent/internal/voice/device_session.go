@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"time"
 
+	"aemeath/agent/internal/netproxy"
 	"github.com/coder/websocket"
 )
 
@@ -18,7 +20,7 @@ func (s *session) connectDevice(address string) (<-chan incoming, <-chan struct{
 		return nil, nil, err
 	}
 	dialCtx, dialCancel := context.WithTimeout(s.ctx, 5*time.Second)
-	ws, _, err := websocket.Dial(dialCtx, endpoint, nil)
+	ws, _, err := websocket.Dial(dialCtx, endpoint, &websocket.DialOptions{HTTPClient: &http.Client{Transport: netproxy.DirectTransport()}})
 	dialCancel()
 	if err != nil {
 		return nil, nil, errors.New("voice connection failed")
