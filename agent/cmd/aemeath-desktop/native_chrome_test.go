@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"runtime"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -45,6 +46,38 @@ func TestNativeTitleBarReservesSystemButtons(t *testing.T) {
 	}
 }
 
+// Exercise the Windows paint policy on every host: headless tests cannot draw
+// DWM's glyphs, but can ensure no underlying pixel shows through the button area.
+func TestNativeTitleBarBackgroundCoversWindowsSystemGlyphs(t *testing.T) {
+	for _, goos := range []string{"windows", "darwin", "linux"} {
+		for _, dark := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/dark=%v", goos, dark), func(t *testing.T) {
+				tt := ui.NewTester(func(c *ui.Context) {
+					c.Root().Background(ui.Transparent)
+					ui.Column(c).Fill().Background(nativeTitleBarBackground(c, goos))
+				}, 138, nativeTitleBarHeight)
+				tt.SetDark(dark)
+				for _, state := range []struct{ material, reduceTransparency bool }{
+					{false, false}, {true, false}, {true, true}, {true, false}, {false, false},
+				} {
+					tt.SetVibrancy(state.material)
+					tt.SetPreferences(ui.Preferences{ReduceTransparency: state.reduceTransparency})
+					img := tt.Image()
+					translucent := goos != "windows" && state.material && !state.reduceTransparency
+					for y := 0; y < img.Bounds().Dy(); y++ {
+						for x := 0; x < img.Bounds().Dx(); x++ {
+							alpha := img.RGBAAt(x, y).A
+							if translucent && (alpha == 0 || alpha == 255) || !translucent && alpha != 255 {
+								t.Fatalf("material=%v reduceTransparency=%v pixel=(%d,%d) alpha=%d", state.material, state.reduceTransparency, x, y, alpha)
+							}
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestNativeChromeMaterialOnlyShowsThroughChrome(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		t.Run(fmt.Sprintf("dark=%v", dark), func(t *testing.T) {
@@ -62,8 +95,9 @@ func TestNativeChromeMaterialOnlyShowsThroughChrome(t *testing.T) {
 				img := tt.Image()
 				for _, point := range [][2]int{{240, 20}, {4, 300}} {
 					alpha := img.RGBAAt(point[0], point[1]).A
-					if material && (alpha == 0 || alpha == 255) || !material && alpha != 255 {
-						t.Fatalf("material=%v chrome pixel=%v alpha=%d", material, point, alpha)
+					translucent := material && (point[1] >= nativeTitleBarHeight || runtime.GOOS != "windows")
+					if translucent && (alpha == 0 || alpha == 255) || !translucent && alpha != 255 {
+						t.Fatalf("translucent=%v chrome pixel=%v alpha=%d", translucent, point, alpha)
 					}
 				}
 				if alpha := img.RGBAAt(210, nativeTitleBarHeight+4).A; alpha != 255 {
