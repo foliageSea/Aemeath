@@ -3,7 +3,6 @@ package brain
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -32,138 +31,122 @@ func fixtureTimeInfo(t *testing.T, timezone, source string) timeaware.Info {
 	return info
 }
 
-func timeArgs(t *testing.T, zone string) string {
-	t.Helper()
-	data, err := json.Marshal(map[string]string{"timezone": zone})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
-func TestCurrentTimeToolNetworkFallbackAndTimezoneAlias(t *testing.T) {
+func TestParseCurrentTimeReportHistoricalResults(t *testing.T) {
 	for _, source := range []string{"network", "system_fallback"} {
 		t.Run(source, func(t *testing.T) {
-			var events []ToolCall
-			ctx := WithToolObserver(context.Background(), func(call ToolCall) { events = append(events, call) })
-			calls := 0
-			tool := currentTimeTool(func(ctx context.Context, zone string) (timeaware.Info, error) {
-				calls++
-				if zone != "Asia/Shanghai" {
-					t.Fatalf("alias not normalized: %s", zone)
-				}
-				return fixtureTimeInfo(t, zone, source), nil
-			})
-			output, err := tool.InvokableRun(ctx, timeArgs(t, "北京时间"))
-			report, ok := ParseCurrentTimeReport(output)
-			if err != nil || !ok || !report.OK || report.Info.Time != "09:30:00" || report.Info.Weekday != "星期二" || report.Info.Source != source || calls != 1 {
-				t.Fatalf("invalid time response %s %v", output, err)
+			want := CurrentTimeReport{OK: true, Info: fixtureTimeInfo(t, "Asia/Shanghai", source)}
+			data, err := json.Marshal(want)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if len(events) != 2 || events[0].Status != "running" || events[1].Status != "succeeded" {
-				t.Fatalf("time event lifecycle %+v", events)
+			report, ok := ParseCurrentTimeReport(string(data))
+			if !ok || report != want {
+				t.Fatalf("historical report lost time/source metadata: %+v valid=%t", report, ok)
 			}
-			display, ok := ParseCurrentTimeReport(events[1].Result)
-			if !ok || display.Info != report.Info {
-				t.Fatal("display lost source/time data")
+			if !strings.Contains(report.Summary(), "2026-11-10 09:30:00") || !strings.Contains(report.Summary(), "星期二") {
+				t.Fatalf("invalid historical summary: %q", report.Summary())
 			}
-			if source == "system_fallback" && (report.Info.Provider != "system" || report.Info.Notice == "") {
-				t.Fatal("fallback pretends to be network time")
+		})
+	}
+	report, ok := ParseCurrentTimeReport(`{"ok":false,"message":"当前时间查询失败，请稍后重试。"}`)
+	if !ok || report.OK || report.Summary() != report.Message {
+		t.Fatalf("historical failure report: %+v valid=%t", report, ok)
+	}
+}
+
+func TestParseCurrentTimeReportRejectsInvalidResults(t *testing.T) {
+	for _, raw := range []string{"[]", "{}", "not JSON", strings.Repeat("x", 4097), string([]byte{0xff})} {
+		if _, ok := ParseCurrentTimeReport(raw); ok {
+			t.Errorf("accepted invalid report %q", raw)
+		}
+	}
+	mutations := []struct {
+		name   string
+		change func(*CurrentTimeReport)
+	}{
+		{"inconsistent time", func(r *CurrentTimeReport) { r.Info.Time = "wrong" }},
+		{"wrong weekday", func(r *CurrentTimeReport) { r.Info.Weekday = "星期日" }},
+		{"wrong unix", func(r *CurrentTimeReport) { r.Info.Unix++ }},
+		{"invalid timezone", func(r *CurrentTimeReport) { r.Info.Timezone = "" }},
+		{"wrong network provider", func(r *CurrentTimeReport) { r.Info.Provider = "system" }},
+		{"fallback without notice", func(r *CurrentTimeReport) { r.Info = fixtureTimeInfo(t, "UTC", "system_fallback"); r.Info.Notice = "" }},
+		{"oversized message", func(r *CurrentTimeReport) { r.Message = strings.Repeat("x", 513) }},
+	}
+	for _, tc := range mutations {
+		t.Run(tc.name, func(t *testing.T) {
+			report := CurrentTimeReport{OK: true, Info: fixtureTimeInfo(t, "UTC", "network")}
+			tc.change(&report)
+			data, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := ParseCurrentTimeReport(string(data)); ok {
+				t.Fatalf("accepted invalid historical report %s", data)
 			}
 		})
 	}
 }
 
-func TestCurrentTimeToolInvalidTimezoneCancelAndInvalidReport(t *testing.T) {
-	calls := 0
-	tool := currentTimeTool(func(ctx context.Context, zone string) (timeaware.Info, error) {
-		calls++
-		return fixtureTimeInfo(t, "UTC", "network"), nil
-	})
-	for _, args := range []string{timeArgs(t, "Mars/Olympus"), timeArgs(t, strings.Repeat("x", 129)), "[]"} {
-		output, err := tool.InvokableRun(context.Background(), args)
-		report, ok := ParseCurrentTimeReport(output)
-		if err != nil || !ok || report.OK {
-			t.Fatalf("invalid timezone accepted %s %v", output, err)
+func assertNoCurrentTimeToolRequest(t *testing.T, req map[string]any) {
+	t.Helper()
+	for _, key := range []string{"tools", "messages"} {
+		data, err := json.Marshal(req[key])
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if calls != 0 {
-		t.Fatal("invalid timezone reached time service")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := tool.InvokableRun(ctx, "{}"); !errors.Is(err, context.Canceled) {
-		t.Fatal("cancellation hidden")
-	}
-	if calls != 0 {
-		t.Fatal("canceled request reached time service")
-	}
-	info := fixtureTimeInfo(t, "UTC", "network")
-	info.Time = "wrong"
-	output, err := currentTimeTool(func(context.Context, string) (timeaware.Info, error) { return info, nil }).InvokableRun(context.Background(), "{}")
-	report, ok := ParseCurrentTimeReport(output)
-	if err != nil || !ok || report.OK {
-		t.Fatal("inconsistent external time accepted")
+		if strings.Contains(string(data), "get_current_time") {
+			t.Errorf("removed time tool remains in outgoing %s: %s", key, data)
+		}
 	}
 }
 
-func TestCurrentTimeRealReActReplyAndStream(t *testing.T) {
+func TestCurrentTimeSnapshotReplyAndStreamWithoutTimeTool(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
-		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
-			var requests, queries atomic.Int32
+		t.Run(fmt.Sprintf("stream=%t", streaming), func(t *testing.T) {
+			now := time.Date(2026, 11, 10, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+			var requests, clockCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				req := readRequest(t, r)
-				msgs := req["messages"].([]any)
-				if !strings.Contains(msgs[0].(map[string]any)["content"].(string), "get_current_time") {
-					t.Error("missing temporal grounding instructions")
-				}
-				if requests.Add(1) == 1 {
-					callsJSON(w, []any{call("time", "get_current_time", timeArgs(t, "Asia/Shanghai"))})
-					return
-				}
-				found := false
-				for _, raw := range msgs {
-					message := raw.(map[string]any)
-					if message["role"] == "tool" {
-						report, ok := ParseCurrentTimeReport(message["content"].(string))
-						if ok && report.OK && report.Info.Time == "09:30:00" && report.Info.Source == "network" {
-							found = true
-						}
-					}
-				}
-				if !found {
-					t.Error("current external time did not reach model")
+				assertNoCurrentTimeToolRequest(t, req)
+				assertTimeSnapshotRequest(t, req, timeSnapshotPrompt(now))
+				n := requests.Add(1)
+				schemas, _ := req["tools"].([]any)
+				if n == 1 && len(schemas) == 0 {
+					t.Error("regression must inspect an enabled tool schema")
 				}
 				if req["stream"] == true {
 					sseChunk(w, map[string]any{"role": "assistant", "content": "北京时间上午九点半，星期二。"}, nil)
 					sseEnd(w)
+				} else if streaming {
+					replyJSON(w, "READY")
 				} else {
-					if streaming {
-						replyJSON(w, "READY")
-					} else {
-						replyJSON(w, "北京时间上午九点半，星期二。")
-					}
+					replyJSON(w, "北京时间上午九点半，星期二。")
 				}
 			}))
 			defer server.Close()
-			engine, err := newWithTime(context.Background(), Config{BaseURL: server.URL + "/v1", Model: "test", Tools: true}, &testHost{}, func(ctx context.Context, zone string) (timeaware.Info, error) {
-				queries.Add(1)
-				return fixtureTimeInfo(t, zone, "network"), nil
-			})
+			engine, err := New(context.Background(), Config{BaseURL: server.URL + "/v1", Model: "test", Persona: "测试助手", Tools: true}, &testHost{})
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer engine.Close()
+			engine.timeNow = func() time.Time { clockCalls.Add(1); return now }
 			var answer, deltas string
 			if streaming {
 				answer, err = engine.ReplyStream(context.Background(), "北京时间几点？", func(delta string) error { deltas += delta; return nil })
 			} else {
 				answer, err = engine.Reply(context.Background(), "北京时间几点？")
 			}
-			if err != nil || queries.Load() != 1 || answer != "北京时间上午九点半，星期二。" {
-				t.Fatalf("answer=%q err=%v queries=%d", answer, err, queries.Load())
+			wantRequests := int32(1)
+			if streaming {
+				wantRequests = 2
+			}
+			if err != nil || answer != "北京时间上午九点半，星期二。" || requests.Load() != wantRequests || clockCalls.Load() != 1 {
+				t.Fatalf("answer=%q err=%v requests=%d clock samples=%d", answer, err, requests.Load(), clockCalls.Load())
 			}
 			if streaming && deltas != answer {
 				t.Fatal("time metadata leaked into speech deltas")
 			}
+			assertTimeSnapshotTransient(t, engine, timeSnapshotPrompt(now), 1)
 		})
 	}
 }

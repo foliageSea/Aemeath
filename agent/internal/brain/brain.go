@@ -87,14 +87,6 @@ func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
 }
 
 func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSearchFunc) (*Engine, error) {
-	return newWithServices(ctx, cfg, host, search, defaultCurrentTime)
-}
-
-func newWithTime(ctx context.Context, cfg Config, host Host, currentTime currentTimeFunc) (*Engine, error) {
-	return newWithServices(ctx, cfg, host, defaultWebSearch, currentTime)
-}
-
-func newWithServices(ctx context.Context, cfg Config, host Host, search webSearchFunc, currentTime currentTimeFunc) (*Engine, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -163,7 +155,7 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 			return nil, errors.New("brain: device tools require a host")
 		}
 		e.persona += contextToolInstructions
-		e.baseTools = append(deviceTools(host), webSearchTool(search), currentTimeTool(currentTime))
+		e.baseTools = append(deviceTools(host), webSearchTool(search))
 		err = e.rebuildAgent(ctx, nil)
 		if err != nil {
 			lifeCancel()

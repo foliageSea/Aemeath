@@ -146,7 +146,7 @@ func TestHomeAssistantDynamicDiscoveryRecoveryAndHistoryRealEino(t *testing.T) {
 		req := readRequest(t, r)
 		n := int(requests.Add(1))
 		all := req["tools"].([]any)
-		expected := []int{8, 9, 7, 8}[n-1]
+		expected := []int{7, 8, 6, 7}[n-1]
 		if len(all) != expected {
 			t.Errorf("round %d tools=%d want=%d", n, len(all), expected)
 		}
@@ -355,13 +355,13 @@ func TestHomeAssistantRealMCPAndEino(t *testing.T) {
 		}
 		count := len(req["tools"].([]any))
 		if !online.Load() {
-			if count != 7 {
+			if count != 6 {
 				t.Errorf("offline tool count=%d", count)
 			}
 			replyJSON(w, "HA不可用")
 			return
 		}
-		if count != 8 {
+		if count != 7 {
 			t.Errorf("online tool count=%d", count)
 		}
 		messages := req["messages"].([]any)

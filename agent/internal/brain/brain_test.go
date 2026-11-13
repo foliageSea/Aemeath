@@ -95,8 +95,8 @@ func TestRealEinoToolCalls(t *testing.T) {
 		if req["model"] != "mock-model" {
 			t.Error("model not forwarded")
 		}
-		if len(req["tools"].([]any)) != 7 {
-			t.Error("expected seven real Eino tools")
+		if len(req["tools"].([]any)) != 6 {
+			t.Error("expected six real Eino tools")
 		}
 		if requests.Add(1) == 1 {
 			callsJSON(w, []any{call("m", "get_metrics", "{}"), call("q", "get_quota", "{}"), call("p", "set_page", `{"page":"metrics"}`), call("s", "set_screen", `{"on":true,"brightness":37}`)})

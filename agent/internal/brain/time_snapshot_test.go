@@ -2,7 +2,6 @@ package brain
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +9,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"aemeath/agent/internal/timeaware"
 )
 
 func TestTimeSnapshotPrompt(t *testing.T) {
@@ -84,6 +81,7 @@ func assertTimeSnapshotFields(t *testing.T, prompt string, fields ...string) {
 // snapshot appended to the original first system persona, never a history item.
 func assertTimeSnapshotRequest(t *testing.T, req map[string]any, snapshot string) string {
 	t.Helper()
+	assertNoCurrentTimeToolRequest(t, req)
 	messages, ok := req["messages"].([]any)
 	if !ok || len(messages) == 0 {
 		t.Error("request has no messages")
@@ -118,7 +116,7 @@ func TestTimeSnapshotFreshAcrossTurns(t *testing.T) {
 	for _, tools := range []bool{false, true} {
 		for _, streaming := range []bool{false, true} {
 			t.Run(fmt.Sprintf("tools=%t/stream=%t", tools, streaming), func(t *testing.T) {
-				var turn, requests, timeQueries atomic.Int32
+				var turn, requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					req := readRequest(t, r)
 					requests.Add(1)
@@ -131,7 +129,7 @@ func TestTimeSnapshotFreshAcrossTurns(t *testing.T) {
 						sseChunk(w, map[string]any{"role": "assistant", "content": "收到。"}, nil)
 						sseEnd(w)
 					} else if tools && streaming {
-						// Fake selection demonstrates READY bypasses the time service;
+						// Fake selection demonstrates READY proceeds to final speech;
 						// this does not test a real model's tool-selection judgment.
 						replyJSON(w, "READY")
 					} else {
@@ -139,18 +137,9 @@ func TestTimeSnapshotFreshAcrossTurns(t *testing.T) {
 					}
 				}))
 				defer server.Close()
-				var engine *Engine
-				if tools {
-					engine, err = newWithTime(context.Background(), Config{BaseURL: server.URL + "/v1", Model: "test", Persona: "测试助手", Tools: true}, &testHost{}, func(context.Context, string) (timeaware.Info, error) {
-						timeQueries.Add(1)
-						t.Error("ordinary time question invoked external time service")
-						return timeaware.Info{}, errors.New("time service must not be called")
-					})
-					if err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					engine = newEngine(t, server, false, &testHost{})
+				engine, err := New(context.Background(), Config{BaseURL: server.URL + "/v1", Model: "test", Persona: "测试助手", Tools: tools}, &testHost{})
+				if err != nil {
+					t.Fatal(err)
 				}
 				defer engine.Close()
 				if engine.timeNow == nil {
@@ -181,8 +170,8 @@ func TestTimeSnapshotFreshAcrossTurns(t *testing.T) {
 				if tools && streaming {
 					wantRequests = 4 // READY selection and final stream for each turn.
 				}
-				if requests.Load() != wantRequests || timeQueries.Load() != 0 {
-					t.Errorf("requests=%d want=%d external time calls=%d", requests.Load(), wantRequests, timeQueries.Load())
+				if requests.Load() != wantRequests {
+					t.Errorf("requests=%d want=%d", requests.Load(), wantRequests)
 				}
 			})
 		}
@@ -224,10 +213,7 @@ func TestTimeSnapshotStableThroughToolContinuation(t *testing.T) {
 			}))
 			defer server.Close()
 			memory := OpenMemory("")
-			engine, err := newWithTime(context.Background(), Config{BaseURL: server.URL + "/v1", Model: "test", Persona: "测试助手", Tools: true, Memory: memory}, &testHost{}, func(context.Context, string) (timeaware.Info, error) {
-				t.Error("metrics continuation invoked external time service")
-				return timeaware.Info{}, errors.New("time service must not be called")
-			})
+			engine, err := New(context.Background(), Config{BaseURL: server.URL + "/v1", Model: "test", Persona: "测试助手", Tools: true, Memory: memory}, &testHost{})
 			if err != nil {
 				t.Fatal(err)
 			}
