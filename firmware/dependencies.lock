@@ -197,7 +197,7 @@ dependencies:
     component_hash: e1e7e6991193c41ed6c9fc386702aa7821433319e7aa9c3147cd3236310cd69c
     dependencies: []
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32
@@ -266,9 +266,10 @@ direct_dependencies:
 - espressif/esp_lcd_st7701
 - espressif/esp_lcd_touch_gt911
 - espressif/esp_lvgl_port
+- espressif/esp_new_jpeg
 - espressif/mdns
 - idf
 - lvgl/lvgl
-manifest_hash: 0514f31d8aa9ab44412435abbc83d90883c7980a5a25853229fd3dd52059ee69
+manifest_hash: 09a77ff6db2fcdd1c023239eb90df3da1c9e2defb205f12ea1eae3735f8d2384
 target: esp32s3
 version: 3.0.0

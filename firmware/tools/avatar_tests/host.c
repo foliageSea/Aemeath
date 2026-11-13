@@ -44,7 +44,7 @@ void host_snapshot(const char *directory, const char *name, lv_obj_t *root)
         const uint8_t *row = image->data + y * image->header.stride;
         for (unsigned x = 22; x < 384; ++x) {
             const uint8_t *pixel = row + x * 3;
-            bool foreground = pixel[0] != 35 || pixel[1] != 25 || pixel[2] != 16;
+            bool foreground = pixel[0] != 20 || pixel[1] != 15 || pixel[2] != 11; // plain #0B0F14, BGR
             if (x < 100 && y < 40 && foreground) ++title_pixels;
             if (x >= 96 && y >= 44 && foreground) ++avatar_pixels;
         }

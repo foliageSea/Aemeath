@@ -2,9 +2,9 @@ file(GLOB_RECURSE SRCS "*.c")
 list(FILTER SRCS EXCLUDE REGEX "/tests/")
 idf_component_register(SRCS ${SRCS}
                        INCLUDE_DIRS "." "net" "ui" "audio" "voice"
-                       EMBED_FILES "assets/bg_480.rgb565" "assets/avatar_frames.bin"
+                       EMBED_FILES "assets/avatar_frames.bin"
                        REQUIRES esp_driver_gpio esp_driver_i2c esp_driver_i2s esp_driver_ledc esp_lcd esp_wifi esp_netif
-                                esp_event nvs_flash esp_http_server lwip esp_timer)
+                                esp_event nvs_flash esp_http_server lwip esp_timer esp_partition mbedtls)
 # Refuse stale sdkconfig: plain Chinese glyph bitmap offsets exceed 20 bits.
 if(NOT CONFIG_LV_FONT_FMT_TXT_LARGE)
     message(FATAL_ERROR "Voice font requires CONFIG_LV_FONT_FMT_TXT_LARGE=y; update sdkconfig")

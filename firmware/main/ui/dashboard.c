@@ -12,6 +12,8 @@
 #include "quota_page.h"
 #include "voice_page.h"
 #include "display.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
+#include "src/misc/cache/instance/lv_image_header_cache.h"
 
 #define C_BG        0x0B0F14
 #define C_CARD      0x151B23
@@ -30,9 +32,10 @@
 #define HIST_POINTS     60
 #define CARD_OPA        LV_OPA_70  // lets the background show through
 
-// tools/make_bg.sh output, embedded via EMBED_FILES
-extern const uint8_t bg_480_start[] asm("_binary_bg_480_rgb565_start");
-extern const uint8_t bg_480_end[] asm("_binary_bg_480_rgb565_end");
+// User background is optional. No factory image is embedded or loaded.
+static lv_obj_t *s_background;
+static lv_image_dsc_t s_background_sources[2];
+static unsigned s_background_index;
 #define AGENT_STALE_US  (3 * 1000 * 1000)
 
 typedef struct {
@@ -176,6 +179,10 @@ static void build_charts(lv_obj_t *scr)
     lv_obj_set_style_pad_column(s_cores, 2, 0);
     lv_obj_set_style_radius(s_cores, 2, LV_PART_ITEMS);
     s_ser_cores = lv_chart_add_series(s_cores, lv_color_hex(C_CPU), LV_CHART_AXIS_PRIMARY_Y);
+    // No cores received yet: zero-height bars match update_metrics(ncores=0).
+    // LVGL 9.6 bar drawing scales POINT_NONE before testing the sentinel, which
+    // overflows signed arithmetic on the first (otherwise empty) render.
+    lv_chart_set_all_values(s_cores, s_ser_cores, 0);
 }
 
 static lv_obj_t *io_row(lv_obj_t *parent, int y, const char *icon, uint32_t color)
@@ -494,6 +501,7 @@ static lv_obj_t *page_tile(int col, lv_dir_t dir)
 {
     lv_obj_t *t = lv_tileview_add_tile(s_tiles, col, 0, dir);
     lv_obj_remove_flag(t, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(t, LV_OPA_TRANSP, 0);
     return t;
 }
 
@@ -549,6 +557,43 @@ static void tick_cb(lv_timer_t *t)
     }
 }
 
+bool dashboard_set_background(const uint8_t *pixels, uint32_t timeout_ms)
+{
+    if (!lvgl_port_lock(timeout_ms)) return false;
+    if (!s_background) { lvgl_port_unlock(); return false; }
+    // esp_lvgl_port holds this lock throughout lv_timer_handler(). lv_refr
+    // drains all draw tasks before flushing/returning, including the parallel
+    // software units. Panel DMA references its frame buffers, not this source.
+    // Thus a former source can safely be retired at this lock boundary.
+    const void *old = lv_image_get_src(s_background);
+    if (pixels) {
+        unsigned next = s_background_index ^ 1u;
+        lv_image_dsc_t *src = &s_background_sources[next];
+        lv_image_cache_drop(src);
+        lv_image_header_cache_drop(src);
+        *src = (lv_image_dsc_t){
+            .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565,
+                       .w = 480, .h = 480, .stride = 960},
+            .data_size = 480 * 480 * 2, .data = pixels,
+        };
+        lv_image_set_src(s_background, src);
+        if (lv_image_get_src(s_background) != src) {
+            if (old) lv_image_set_src(s_background, old);
+            lvgl_port_unlock();
+            return false;
+        }
+        s_background_index = next;
+        lv_obj_remove_flag(s_background, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_background, LV_OBJ_FLAG_HIDDEN);
+        lv_image_set_src(s_background, NULL);
+    }
+    if (old) { lv_image_cache_drop(old); lv_image_header_cache_drop(old); }
+    lv_obj_invalidate(lv_screen_active());
+    lvgl_port_unlock();
+    return true;
+}
+
 void dashboard_create(void)
 {
     lvgl_port_lock(0);
@@ -556,20 +601,10 @@ void dashboard_create(void)
     lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    static lv_image_dsc_t bg = {
-        .header = {
-            .magic = LV_IMAGE_HEADER_MAGIC,
-            .cf = LV_COLOR_FORMAT_RGB565,
-            .w = 480,
-            .h = 480,
-            .stride = 480 * 2,
-        },
-    };
-    bg.data = bg_480_start;
-    bg.data_size = bg_480_end - bg_480_start;
-    lv_obj_t *bg_img = lv_image_create(scr);
-    lv_image_set_src(bg_img, &bg);
-    lv_obj_center(bg_img);
+    s_background = lv_image_create(scr);
+    lv_obj_set_pos(s_background, 0, 0);
+    lv_obj_remove_flag(s_background, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_background, LV_OBJ_FLAG_HIDDEN);
 
     // Swipe left/right between telemetry, quotas and the voice companion.
     s_tiles = lv_tileview_create(scr);

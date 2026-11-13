@@ -79,6 +79,8 @@ type nativeUI struct {
 	wakeAssetOps             nativeWakeAssetOps
 	wakeAdvanced             bool
 	homeAssistant            nativeHAState
+	background               nativeBackgroundState
+	backgroundOps            nativeBackgroundOps
 	haProbe                  func(context.Context, hamcp.Config) ([]hamcp.Tool, error)
 }
 
@@ -98,6 +100,7 @@ func copySettings(s desktop.Settings) desktop.Settings {
 // refresh runs on the UI thread and never replaces the user's draft.
 func (a *nativeUI) refresh() {
 	a.snapshot = a.service.Snapshot()
+	a.syncBackgroundConnection()
 	if a.snapshot.Error == "" {
 		a.details = false
 	}
@@ -323,4 +326,5 @@ func (a *nativeUI) screenSettingsView(c *ui.Context) {
 			return field
 		})
 	})
+	a.backgroundSettingsView(c)
 }

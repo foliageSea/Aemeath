@@ -5,6 +5,7 @@ dist/
 firmware/build-release/
 firmware/build/
 firmware/build-avatar-host/
+firmware/build-background-*/
 firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old

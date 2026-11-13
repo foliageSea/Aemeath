@@ -10,6 +10,7 @@
 #include "metrics.h"
 #include "net.h"
 #include "voice_ws.h"
+#include "background_http.h"
 
 static const char *TAG = "server";
 
@@ -221,6 +222,7 @@ void server_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 8192;
+    cfg.max_uri_handlers = 16;
     cfg.max_open_sockets = 7;
     cfg.lru_purge_enable = true;
     cfg.send_wait_timeout = 1;
@@ -240,7 +242,9 @@ void server_start(void)
          .ws_post_handshake_cb = ws_post_handshake},
     };
     for (int i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
-        httpd_register_uri_handler(srv, &uris[i]);
+        ESP_ERROR_CHECK(httpd_register_uri_handler(srv, &uris[i]));
     }
-    httpd_register_err_handler(srv, HTTPD_404_NOT_FOUND, redirect_404);
+    esp_err_t background_err = background_http_register(srv);
+    if (background_err != ESP_OK) ESP_LOGE(TAG, "background routes unavailable: %s", esp_err_to_name(background_err));
+    ESP_ERROR_CHECK(httpd_register_err_handler(srv, HTTPD_404_NOT_FOUND, redirect_404));
 }

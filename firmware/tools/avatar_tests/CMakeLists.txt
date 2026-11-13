@@ -11,7 +11,9 @@ add_compile_definitions(LV_MEM_SIZE=8388608 LV_USE_SNAPSHOT=1 LV_USE_QRCODE=1
     LV_FONT_MONTSERRAT_12=1 LV_FONT_MONTSERRAT_16=1 LV_FONT_MONTSERRAT_20=1 LV_FONT_MONTSERRAT_28=1)
 option(AVATAR_PARALLEL_DRAW "Exercise the device-style two-worker software renderer" OFF)
 if(AVATAR_PARALLEL_DRAW)
-    add_compile_definitions(LV_USE_OS=LV_OS_PTHREAD LV_DRAW_SW_DRAW_UNIT_CNT=2)
+    # Host sanitizer frames need more than the embedded 8 KiB draw stack.
+    # This affects only pthread tests, not the device configuration.
+    add_compile_definitions(LV_USE_OS=LV_OS_PTHREAD LV_DRAW_SW_DRAW_UNIT_CNT=2 LV_DRAW_THREAD_STACK_SIZE=1048576)
 endif()
 find_package(Threads REQUIRED)
 add_subdirectory("${FIRMWARE}/managed_components/lvgl__lvgl" lvgl)

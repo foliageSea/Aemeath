@@ -1,4 +1,5 @@
 #include "board.h"
+#include "background.h"
 #include "dashboard.h"
 #include "display.h"
 #include "esp_log.h"
@@ -33,6 +34,7 @@ void app_main(void)
     ESP_ERROR_CHECK(display_start());
     dashboard_create();
     ESP_ERROR_CHECK(voice_init());
+    background_init(); // optional; never sacrifice monitoring/voice for a background
     net_start();
 
     // Holding BOOT for 3 s forgets Wi-Fi and reboots into the setup portal.

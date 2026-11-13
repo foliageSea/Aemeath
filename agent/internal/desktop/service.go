@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -36,6 +37,7 @@ type connection interface {
 	Close()
 }
 type dependencies struct {
+	backgroundHTTP                      *http.Client
 	haClient                            func(hamcp.Config) (haConnection, error)
 	haEvery                             time.Duration
 	sample                              func(context.Context) proto.Frame
