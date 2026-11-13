@@ -24,7 +24,6 @@ var (
 )
 
 const (
-	vkF8        = 0x77
 	hotkeyID    = 1
 	modNoRepeat = 0x4000
 	wmQuit      = 0x0012
@@ -48,12 +47,12 @@ type windowsReady struct {
 	err      error
 }
 
-func start(callback func(bool), modified bool) (func(), error) {
+func start(callback func(bool), s shortcut) (func(), error) {
 	events := newTransitions(callback)
 	ready := make(chan windowsReady, 1)
 	quit := make(chan struct{})
 	done := make(chan struct{})
-	go windowsLoop(events, ready, quit, done, modified)
+	go windowsLoop(events, ready, quit, done, s)
 	result := <-ready
 	if result.err != nil {
 		<-done
@@ -72,7 +71,7 @@ func start(callback func(bool), modified bool) (func(), error) {
 	}, nil
 }
 
-func windowsLoop(events *transitions, ready chan<- windowsReady, quit <-chan struct{}, done chan<- struct{}, modified bool) {
+func windowsLoop(events *transitions, ready chan<- windowsReady, quit <-chan struct{}, done chan<- struct{}, s shortcut) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(done)
@@ -80,13 +79,10 @@ func windowsLoop(events *transitions, ready chan<- windowsReady, quit <-chan str
 	var msg winMessage
 	// Force creation of this thread's message queue before exposing its ID.
 	peekMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0, 0)
-	modifiers := uintptr(modNoRepeat)
-	if modified {
-		modifiers |= 0x0002 | 0x0004
-	} // MOD_CONTROL | MOD_SHIFT
-	ok, _, err := registerHotKey.Call(0, hotkeyID, modifiers, vkF8)
+	key, modifiers := s.windowsCodes()
+	ok, _, err := registerHotKey.Call(0, hotkeyID, uintptr(modifiers)|modNoRepeat, uintptr(key))
 	if ok == 0 {
-		ready <- windowsReady{err: fmt.Errorf("holdkey: reserve global F8 with RegisterHotKey (key may already be reserved): %w", err)}
+		ready <- windowsReady{err: fmt.Errorf("holdkey: reserve global %s with RegisterHotKey (key may already be reserved): %w", s, err)}
 		return
 	}
 	defer unregisterHotKey.Call(0, hotkeyID)
@@ -94,7 +90,7 @@ func windowsLoop(events *transitions, ready chan<- windowsReady, quit <-chan str
 	// even while every application window is hidden; no UI message pump is needed.
 	timer, _, err := setTimer.Call(0, 0, 10, 0)
 	if timer == 0 {
-		ready <- windowsReady{err: fmt.Errorf("holdkey: create F8 release timer: %w", err)}
+		ready <- windowsReady{err: fmt.Errorf("holdkey: create %s release timer: %w", s, err)}
 		return
 	}
 	defer killTimer.Call(0, timer)
@@ -125,8 +121,10 @@ func windowsLoop(events *transitions, ready chan<- windowsReady, quit <-chan str
 			continue
 		}
 		if down {
-			state, _, _ := getAsyncKeyState.Call(vkF8)
-			if state&0x8000 == 0 {
+			if !s.windowsHeld(func(key uint32) bool {
+				state, _, _ := getAsyncKeyState.Call(uintptr(key))
+				return state&0x8000 != 0
+			}) {
 				down = false
 				events.change(false)
 			}

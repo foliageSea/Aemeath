@@ -54,6 +54,12 @@ type nativeUI struct {
 	voiceGlobalReady         bool
 	voiceGlobalKey           string
 	voiceGlobalError         string
+	voiceShortcutRegister    func(string, func(bool)) (func(), error)
+	voiceShortcutStop        func()
+	voiceShortcutPending     func()
+	voiceShortcutGeneration  uint64
+	voiceShortcutNext        uint64
+	voiceShortcutClosed      bool
 	voiceHoldSession         uint64
 	voiceHoldStartTurn       uint32
 	voicePreview             string
@@ -150,14 +156,7 @@ func (a *nativeUI) run(key string, work func() error, done func()) {
 }
 func (a *nativeUI) edited() { a.dirty = true; a.revision++ }
 func (a *nativeUI) save() {
-	settings, revision := copySettings(a.draft), a.revision
-	a.run("save", func() error { return a.service.SaveSettings(settings) }, func() {
-		if a.revision == revision {
-			a.dirty = false
-		}
-		a.quotaUnsaved = false
-		a.notify("设置已保存。")
-	})
+	a.saveWithVoiceShortcut()
 }
 func (a *nativeUI) subscriptions() []desktop.Subscription {
 	list := append([]desktop.Subscription{}, a.draft.Subscriptions...)

@@ -9,6 +9,19 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// Adapt the original fixed-key tests to the configurable listener lifecycle.
+func (a *nativeUI) installGlobalVoiceHold(register, alternate func(func(bool)) (func(), error)) func() {
+	return a.installConfiguredVoiceHold(func(key string, cb func(bool)) (func(), error) {
+		if key == "F8" {
+			return register(cb)
+		}
+		if alternate != nil {
+			return alternate(cb)
+		}
+		return register(cb)
+	})
+}
+
 func voiceHoldTest(t *testing.T) (*nativeUI, *nativeVoiceFake, *ui.Tester) {
 	t.Helper()
 	a, base, _, tt := nativeTest(t)

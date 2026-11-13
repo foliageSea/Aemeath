@@ -90,7 +90,7 @@ func main() {
 		cancelVoiceAssets = native.cancelWakeAssets
 		win = mygo.NewWindow(nativeWindowOptions(native.view, mygo.App.WasOpenedAtLogin()))
 		native.update = win.Update
-		stopVoiceHotkey = native.installGlobalVoiceHold(holdkey.Start, holdkey.StartAlternate)
+		stopVoiceHotkey = native.installConfiguredVoiceHold(holdkey.StartShortcut)
 		if native.voiceGlobalError != "" {
 			log.Print(native.voiceGlobalError)
 		}

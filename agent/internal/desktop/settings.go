@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"aemeath/agent/internal/holdkey"
 	"aemeath/agent/internal/magpie"
 	"aemeath/agent/internal/netproxy"
 	"aemeath/agent/internal/voice"
@@ -28,6 +29,8 @@ const (
 )
 
 type Settings struct {
+	// Empty retains automatic F8 / Ctrl+Shift+F8 selection for existing settings.
+	VoiceShortcut string          `json:"voiceShortcut,omitempty"`
 	RunMode       string          `json:"runMode"`
 	Address       string          `json:"address"`
 	MagpieURL     string          `json:"magpieURL"`
@@ -46,6 +49,13 @@ func normalizeSettings(in Settings) (Settings, error) {
 		return Settings{}, fmt.Errorf("invalid run mode %q: expected device or standalone", in.RunMode)
 	}
 	var err error
+	in.VoiceShortcut = strings.TrimSpace(in.VoiceShortcut)
+	if in.VoiceShortcut != "" {
+		in.VoiceShortcut, err = holdkey.NormalizeShortcut(in.VoiceShortcut)
+		if err != nil {
+			return Settings{}, fmt.Errorf("语音触发快捷键无效: %w", err)
+		}
+	}
 	in.Network, err = netproxy.Normalize(in.Network)
 	if err != nil {
 		return Settings{}, fmt.Errorf("network settings: %w", err)

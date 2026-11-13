@@ -96,6 +96,7 @@ func (a *nativeUI) voiceGeneralSettingsView(c *ui.Context) {
 			return field
 		})
 	})
+	a.voiceShortcutSettingsView(c)
 }
 
 func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {

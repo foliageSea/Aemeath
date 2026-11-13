@@ -25,7 +25,7 @@ static OSStatus holdkey_event(EventHandlerCallRef next, EventRef event, void *da
     return noErr;
 }
 
-int32_t holdkey_start(uintptr_t token, int modified, HoldKeyListener **out) {
+int32_t holdkey_start(uintptr_t token, uint32_t keycode, uint32_t modifiers, HoldKeyListener **out) {
     *out = NULL;
     HoldKeyListener *listener = calloc(1, sizeof(*listener));
     if (!listener) return memFullErr;
@@ -38,7 +38,7 @@ int32_t holdkey_start(uintptr_t token, int modified, HoldKeyListener **out) {
         holdkey_event, 2, types, listener, &listener->handler);
     if (status != noErr) { free(listener); return status; }
     EventHotKeyID id = { 'AeF8', (UInt32)token };
-    status = RegisterEventHotKey(100, modified ? (controlKey | shiftKey) : 0, id, GetApplicationEventTarget(),
+    status = RegisterEventHotKey(keycode, modifiers, id, GetApplicationEventTarget(),
         kEventHotKeyExclusive, &listener->hotkey);
     if (status != noErr) {
         RemoveEventHandler(listener->handler);

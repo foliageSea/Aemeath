@@ -14,19 +14,19 @@ import (
 	"sync"
 )
 
-func start(callback func(bool), modified bool) (func(), error) {
+func start(callback func(bool), s shortcut) (func(), error) {
+	key, modifiers, err := s.carbonCodes()
+	if err != nil {
+		return nil, err
+	}
 	events := newTransitions(callback)
 	handle := cgo.NewHandle(events)
 	var listener *C.HoldKeyListener
-	var modifiers C.int
-	if modified {
-		modifiers = 1
-	}
-	status := C.holdkey_start(C.uintptr_t(handle), modifiers, &listener)
+	status := C.holdkey_start(C.uintptr_t(handle), C.uint32_t(key), C.uint32_t(modifiers), &listener)
 	if status != 0 {
 		handle.Delete()
 		events.shutdown()
-		return nil, fmt.Errorf("holdkey: reserve global F8 with Carbon: OSStatus %d (key may already be reserved)", int32(status))
+		return nil, fmt.Errorf("holdkey: reserve global %s with Carbon: OSStatus %d (key may already be reserved)", s, int32(status))
 	}
 	var once sync.Once
 	return func() {
