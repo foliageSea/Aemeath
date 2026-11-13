@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"aemeath/agent/internal/brain"
+	"aemeath/agent/internal/desktop"
 	"aemeath/agent/internal/voice"
 	"aemeath/agent/internal/wake"
 
@@ -186,6 +187,19 @@ func (a *nativeUI) savedWakePhrase() string {
 	return phrase
 }
 
+func (a *nativeUI) voicePathLabel() string {
+	if a.snapshot.Settings.RunMode == desktop.RunModeStandalone {
+		if a.snapshot.Voice.Phase == "speaking" {
+			return "语音路径：本机麦克风 → 本机扬声器 · 播放时暂停自动唤醒，可手动打断"
+		}
+		return "语音路径：本机麦克风 → 本机扬声器"
+	}
+	if a.snapshot.Settings.Voice.PlaybackOutput == "console" {
+		return "语音路径：ESP32 麦克风 → 本机扬声器"
+	}
+	return "语音路径：ESP32 麦克风 → ESP32 扬声器"
+}
+
 func (a *nativeUI) voiceView(c *ui.Context) {
 	t := c.Theme()
 	state := a.snapshot.Voice
@@ -202,6 +216,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 						detail = "语音通道：" + connection
 					}
 					ui.Text(c, "· "+connection).MinWidth(0).FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…").Tooltip(detail)
+					ui.Text(c.Key("voice-path"), a.voicePathLabel()).Label(a.voicePathLabel()).Grow(1).MinWidth(0).FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…").Tooltip(a.voicePathLabel())
 				})
 				ui.Row(c.Key("voice-header-hints")).Label("助手唤醒与快捷键").FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
 					a.voiceStatusView(c)

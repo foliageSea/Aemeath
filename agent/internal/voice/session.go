@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"aemeath/agent/internal/audioinput"
 	"aemeath/agent/internal/brain"
 
 	"github.com/coder/websocket"
@@ -36,6 +36,7 @@ type playback struct {
 type session struct {
 	ctx                        context.Context
 	ws                         *websocket.Conn
+	standalone                 bool
 	cfg                        Config
 	state                      State
 	emit                       func(State)
@@ -88,7 +89,11 @@ func voiceURL(address string) (string, error) {
 	return u.String(), nil
 }
 
-func runWithDependencies(ctx context.Context, address string, cfg Config, host Host, commands <-chan Command, emit func(State), d dependencies) (retErr error) {
+func runWithDependencies(ctx context.Context, address string, cfg Config, host Host, commands <-chan Command, emit func(State), d dependencies) error {
+	return runSession(ctx, address, cfg, host, commands, emit, d, false)
+}
+
+func runSession(ctx context.Context, address string, cfg Config, host Host, commands <-chan Command, emit func(State), d dependencies, standalone bool) (retErr error) {
 	cfg, err := NormalizeConfig(cfg)
 	if err != nil {
 		return err
@@ -96,7 +101,10 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	if emit == nil {
 		emit = func(State) {}
 	}
-	s := &session{cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16), responses: make(chan result, 1), newOutput: d.newOutput}
+	if standalone {
+		cfg.PlaybackOutput = "console"
+	}
+	s := &session{standalone: standalone, cfg: cfg, emit: emit, state: State{Phase: "idle"}, jobs: make(chan work, 1), results: make(chan result, 16), responses: make(chan result, 1), newOutput: d.newOutput}
 	defer s.closeOutput()
 	defer func() {
 		status := "canceled"
@@ -116,45 +124,18 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 		s.state.Phase = "disabled"
 		return nil
 	}
-	endpoint, err := voiceURL(address)
-	if err != nil {
-		return err
-	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s.ctx = sessionCtx
 	defer cancel()
-	dialCtx, dialCancel := context.WithTimeout(sessionCtx, 5*time.Second)
-	ws, _, err := websocket.Dial(dialCtx, endpoint, nil)
-	dialCancel()
-	if err != nil {
-		return errors.New("voice connection failed")
+	var rx <-chan incoming
+	var readerDone <-chan struct{}
+	if !standalone {
+		rx, readerDone, err = s.connectDevice(address)
+		if err != nil {
+			return err
+		}
+		defer func() { cancel(); s.ws.CloseNow(); <-readerDone }()
 	}
-	s.ws = ws
-	ws.SetReadLimit(maxTextBytes)
-	defer ws.CloseNow()
-	helloCtx, helloCancel := context.WithTimeout(sessionCtx, 5*time.Second)
-	typ, b, err := ws.Read(helloCtx)
-	helloCancel()
-	if err != nil {
-		return errors.New("voice hello failed")
-	}
-	if typ != websocket.MessageText {
-		return errors.New("expected voice hello")
-	}
-	hello, err := decodeMessage(b)
-	if err != nil {
-		return err
-	}
-	if hello.Type == "error" {
-		return fmt.Errorf("device refused voice session: %s", s.safe(hello.Code))
-	}
-	if err = hello.validateHello(); err != nil {
-		return err
-	}
-	if cfg.PlaybackOutput != "console" && cfg.TTSProvider == "fish" && !slices.Contains(hello.Capabilities, "stream_playback") {
-		return errors.New("设备固件不支持 Fish 流式播放，请更新固件或选择 MiMo")
-	}
-	s.epoch = hello.Epoch
 	// Keep capture disabled while native models are loading.
 	s.detector, err = d.newDetector(cfg)
 	if err != nil {
@@ -173,6 +154,30 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	if s.vad != nil {
 		defer s.vad.Close()
 	}
+	var input audioinput.Input
+	var mic <-chan audioinput.Frame
+	if standalone {
+		if d.newInput == nil {
+			return errors.New("本机麦克风不可用")
+		}
+		input, err = d.newInput(sessionCtx)
+		if err != nil {
+			s.state.ErrorStage = "listening"
+			return err
+		}
+		if input == nil {
+			return errors.New("本机麦克风不可用")
+		}
+		defer input.Close()
+		mic = input.Frames()
+		if mic == nil {
+			s.state.ErrorStage = "listening"
+			return errors.New("本机麦克风没有音频流")
+		}
+	}
+	if err = sessionCtx.Err(); err != nil {
+		return err
+	}
 	if err = s.send(message{Type: "config", Enabled: true, Volume: cfg.Volume}); err != nil {
 		return err
 	}
@@ -183,32 +188,6 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	if err = s.phase("idle"); err != nil {
 		return err
 	}
-	// Reader owns all websocket reads, allowing ping/pong and close handling even
-	// while a cloud request or native detector is busy. Overflow closes the session.
-	rx := make(chan incoming, 64)
-	readerDone := make(chan struct{})
-	go func() {
-		defer close(readerDone)
-		for {
-			typ, b, err := ws.Read(sessionCtx)
-			item := incoming{kind: typ, data: b, err: err}
-			select {
-			case rx <- item:
-			case <-sessionCtx.Done():
-				return
-			default:
-				ws.CloseNow()
-				select {
-				case rx <- incoming{err: errors.New("voice receive queue overflow")}:
-				case <-sessionCtx.Done():
-				}
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
@@ -221,8 +200,12 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 			s.cancelTurn()
 		}
 		cancel()
-		ws.CloseNow()
-		<-readerDone
+		if input != nil {
+			input.Close()
+		}
+		if s.ws != nil {
+			s.ws.CloseNow()
+		}
 		<-workerDone
 	}()
 	tickInterval := 250 * time.Millisecond
@@ -233,6 +216,10 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 	defer tick.Stop()
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
+	var pingC <-chan time.Time
+	if !standalone {
+		pingC = ping.C
+	}
 	pingErr := make(chan error, 1)
 	pingActive := false
 	for {
@@ -243,13 +230,13 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 		select {
 		case <-sessionCtx.Done():
 			return sessionCtx.Err()
-		case <-ping.C:
+		case <-pingC:
 			if !pingActive {
 				pingActive = true
 				go func() {
 					c, done := context.WithTimeout(sessionCtx, 3*time.Second)
 					defer done()
-					e := ws.Ping(c)
+					e := s.ws.Ping(c)
 					select {
 					case pingErr <- e:
 					case <-sessionCtx.Done():
@@ -299,6 +286,25 @@ func runWithDependencies(ctx context.Context, address string, cfg Config, host H
 			if err = s.result(r); err != nil {
 				return err
 			}
+		case frame, ok := <-mic:
+			if sessionCtx.Err() != nil {
+				return sessionCtx.Err()
+			}
+			if !ok {
+				s.state.ErrorStage = "listening"
+				return errors.New("本机麦克风采集已停止")
+			}
+			if frame.Err != nil {
+				s.state.ErrorStage = "listening"
+				return frame.Err
+			}
+			if len(frame.PCM) != frameSamples {
+				s.state.ErrorStage = "listening"
+				return errors.New("invalid local microphone frame")
+			}
+			if err = s.microphonePCM(frame.PCM); err != nil {
+				return err
+			}
 		case in := <-rx:
 			if in.err != nil {
 				if sessionCtx.Err() != nil {
@@ -332,6 +338,9 @@ func (s *session) safe(text string) string {
 	return text
 }
 func (s *session) send(m message) error {
+	if s.standalone {
+		return s.ctx.Err()
+	}
 	m.V = protocolVersion
 	m.Epoch = s.epoch
 	if m.Turn != 0 && m.Turn == s.state.Turn {
@@ -661,13 +670,23 @@ func (s *session) microphone(b []byte) error {
 		return nil
 	}
 	s.nextMic++
+	return s.microphonePCM(f.PCM)
+}
+
+// microphonePCM is shared by native input and validated device frames.
+func (s *session) microphonePCM(pcm []int16) error {
+	var err error
+	// Without AEC, local speaker audio must never enter keyword spotting.
+	if s.standalone && s.play != nil {
+		return nil
+	}
 	if s.muted {
 		return nil
 	}
 	// Hold recording deliberately bypasses both keyword spotting and VAD.
 	if s.recording {
 		remaining := maxUtteranceSamples - len(s.capture.pcm)
-		s.capture.pcm = append(s.capture.pcm, f.PCM[:min(remaining, len(f.PCM))]...)
+		s.capture.pcm = append(s.capture.pcm, pcm[:min(remaining, len(pcm))]...)
 		if len(s.capture.pcm) >= maxUtteranceSamples {
 			return s.stopRecording()
 		}
@@ -676,9 +695,9 @@ func (s *session) microphone(b []byte) error {
 	// Retain the detector decision delay during capture, cloud work and playback
 	// too, so a wake word followed immediately by a new question loses no suffix.
 	if s.state.WakeReady {
-		s.ring.add(f.PCM)
-		s.kwsSamples += int64(len(f.PCM))
-		hit, err := s.detector.Feed(f.PCM)
+		s.ring.add(pcm)
+		s.kwsSamples += int64(len(pcm))
+		hit, err := s.detector.Feed(pcm)
 		if err != nil {
 			s.state.WakeReady = false
 			s.diagnostic = "Offline wake unavailable: " + s.safe(err.Error())
@@ -711,18 +730,18 @@ func (s *session) microphone(b []byte) error {
 	if s.capture != nil {
 		var speech bool
 		if s.vad != nil {
-			speech, err = s.vad.Speech(f.PCM)
+			speech, err = s.vad.Speech(pcm)
 			if err != nil {
 				return s.fail("vad", err)
 			}
 		}
 		done, empty := false, false
 		if s.manualFixed {
-			s.capture.pcm = append(s.capture.pcm, f.PCM...)
-			s.capture.elapsed += len(f.PCM)
+			s.capture.pcm = append(s.capture.pcm, pcm...)
+			s.capture.elapsed += len(pcm)
 			done = s.capture.elapsed >= manualWindowSamples
 		} else {
-			done, empty = s.capture.feed(f.PCM, speech)
+			done, empty = s.capture.feed(pcm, speech)
 		}
 		if done {
 			if empty {

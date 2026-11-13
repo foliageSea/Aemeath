@@ -21,7 +21,13 @@ type Subscription struct {
 	Hidden bool   `json:"hidden"`
 }
 
+const (
+	RunModeDevice     = "device"
+	RunModeStandalone = "standalone"
+)
+
 type Settings struct {
+	RunMode       string         `json:"runMode"`
 	Address       string         `json:"address"`
 	MagpieURL     string         `json:"magpieURL"`
 	Subscriptions []Subscription `json:"subscriptions"`
@@ -29,6 +35,14 @@ type Settings struct {
 }
 
 func normalizeSettings(in Settings) (Settings, error) {
+	in.RunMode = strings.ToLower(strings.TrimSpace(in.RunMode))
+	switch in.RunMode {
+	case "":
+		in.RunMode = RunModeDevice
+	case RunModeDevice, RunModeStandalone:
+	default:
+		return Settings{}, fmt.Errorf("invalid run mode %q: expected device or standalone", in.RunMode)
+	}
 	var err error
 	in.Voice, err = voice.NormalizeConfig(in.Voice)
 	if err != nil {

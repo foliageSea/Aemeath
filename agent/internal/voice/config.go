@@ -1,4 +1,4 @@
-// Package voice owns one duplex voice session with a device. The caller owns retries.
+// Package voice owns device and standalone voice sessions. The caller owns retries.
 package voice
 
 import (

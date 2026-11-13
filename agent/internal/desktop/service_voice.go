@@ -20,6 +20,10 @@ import (
 // startVoice joins the audio session to this exact telemetry connection attempt.
 // Its worker is joined before connectionLoop releases or replaces that attempt.
 func (s *Service) startVoice(ctx context.Context, conn connection, address string) <-chan struct{} {
+	return s.startVoiceSession(ctx, conn, address, false)
+}
+
+func (s *Service) startVoiceSession(ctx context.Context, conn connection, address string, standalone bool) <-chan struct{} {
 	done := make(chan struct{})
 	s.mu.Lock()
 	cfg := s.state.Settings.Voice
@@ -38,27 +42,9 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 	if run == nil {
 		run = voice.Run
 	}
-	var session uint64
-	var lastHA hamcp.Status
-	emit := func(state voice.State) {
-		state.Session = session
-		s.mu.Lock()
-		report := false
-		if s.conn == conn && ctx.Err() == nil {
-			previous := s.state.Voice
-			report = state.Error != "" && (state.Error != previous.Error || state.Turn != previous.Turn || state.Phase != previous.Phase)
-			if state.HomeAssistant == lastHA {
-				state.HomeAssistant = previous.HomeAssistant
-			} else {
-				lastHA = state.HomeAssistant
-			}
-			s.setVoiceLocked(state)
-		}
-		s.mu.Unlock()
-		if report {
-			// Runtime errors are sanitized; never log keys, transcripts or response audio.
-			log.Printf("voice: turn=%d phase=%s asr_ms=%d agent_ms=%d tts_ms=%d error=%s", state.Turn, state.Phase, state.ASRMillis, state.AgentMillis, state.TTSMillis, state.Error)
-		}
+	runStandalone := s.deps.voiceRunStandalone
+	if runStandalone == nil {
+		runStandalone = voice.RunStandalone
 	}
 	go func() {
 		defer close(done)
@@ -73,9 +59,35 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 			s.mu.Unlock()
 		}()
 		for ctx.Err() == nil {
-			session = s.voiceSession.Add(1)
-			lastHA = hamcp.Status{}
-			err := run(ctx, address, cfg, voiceHost{s}, commands, emit)
+			session := s.voiceSession.Add(1)
+			generation := s.voiceGeneration.Add(1)
+			var lastHA hamcp.Status
+			emit := func(state voice.State) {
+				state.Session = session
+				s.mu.Lock()
+				report := false
+				if s.voiceGeneration.Load() == generation && s.voiceCommands == commands && (standalone || s.conn == conn) && ctx.Err() == nil {
+					previous := s.state.Voice
+					report = state.Error != "" && (state.Error != previous.Error || state.Turn != previous.Turn || state.Phase != previous.Phase)
+					if state.HomeAssistant == lastHA {
+						state.HomeAssistant = previous.HomeAssistant
+					} else {
+						lastHA = state.HomeAssistant
+					}
+					s.setVoiceLocked(state)
+				}
+				s.mu.Unlock()
+				if report {
+					// Runtime errors are sanitized; never log keys, transcripts or response audio.
+					log.Printf("voice: turn=%d phase=%s asr_ms=%d agent_ms=%d tts_ms=%d error=%s", state.Turn, state.Phase, state.ASRMillis, state.AgentMillis, state.TTSMillis, state.Error)
+				}
+			}
+			var err error
+			if standalone {
+				err = runStandalone(ctx, cfg, voiceHost{s}, commands, emit)
+			} else {
+				err = run(ctx, address, cfg, voiceHost{s}, commands, emit)
+			}
 			if ctx.Err() != nil {
 				return
 			}
@@ -87,6 +99,7 @@ func (s *Service) startVoice(ctx context.Context, conn connection, address strin
 			s.mu.RUnlock()
 			state.Connected, state.WakeReady, state.Phase, state.Error = false, false, "error", err.Error()
 			emit(state)
+			s.voiceGeneration.CompareAndSwap(generation, generation+1)
 			// Discard commands queued against the ended session before reconnecting.
 			for len(commands) > 0 {
 				<-commands
@@ -156,6 +169,10 @@ func (s *Service) ReloadWakeModels(modelDir string) error {
 	}
 	if filepath.Clean(saved) == filepath.Clean(modelDir) && s.state.Settings.Voice.Enabled && s.attemptCancel != nil {
 		s.attemptCancel()
+		state := s.state.Voice.Clone()
+		state.Connected, state.WakeReady = false, false
+		s.setVoiceLocked(state)
+		signal(s.runWake)
 	}
 	return nil
 }

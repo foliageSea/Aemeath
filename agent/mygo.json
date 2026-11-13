@@ -8,8 +8,10 @@
   "resourcesExclude": ["native"],
   "macos": {
     "minimumSystemVersion": "13.0",
+    "entitlements": "cmd/aemeath-desktop/entitlements.plist",
     "infoPlist": {
       "LSUIElement": true,
+      "NSMicrophoneUsageDescription": "Aemeath 在独立模式下使用本机麦克风进行语音对话和离线唤醒。",
       "NSLocalNetworkUsageDescription": "Aemeath 需要连接局域网中的性能监控台并自动发现设备。",
       "NSBonjourServices": [
         "_aemeath._tcp"

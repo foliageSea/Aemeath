@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"aemeath/agent/internal/audioinput"
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/hamcp"
 	"aemeath/agent/internal/wake"
@@ -34,6 +35,7 @@ type brainAPI interface {
 
 // Factories are injected per session in tests, never mutated package globals.
 type dependencies struct {
+	newInput    func(context.Context) (audioinput.Input, error)
 	newDetector func(Config) (detector, error)
 	newVAD      func(Config) (vad, error)
 	newSpeech   func(Config) speechAPI
@@ -44,6 +46,7 @@ type dependencies struct {
 
 func productionDependencies() dependencies {
 	return dependencies{
+		newInput: audioinput.Open,
 		newDetector: func(c Config) (detector, error) {
 			return wake.New(wake.Config{ModelDir: c.WakeModelDir, Threshold: c.WakeThreshold, Phrase: c.WakePhrase})
 		},

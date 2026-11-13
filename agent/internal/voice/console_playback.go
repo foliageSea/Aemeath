@@ -25,12 +25,18 @@ func (s *session) closeOutput() {
 	if s.output != nil {
 		s.output.Close()
 		s.output = nil
+		if s.standalone {
+			s.resetCapture()
+		}
 	}
 }
 
 func (s *session) startPlayback(streaming bool, samples int) error {
 	if s.cfg.PlaybackOutput != "console" {
 		return s.send(message{Type: "playback_start", Turn: s.state.Turn, Streaming: streaming, Samples: samples, Volume: s.cfg.Volume})
+	}
+	if s.standalone {
+		s.resetCapture()
 	}
 	if s.newOutput == nil {
 		return s.fail("playback", errors.New("console audio output is unavailable"))

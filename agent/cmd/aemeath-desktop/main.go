@@ -200,6 +200,21 @@ func main() {
 				if s.Connected {
 					label = "已连接 · " + s.Target
 				}
+				if s.Settings.RunMode == desktop.RunModeStandalone {
+					label = "独立模式 · 已停止"
+					if s.Running {
+						label = "独立模式 · 启动中"
+						if !s.Settings.Voice.Enabled {
+							label = "独立模式 · 语音未启用"
+						}
+						if s.Voice.Connected {
+							label = "独立模式 · 就绪"
+						}
+						if s.Voice.Error != "" {
+							label = "独立模式 · 语音异常"
+						}
+					}
+				}
 				tray.SetToolTip("Aemeath · " + label)
 				menu.ItemByID("status").SetLabel(label)
 				menu.ItemByID("start").SetEnabled(!s.Running)

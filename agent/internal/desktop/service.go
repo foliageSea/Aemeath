@@ -46,37 +46,40 @@ type dependencies struct {
 	dial                                func(context.Context, string) (connection, error)
 	quota                               func(context.Context, string) (*proto.QuotaFrame, error)
 	voiceRun                            func(context.Context, string, voice.Config, voice.Host, <-chan voice.Command, func(voice.State)) error
+	voiceRunStandalone                  func(context.Context, voice.Config, voice.Host, <-chan voice.Command, func(voice.State)) error
 	sampleEvery, quotaEvery, retryEvery time.Duration
 }
 
 // Service owns local sampling and quota polling independently of device forwarding.
-// Use Close to release all resources; Stop only disables device forwarding.
+// Use Close to release all resources; Stop disables the selected device or standalone session.
 type Service struct {
-	lifeMu        sync.Mutex
-	mu            sync.RWMutex
-	sendMu        sync.Mutex
-	quotaMu       sync.Mutex
-	state         State
-	path          string
-	deps          dependencies
-	ctx           context.Context
-	cancel        context.CancelFunc
-	closed        bool
-	wg            sync.WaitGroup
-	runCancel     context.CancelFunc
-	runDone       chan struct{}
-	attemptCancel context.CancelFunc
-	conn          connection
-	connCtx       context.Context
-	updates       chan struct{}
-	quotaWake     chan struct{}
-	haWake        chan struct{}
-	haCancel      context.CancelFunc
-	voiceUpdates  chan struct{} // coalesced notifications for the desktop UI
-	voiceCommands chan voice.Command
-	memory        *brain.Memory // voice conversation; outlives each device connection
-	catalog       *brain.ModelCatalog
-	voiceSession  atomic.Uint64 // numbers voice connections; see voice.State.Session
+	lifeMu          sync.Mutex
+	mu              sync.RWMutex
+	sendMu          sync.Mutex
+	quotaMu         sync.Mutex
+	state           State
+	path            string
+	deps            dependencies
+	ctx             context.Context
+	cancel          context.CancelFunc
+	closed          bool
+	wg              sync.WaitGroup
+	runCancel       context.CancelFunc
+	runDone         chan struct{}
+	attemptCancel   context.CancelFunc
+	conn            connection
+	connCtx         context.Context
+	updates         chan struct{}
+	quotaWake       chan struct{}
+	runWake         chan struct{} // interrupt reconnect backoff after settings/model changes
+	voiceGeneration atomic.Uint64 // invalidates callbacks independently of device connections
+	haWake          chan struct{}
+	haCancel        context.CancelFunc
+	voiceUpdates    chan struct{} // coalesced notifications for the desktop UI
+	voiceCommands   chan voice.Command
+	memory          *brain.Memory // voice conversation; outlives each device connection
+	catalog         *brain.ModelCatalog
+	voiceSession    atomic.Uint64 // numbers voice connections; see voice.State.Session
 }
 
 // New loads preferences and starts local sampling (1s) and quota polling (30s).
@@ -122,7 +125,7 @@ func New(configPath string) (*Service, error) {
 
 func newService(path string, settings Settings, deps dependencies) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
+	s := &Service{path: path, deps: deps, ctx: ctx, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), runWake: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
 	memoryPath := ""
 	catalogPath := ""
 	if path != "" {
@@ -163,7 +166,7 @@ func (s *Service) Snapshot() State {
 	return state
 }
 
-// Start is idempotent and starts asynchronous discovery, connection and retry.
+// Start is idempotent and starts the selected device or standalone session asynchronously.
 func (s *Service) Start() error {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
@@ -243,8 +246,17 @@ func (s *Service) SaveSettings(settings Settings) error {
 			s.haCancel()
 		}
 	}
-	if (old.Address != normalized.Address || old.Voice != normalized.Voice) && s.attemptCancel != nil {
-		s.attemptCancel()
+	if old.RunMode != normalized.RunMode || old.Address != normalized.Address || old.Voice != normalized.Voice {
+		if s.attemptCancel != nil {
+			s.attemptCancel()
+			state := s.state.Voice.Clone()
+			state.Connected, state.WakeReady = false, false
+			s.setVoiceLocked(state)
+		}
+		if old.RunMode != normalized.RunMode {
+			s.state.Connected, s.state.ScreenKnown = false, false
+		}
+		signal(s.runWake)
 	}
 	if old.MagpieURL != normalized.MagpieURL {
 		s.state.Quota, s.state.QuotaError = nil, ""
@@ -490,12 +502,32 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 		attempt, cancel := context.WithCancel(ctx)
 		s.mu.Lock()
 		s.attemptCancel = cancel
+		// A wake signal already represented by this settings snapshot is consumed.
+		select {
+		case <-s.runWake:
+		default:
+		}
+		standalone := s.state.Settings.RunMode == RunModeStandalone
 		address := s.state.Settings.Address
 		s.state.Status, s.state.Connected = "connecting", false
 		if address == "" {
 			s.state.Status = "discovering"
 		}
 		s.mu.Unlock()
+		if standalone {
+			s.mu.Lock()
+			s.state.Status, s.state.Target, s.state.Error = "standalone", "", ""
+			s.state.Connected, s.state.ScreenKnown = false, false
+			s.mu.Unlock()
+			voiceDone := s.startVoiceSession(attempt, nil, "", true)
+			<-attempt.Done()
+			<-voiceDone
+			cancel()
+			s.mu.Lock()
+			s.attemptCancel = nil
+			s.mu.Unlock()
+			continue
+		}
 		var err error
 		if address == "" {
 			address, err = s.deps.find(attempt)
@@ -545,6 +577,8 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 		case <-ctx.Done():
 			timer.Stop()
 			return
+		case <-s.runWake:
+			timer.Stop()
 		case <-timer.C:
 		}
 	}

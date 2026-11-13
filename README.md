@@ -5,7 +5,7 @@
 Go 采集端（macOS / Windows）通过 Wi‑Fi WebSocket 把 CPU、内存、磁盘、网络、温度、GPU 推送到
 Waveshare **ESP32‑S3‑Touch‑LCD‑4B**（480×480 ST7701 + GT911），在 LVGL 多页仪表盘上显示。
 
-**爱弥斯语音助手**使用监控台麦克风和扬声器，由电脑离线检测唤醒词（默认“你好小爱”，支持自定义），通过 MiMo ASR → CloudWeGo Eino / OpenAI 兼容模型 → MiMo 音色克隆或 Fish 双向流式合成完成对话。也可使用全局 F8 按住说话。设备上的爱弥斯 Q 版动画随聆听、思考、播报状态切换，桌面端显示对话与工具执行过程。
+**爱弥斯语音助手**支持 ESP32 设备模式与无需 ESP32 的独立模式；独立模式使用电脑系统默认麦克风和扬声器。由电脑离线检测唤醒词（默认“你好小爱”，支持自定义），通过 MiMo ASR → CloudWeGo Eino / OpenAI 兼容模型 → MiMo 音色克隆或 Fish 双向流式合成完成对话。也可使用全局 F8 按住说话。设备上的爱弥斯 Q 版动画随聆听、思考、播报状态切换，桌面端显示对话与工具执行过程。
 
 → [语音助手安装、配置与运行](docs/voice-agent.md) · [协议约定](docs/voice-contract.md) · [验证记录与限制](docs/voice-validation.md)
 
@@ -51,6 +51,10 @@ bash scripts/build-release.sh firmware
 ```
 
 ## 开始使用
+
+无需 ESP32 时，可在桌面“设置 → 连接 → 运行模式”选择“独立模式”并保存，再启用和配置助手；CLI 使用 `--standalone`。两者均使用系统默认麦克风与扬声器，不发现或连接设备。独立模式仍需联网调用 MiMo ASR、所配 LLM 和 MiMo/Fish TTS；离线能力仅包括唤醒与断句。首次使用需允许麦克风权限：macOS 在“系统设置 → 隐私与安全性 → 麦克风”允许 Aemeath（CLI 允许启动它的终端）；Windows 在“设置 → 隐私和安全性 → 麦克风”开启麦克风访问与“允许桌面应用访问麦克风”。独立模式自动在电脑播放，即使已保存的播放位置是“监控台”，也只覆盖本次有效输出，不改写该设置。电脑本地播放没有 AEC，播放期间暂停自动唤醒；仍可用 F8、手动唤醒、取消或文字输入打断。
+
+使用 ESP32 监控台时：
 
 1. 构建并烧录固件，按屏幕提示完成 Wi-Fi 配网，让设备与电脑处于同一局域网。
 2. 运行 MyGO 桌面端或命令行采集端，通过 mDNS 自动发现设备，也可手动填写设备地址。
@@ -104,9 +108,12 @@ cd agent
 go run ./cmd/aemeath-agent            # mDNS 自动发现
 go run ./cmd/aemeath-agent -addr 192.168.31.207:80
 go run ./cmd/aemeath-agent -dry-run   # 只打印 JSON，不连接
+CGO_ENABLED=1 go run ./cmd/aemeath-agent --standalone --voice-config voice.local.json # 电脑麦克风/扬声器，无需 ESP32
 ```
 
-Windows 交叉编译（无需 cgo）：
+`--standalone` 自动启用语音，无需另加 `--voice`，不可与 `--addr` 或 `--dry-run` 同用。终端支持 `wake`、`record_start` / `record_stop` / `record_cancel`、`text 你的问题` 和 `cancel`，启动日志显示独立模式实际播放位置。更多配置见[语音助手说明](docs/voice-agent.md)。
+
+Windows 交叉编译（无需 cgo；此构建不提供本机音频与离线唤醒能力）：
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags -H=windowsgui -o aemeath-agent.exe ./cmd/aemeath-agent

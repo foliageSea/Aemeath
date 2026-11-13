@@ -3,6 +3,14 @@
 set -euo pipefail
 app="${1:?Usage: verify-macos-voice.sh /path/to/Aemeath.app}"
 executable="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$app/Contents/Info.plist")"
+if ! microphone_description="$(/usr/libexec/PlistBuddy -c 'Print NSMicrophoneUsageDescription' "$app/Contents/Info.plist" 2>/dev/null)" || [[ -z "${microphone_description//[[:space:]]/}" ]]; then
+  echo "Missing microphone usage description" >&2
+  exit 1
+fi
+if ! audio_input_entitlement="$(codesign -d --entitlements :- "$app" 2>/dev/null | plutil -extract 'com\.apple\.security\.device\.audio-input' raw -o - - 2>/dev/null)" || [[ "$audio_input_entitlement" != "true" ]]; then
+  echo "Missing signed audio-input entitlement" >&2
+  exit 1
+fi
 resources="$app/Contents/Resources"
 for binary in "$app/Contents/MacOS/$executable" "$resources/libsherpa-onnx-c-api.dylib" "$resources/libonnxruntime.dylib"; do
   [[ -f "$binary" ]] || { echo "Missing bundled native code: $binary" >&2; exit 1; }
@@ -31,4 +39,4 @@ otool -arch all -l "$app/Contents/MacOS/$executable" | awk '
   END { if (!found) { print "Missing bundled-library rpath" > "/dev/stderr"; exit 1 } }
 '
 codesign --verify --deep --strict "$app"
-echo "Verified bundled sherpa/onnx linkage and code signatures."
+echo "Verified microphone permission description and audio-input entitlement, bundled sherpa/onnx linkage and code signatures."

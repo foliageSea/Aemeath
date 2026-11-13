@@ -288,8 +288,21 @@ func (a *nativeUI) settingsView(c *ui.Context) {
 
 func (a *nativeUI) connectionSettingsView(c *ui.Context) {
 	nativeSettingsSection(c, "connection-card", "连接配置", func() {
+		nativeSettingsField(c, "run-mode-field", "运行模式", func() ui.Element {
+			mode := 0
+			if a.draft.RunMode == desktop.RunModeStandalone {
+				mode = 1
+			}
+			field := nativeSettingsSegmented(c, "run-mode", &mode, "运行模式", "设备模式", "独立模式")
+			if field.Changed() {
+				a.draft.RunMode = []string{desktop.RunModeDevice, desktop.RunModeStandalone}[mode]
+				a.edited()
+			}
+			return field
+		})
+		ui.Text(c, "独立模式使用本机麦克风和扬声器，无需 ESP32 设备。保存后生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		nativeSettingsField(c, "address-field", "设备地址", func() ui.Element {
-			field := ui.TextInput(c.Key("address"), &a.draft.Address).Label("设备地址").Placeholder("aemeath.local 或 192.168.1.20:80").FillWidth().MinWidth(0).Height(36)
+			field := ui.TextInput(c.Key("address"), &a.draft.Address).Label("设备地址").Placeholder("aemeath.local 或 192.168.1.20:80").Disabled(a.draft.RunMode == desktop.RunModeStandalone).FillWidth().MinWidth(0).Height(36)
 			if field.Changed() {
 				a.edited()
 			}

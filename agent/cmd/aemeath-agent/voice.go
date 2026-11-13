@@ -88,7 +88,17 @@ type cliVoiceControl struct {
 	connected bool
 }
 
+const cliVoiceHelp = "语音控制：wake / record_start / record_stop / record_cancel / text <文字> / cancel / clear / preview [文字] / reference"
+
 func (c *cliVoiceControl) start(ctx context.Context, address string, cfg voice.Config, host *cliVoiceHost) <-chan struct{} {
+	return c.startWorker(ctx, address, cfg, host, false)
+}
+
+func (c *cliVoiceControl) startStandalone(ctx context.Context, cfg voice.Config, host *cliVoiceHost) <-chan struct{} {
+	return c.startWorker(ctx, "", cfg, host, true)
+}
+
+func (c *cliVoiceControl) startWorker(ctx context.Context, address string, cfg voice.Config, host *cliVoiceHost, standalone bool) <-chan struct{} {
 	done := make(chan struct{})
 	if !cfg.Enabled {
 		close(done)
@@ -114,7 +124,7 @@ func (c *cliVoiceControl) start(ctx context.Context, address string, cfg voice.C
 		}()
 		lastPhase, lastError := "", ""
 		for ctx.Err() == nil {
-			err := voice.Run(ctx, address, cfg, host, commands, func(state voice.State) {
+			emit := func(state voice.State) {
 				c.mu.Lock()
 				if c.commands == commands {
 					c.connected = state.Connected
@@ -127,7 +137,13 @@ func (c *cliVoiceControl) start(ctx context.Context, address string, cfg voice.C
 					}
 					lastPhase, lastError = state.Phase, state.Error
 				}
-			})
+			}
+			var err error
+			if standalone {
+				err = voice.RunStandalone(ctx, cfg, host, commands, emit)
+			} else {
+				err = voice.Run(ctx, address, cfg, host, commands, emit)
+			}
 			c.mu.Lock()
 			c.connected = false
 			c.mu.Unlock()
@@ -165,14 +181,14 @@ func (c *cliVoiceControl) console(ctx context.Context, input io.Reader) {
 			continue
 		}
 		switch kind {
-		case "wake", "cancel", "clear", "preview", "reference":
+		case "wake", "record_start", "record_stop", "record_cancel", "text", "cancel", "clear", "preview", "reference":
 		default:
-			log.Print("语音命令：wake / cancel / clear / preview [文字] / reference")
+			log.Print(cliVoiceHelp)
 			continue
 		}
 		c.mu.Lock()
 		if !c.connected || c.commands == nil {
-			log.Print("voice: device audio connection is offline")
+			log.Print("voice: audio session is offline")
 		} else {
 			select {
 			case c.commands <- voice.Command{Kind: kind, Text: strings.TrimSpace(text)}:
@@ -230,6 +246,9 @@ func (h *cliVoiceHost) SetPage(ctx context.Context, page string) error {
 	if page != "metrics" && page != "quota" && page != "voice" {
 		return errors.New("invalid display page")
 	}
+	if h.conn == nil {
+		return errors.New("device unavailable: ESP32 display control requires a device connection")
+	}
 	return h.conn.Send(ctx, struct {
 		V    int    `json:"v"`
 		Type string `json:"type"`
@@ -239,6 +258,9 @@ func (h *cliVoiceHost) SetPage(ctx context.Context, page string) error {
 func (h *cliVoiceHost) SetScreen(ctx context.Context, on bool, brightness int) error {
 	if brightness < 0 || brightness > 100 {
 		return errors.New("brightness must be 0..100")
+	}
+	if h.conn == nil {
+		return errors.New("device unavailable: ESP32 screen control requires a device connection")
 	}
 	return h.conn.Send(ctx, struct {
 		V          int    `json:"v"`

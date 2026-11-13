@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"aemeath/agent/internal/desktop"
 	"aemeath/agent/internal/wake"
 
 	"github.com/egoist/mygo/ui"
@@ -256,13 +257,16 @@ func (a *nativeUI) voiceSoundSettingsView(c *ui.Context) {
 			if cfg.PlaybackOutput == "console" {
 				output = 0
 			}
-			field := nativeSettingsSegmented(c, "voice-playback-output", &output, "播放位置", "Agent", "监控台")
+			field := nativeSettingsSegmented(c, "voice-playback-output", &output, "播放位置", "Agent", "监控台").Disabled(a.draft.RunMode == desktop.RunModeStandalone)
 			if field.Changed() {
 				cfg.PlaybackOutput = []string{"console", "agent"}[output]
 				a.edited()
 			}
 			return field
 		})
+		if a.draft.RunMode == desktop.RunModeStandalone {
+			ui.Text(c, "独立模式始终使用本机麦克风和扬声器；设备模式的播放位置会保留。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+		}
 		ui.Text(c, "Agent 使用当前电脑的扬声器；监控台使用 ESP32 设备扬声器。保存后生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		nativeSettingsField(c, "voice-volume-field", "播放音量", func() ui.Element {
 			volume := float64(cfg.Volume)
