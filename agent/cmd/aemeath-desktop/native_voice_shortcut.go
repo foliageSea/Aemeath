@@ -15,7 +15,7 @@ func (a *nativeUI) installConfiguredVoiceHold(register func(string, func(bool)) 
 	commit, _, err := a.prepareVoiceShortcut(a.snapshot.Settings.VoiceShortcut)
 	if err != nil {
 		a.voiceGlobalError = "全局快捷键不可用：" + err.Error()
-		a.notify(a.voiceGlobalError)
+		a.notify(nativeNoticeError, a.voiceGlobalError)
 	} else {
 		commit()
 	}
@@ -100,7 +100,7 @@ func (a *nativeUI) saveWithVoiceShortcut() {
 	}
 	dispatch := a.update
 	if dispatch == nil {
-		a.notify("窗口尚未就绪，请稍后重试。")
+		a.notify(nativeNoticeWarning, "窗口尚未就绪，请稍后重试。")
 		return
 	}
 	settings, revision := copySettings(a.draft), a.revision
@@ -108,14 +108,14 @@ func (a *nativeUI) saveWithVoiceShortcut() {
 	if settings.VoiceShortcut != "" {
 		key, err := holdkey.NormalizeShortcut(settings.VoiceShortcut)
 		if err != nil {
-			a.notify("语音触发快捷键无效：" + err.Error())
+			a.notify(nativeNoticeError, "语音触发快捷键无效："+err.Error())
 			return
 		}
 		settings.VoiceShortcut = key
 	}
 	commit, cancel, err := a.prepareVoiceShortcut(settings.VoiceShortcut)
 	if err != nil {
-		a.notify("快捷键未更改，原快捷键仍保留：" + err.Error())
+		a.notify(nativeNoticeWarning, "快捷键未更改，原快捷键仍保留："+err.Error())
 		return
 	}
 	a.voiceShortcutPending = cancel
@@ -127,7 +127,7 @@ func (a *nativeUI) saveWithVoiceShortcut() {
 			a.voiceShortcutPending = nil
 			if err != nil {
 				cancel()
-				a.notify("操作失败，修改已保留：" + err.Error())
+				a.notify(nativeNoticeError, "操作失败，修改已保留："+err.Error())
 			} else {
 				commit()
 				if a.revision == revision {
@@ -135,7 +135,7 @@ func (a *nativeUI) saveWithVoiceShortcut() {
 					a.draft.VoiceShortcut = settings.VoiceShortcut
 				}
 				a.quotaUnsaved = false
-				a.notify("设置已保存。")
+				a.notify(nativeNoticeSuccess, "设置已保存。")
 			}
 			a.refresh()
 		})

@@ -37,6 +37,7 @@ type nativeUI struct {
 	draft                    desktop.Settings
 	page                     string
 	notice                   string
+	noticeType               nativeNoticeType
 	noticePending            bool
 	dirty                    bool
 	revision                 int
@@ -123,7 +124,8 @@ func (a *nativeUI) refreshVoice() {
 	a.recordVoice()
 }
 
-func (a *nativeUI) notify(message string) {
+func (a *nativeUI) notify(kind nativeNoticeType, message string) {
+	a.noticeType = kind
 	a.notice = message
 	a.noticePending = true
 }
@@ -134,7 +136,7 @@ func (a *nativeUI) run(key string, work func() error, done func()) {
 	}
 	dispatch := a.update
 	if dispatch == nil {
-		a.notify("窗口尚未就绪，请稍后重试。")
+		a.notify(nativeNoticeWarning, "窗口尚未就绪，请稍后重试。")
 		return
 	}
 	a.busy[key] = true
@@ -143,9 +145,9 @@ func (a *nativeUI) run(key string, work func() error, done func()) {
 		dispatch(func() {
 			a.busy[key] = false
 			if err != nil {
-				a.notify("操作失败，修改已保留：" + err.Error())
+				a.notify(nativeNoticeError, "操作失败，修改已保留："+err.Error())
 			} else {
-				a.notify("操作已完成。")
+				a.notify(nativeNoticeSuccess, "操作已完成。")
 				if done != nil {
 					done()
 				}
@@ -184,8 +186,9 @@ func (a *nativeUI) view(c *ui.Context) {
 		a.endVoiceHold(true)
 	}
 	t := c.Theme()
+	defer a.toastView(c)
 	if a.noticePending {
-		c.Toast(a.notice)
+		c.AddToast(ui.Toast{ID: string(a.noticeType) + ":" + a.notice, Title: a.notice, Type: string(a.noticeType)})
 		a.noticePending = false
 	}
 	if a.voiceHold && c.Shortcut(0, ui.KeyEscape) {
@@ -326,14 +329,14 @@ func (a *nativeUI) screenSettingsView(c *ui.Context) {
 		screenOn := a.snapshot.ScreenOn
 		if nativeSettingsToggle(c, "screen-on", "屏幕状态", &screenOn, screenDisabled, "亮屏") {
 			brightness := a.snapshot.Brightness
-			a.run("screen", func() error { return a.service.SetScreen(screenOn, brightness) }, func() { a.notify("屏幕指令已发送") })
+			a.run("screen", func() error { return a.service.SetScreen(screenOn, brightness) }, func() { a.notify(nativeNoticeSuccess, "屏幕指令已发送") })
 		}
 		nativeSettingsField(c, "screen-brightness-field", "亮度", func() ui.Element {
 			brightness := float64(a.snapshot.Brightness)
 			field := ui.Slider(c.Key("screen-brightness"), &brightness, 0, 100).Label("亮度").Disabled(screenDisabled || !a.snapshot.ScreenOn).FillWidth()
 			if field.Changed() {
 				on, level := a.snapshot.ScreenOn, int(brightness)
-				a.run("screen", func() error { return a.service.SetScreen(on, level) }, func() { a.notify("亮度指令已发送") })
+				a.run("screen", func() error { return a.service.SetScreen(on, level) }, func() { a.notify(nativeNoticeSuccess, "亮度指令已发送") })
 			}
 			return field
 		})

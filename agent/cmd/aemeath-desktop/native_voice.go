@@ -53,7 +53,7 @@ func (a *nativeUI) voiceCommand(kind, text string) {
 	}
 	service, ok := a.service.(nativeVoiceService)
 	if !ok {
-		a.notify("当前服务不支持语音操作，请更新桌面应用。")
+		a.notify(nativeNoticeWarning, "当前服务不支持语音操作，请更新桌面应用。")
 		return
 	}
 	textRevision := a.voiceTextRevision
@@ -63,7 +63,7 @@ func (a *nativeUI) voiceCommand(kind, text string) {
 				a.voiceText = ""
 			}
 			a.voiceScroll.Y = math.MaxFloat32
-			a.notify("文本消息已发送。")
+			a.notify(nativeNoticeSuccess, "文本消息已发送。")
 			return
 		}
 		if kind == "clear" {
@@ -71,7 +71,7 @@ func (a *nativeUI) voiceCommand(kind, text string) {
 			a.voiceCleared, a.voiceClearTurn = true, a.snapshot.Voice.Turn
 			a.voiceClearSession = a.snapshot.Voice.Session
 		}
-		a.notify("语音指令已发送。")
+		a.notify(nativeNoticeSuccess, "语音指令已发送。")
 	})
 }
 
@@ -278,7 +278,7 @@ func (a *nativeUI) sendVoiceText() {
 		return
 	}
 	if len(text) > 4096 {
-		a.notify("文本消息过长，请缩短后重试（最多 4096 字节）。")
+		a.notify(nativeNoticeWarning, "文本消息过长，请缩短后重试（最多 4096 字节）。")
 		return
 	}
 	a.voiceCommand("text", text)

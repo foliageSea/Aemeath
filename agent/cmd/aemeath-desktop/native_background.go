@@ -130,7 +130,7 @@ func (a *nativeUI) chooseBackground() {
 		dispatch(func() {
 			b.loading = false
 			if err != nil {
-				a.notify("无法载入背景图片：" + err.Error())
+				a.notify(nativeNoticeError, "无法载入背景图片："+err.Error())
 				return
 			}
 			if path == "" {
@@ -310,10 +310,10 @@ func (a *nativeUI) backgroundRequest(action string) {
 				if (action == "upload" || action == "remove") && checkErr == nil {
 					b.info = info
 					b.deviceError = ""
-					a.notify("背景操作未确认完成，已刷新设备状态；编辑已保留：" + err.Error())
+					a.notify(nativeNoticeWarning, "背景操作未确认完成，已刷新设备状态；编辑已保留："+err.Error())
 				} else {
 					b.deviceError = err.Error()
-					a.notify("背景操作未完成，编辑已保留：" + err.Error())
+					a.notify(nativeNoticeError, "背景操作未完成，编辑已保留："+err.Error())
 				}
 				return
 			}
@@ -324,9 +324,9 @@ func (a *nativeUI) backgroundRequest(action string) {
 					a.setBackgroundSource(src, thumb, "设备当前背景（已压缩）", size)
 				}
 			case "upload":
-				a.notify("背景已保存并应用到监控台。")
+				a.notify(nativeNoticeSuccess, "背景已保存并应用到监控台。")
 			case "remove":
-				a.notify("背景已移除，监控台恢复纯色底。")
+				a.notify(nativeNoticeSuccess, "背景已移除，监控台恢复纯色底。")
 			}
 		})
 	}()

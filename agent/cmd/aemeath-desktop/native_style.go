@@ -65,7 +65,7 @@ func (a *nativeUI) header(c *ui.Context) {
 		seg := ui.Segmented(c, &pageIndex, "性能屏", "额度屏", "语音屏").FontSize(12).Disabled(!a.snapshot.Connected || a.busy["page"])
 		if seg.Changed() {
 			page := nativePageNames[pageIndex]
-			a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify("切页指令已发送") })
+			a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify(nativeNoticeSuccess, "切页指令已发送") })
 		}
 		screenLabel, screenIcon := "息屏", screenMonitorIcon
 		if !a.snapshot.ScreenOn {
@@ -84,7 +84,7 @@ func (a *nativeUI) header(c *ui.Context) {
 			ui.Icon(c, screenIcon).FontSize(17).TextColor(iconColor)
 		}).OnClick(func() {
 			on, brightness := !a.snapshot.ScreenOn, a.snapshot.Brightness
-			a.run("screen", func() error { return a.service.SetScreen(on, brightness) }, func() { a.notify("屏幕指令已发送") })
+			a.run("screen", func() error { return a.service.SetScreen(on, brightness) }, func() { a.notify(nativeNoticeSuccess, "屏幕指令已发送") })
 		})
 	})
 }

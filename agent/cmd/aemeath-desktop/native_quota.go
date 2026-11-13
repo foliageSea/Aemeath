@@ -20,7 +20,7 @@ func (a *nativeUI) saveSubscriptions() {
 	settings := copySettings(a.snapshot.Settings)
 	settings.Subscriptions = append([]desktop.Subscription{}, a.draft.Subscriptions...)
 	a.quotaUnsaved = true
-	a.run("save", func() error { return a.service.SaveSettings(settings) }, func() { a.quotaUnsaved = false; a.notify("订阅已保存") })
+	a.run("save", func() error { return a.service.SaveSettings(settings) }, func() { a.quotaUnsaved = false; a.notify(nativeNoticeSuccess, "订阅已保存") })
 }
 func (a *nativeUI) toggleSubscription(name string) {
 	if a.busy["save"] {

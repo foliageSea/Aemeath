@@ -52,7 +52,7 @@ func (a *nativeUI) startWakeAssets(install bool) {
 	}
 	dispatch := a.update
 	if dispatch == nil {
-		a.notify("窗口尚未就绪，请稍后重试。")
+		a.notify(nativeNoticeWarning, "窗口尚未就绪，请稍后重试。")
 		return
 	}
 	target := a.wakeModelPath()
@@ -99,18 +99,18 @@ func (a *nativeUI) startWakeAssets(install bool) {
 			}
 			if err != nil {
 				if !a.wakeAssets.canceled {
-					a.notify("唤醒模型安装失败，请检查网络或目录后重试。")
+					a.notify(nativeNoticeError, "唤醒模型安装失败，请检查网络或目录后重试。")
 				}
 				return
 			}
-			a.notify("唤醒模型已安装。")
+			a.notify(nativeNoticeSuccess, "唤醒模型已安装。")
 			// Reload only the saved model directory; never save or overwrite a draft.
 			saved := strings.TrimSpace(a.snapshot.Settings.Voice.WakeModelDir)
 			if saved == "" {
 				saved = wake.DefaultModelDir()
 			}
 			if service, ok := a.service.(nativeWakeReloader); ok && filepath.Clean(saved) == target && a.snapshot.Settings.Voice.Enabled && a.snapshot.Running {
-				a.run("wake-reload", func() error { return service.ReloadWakeModels(target) }, func() { a.notify("唤醒模型已安装，语音连接将重新加载模型。") })
+				a.run("wake-reload", func() error { return service.ReloadWakeModels(target) }, func() { a.notify(nativeNoticeSuccess, "唤醒模型已安装，语音连接将重新加载模型。") })
 			}
 		})
 	}()

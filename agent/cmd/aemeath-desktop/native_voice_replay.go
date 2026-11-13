@@ -133,7 +133,7 @@ func (a *nativeUI) voiceReplayView(c *ui.Context, turn nativeVoiceTurn) {
 			voiceReplayAction(c, "action", label, hint, icon, disabled, func() { a.replayVoiceTurn(turn) })
 		}
 		if showCost {
-			voiceReplayAction(c, "cost-info", "可能收费", voiceReplayCostHint, voiceReplayInfoIcon, false, func() { a.notify(voiceReplayCostHint) })
+			voiceReplayAction(c, "cost-info", "可能收费", voiceReplayCostHint, voiceReplayInfoIcon, false, func() { a.notify(nativeNoticeInfo, voiceReplayCostHint) })
 		}
 	})
 }

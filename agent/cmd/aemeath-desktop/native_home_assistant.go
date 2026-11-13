@@ -43,7 +43,7 @@ func (a *nativeUI) checkHomeAssistant() {
 		return
 	}
 	if a.update == nil {
-		a.notify("窗口尚未就绪，请稍后重试。")
+		a.notify(nativeNoticeWarning, "窗口尚未就绪，请稍后重试。")
 		return
 	}
 	cfg := nativeHAConfig(a.draft.Voice)

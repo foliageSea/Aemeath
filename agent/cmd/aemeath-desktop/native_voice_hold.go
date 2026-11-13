@@ -23,7 +23,7 @@ func (a *nativeUI) startVoiceHold() bool {
 	}
 	service := a.service.(nativeVoiceService)
 	if err := service.VoiceCommand("record_start", ""); err != nil {
-		a.notify(err.Error())
+		a.notify(nativeNoticeError, err.Error())
 		return false
 	}
 	a.voiceHold = true
@@ -46,7 +46,7 @@ func (a *nativeUI) endVoiceHold(discard bool) {
 	}
 	if service, ok := a.service.(nativeVoiceService); ok {
 		if err := service.VoiceCommand(kind, ""); err != nil {
-			a.notify(err.Error())
+			a.notify(nativeNoticeError, err.Error())
 		}
 	}
 }
