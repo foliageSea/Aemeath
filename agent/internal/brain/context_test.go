@@ -314,6 +314,7 @@ func TestContextBudgetChecksLiveToolResultsWithoutReplay(t *testing.T) {
 	defer s.Close()
 	host := &largeMetricsHost{}
 	e := contextEngine(t, s, nil, true, host)
+	e.authorizeTool = allowToolAuthorizationForTest // isolate live-result budgeting
 	_, err := e.Reply(context.Background(), "查看状态")
 	var failure *requestFailure
 	if !errors.As(err, &failure) || failure.code != "context_limit" || requests.Load() != 1 || host.calls.Load() != 1 {

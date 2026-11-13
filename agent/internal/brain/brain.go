@@ -61,6 +61,7 @@ type Engine struct {
 	lifeCancel         context.CancelFunc
 	closed             bool
 	model              *openai.ChatModel
+	authorizeTool      toolAuthorizationFunc // independent execution admission; test seam
 	agent              *react.Agent
 	persona            string
 	timeNow            func() time.Time // local snapshot clock; sampled once per user turn
@@ -172,6 +173,7 @@ func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSear
 		return nil, errors.New("brain: cannot initialize OpenAI model")
 	}
 	e.model = cm
+	e.authorizeTool = e.checkToolAuthorization
 	if cfg.Tools && cfg.HomeAssistant.Enabled {
 		e.haConfig = cfg.HomeAssistant
 	}
@@ -256,6 +258,8 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	e.syncMemoryLocked()
 	generation := e.generation
 	ctx = context.WithValue(ctx, requestScopeKey{}, requestScope{generation: generation, epoch: e.memoryEpoch})
+	ctx = withToolAuthorization(ctx, text, e.authorizeTool)
+	ctx = withToolResultCache(ctx)
 	memoryScope := e.recallMemoriesLocked(text)
 	ctx = context.WithValue(ctx, memoryTurnKey{}, memoryScope)
 	e.mu.Unlock()
@@ -351,7 +355,7 @@ func (e *Engine) rebuildAgent(ctx context.Context, extra []tool.BaseTool) error 
 	e.mu.Unlock()
 	for i, candidate := range all {
 		if invokable, ok := candidate.(tool.InvokableTool); ok {
-			all[i] = diagnosticTool{InvokableTool: invokable}
+			all[i] = diagnosticTool{InvokableTool: authorizedTool{InvokableTool: invokable, engine: e}}
 		}
 	}
 	agent, err := react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: &finalStreamModel{base: e.model, decision: e.model}, ToolsConfig: compose.ToolsNodeConfig{Tools: all, ExecuteSequentially: true}, MaxStep: maxSteps})

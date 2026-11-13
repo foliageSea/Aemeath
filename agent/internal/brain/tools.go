@@ -18,16 +18,18 @@ type deviceTool struct {
 }
 
 func (t *deviceTool) Info(context.Context) (*schema.ToolInfo, error) { return t.info, nil }
-func (t *deviceTool) InvokableRun(ctx context.Context, args string, _ ...tool.Option) (output string, err error) {
-	finish := startTool(ctx, t.info.Name, args)
-	defer func() { finish(output, err) }()
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	if len(args) > 4096 {
-		return "", errors.New("tool arguments too large")
-	}
-	return t.run(ctx, args)
+func (t *deviceTool) InvokableRun(ctx context.Context, args string, _ ...tool.Option) (string, error) {
+	return cachedToolResult(ctx, t.info.Name, args, func() (output string, err error) {
+		finish := startTool(ctx, t.info.Name, args)
+		defer func() { finish(output, err) }()
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if len(args) > 4096 {
+			return "", errors.New("tool arguments too large")
+		}
+		return t.run(ctx, args)
+	})
 }
 
 func deviceTools(host Host) []tool.BaseTool {

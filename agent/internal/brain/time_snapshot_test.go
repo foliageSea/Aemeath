@@ -218,6 +218,7 @@ func TestTimeSnapshotStableThroughToolContinuation(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer engine.Close()
+			engine.authorizeTool = allowToolAuthorizationForTest // isolate snapshot continuity
 			engine.timeNow = func() time.Time {
 				return now.Add(time.Duration(clockCalls.Add(1)-1) * 48 * time.Hour)
 			}

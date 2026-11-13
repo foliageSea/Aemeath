@@ -39,6 +39,14 @@ func TestWorkerRealReActToolEvents(t *testing.T) {
 					t.Error(err)
 					return
 				}
+				if req["tool_choice"] == "none" && req["stream"] != true {
+					// Independent execution admission is not a selection/final reply.
+					if _, exists := req["tools"]; exists {
+						t.Error("authorization bound tools")
+					}
+					io.WriteString(w, `{"choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ALLOW"}}]}`)
+					return
+				}
 				if requests.Add(1) == 1 {
 					io.WriteString(w, `{"choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"random","type":"function","function":{"name":"set_page","arguments":"{\"page\":\"voice\"}"}}]}}]}`)
 				} else if req["stream"] == true {
