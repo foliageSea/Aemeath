@@ -255,7 +255,7 @@ func nativeProgress(c *ui.Context, v float64) {
 }
 func (a *nativeUI) overview(c *ui.Context) { a.metricGrid(c) }
 func (a *nativeUI) settingsView(c *ui.Context) {
-	ui.Row(c.Key("settings-toolbar")).FillWidth().MinWidth(0).MaxWidth(nativeSettingsPageWidth).Padding(0, nativeSettingsScrollbarGutter, 0, 0).Shrink(0).Gap(12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("settings-toolbar")).FillWidth().MinWidth(0).Shrink(0).Gap(12).AlignItems(ui.Center).Children(func() {
 		ui.Tabs(c.Key("settings-tabs"), &a.settingsTab, "连接", "通用", "屏幕", "助手", "语音", "智能家居").Grow(1)
 		if a.dirty {
 			ui.Text(c, "未保存").FontSize(12).TextColor(c.Theme().Warning)

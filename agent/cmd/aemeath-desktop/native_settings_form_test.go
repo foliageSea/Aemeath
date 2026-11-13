@@ -55,9 +55,9 @@ func nativeSettingsFormTestInside(t *testing.T, what string, r ui.Rect, left, to
 }
 
 func TestNativeSettingsFormResponsiveFields(t *testing.T) {
-	// The form reserves 16 DIPs for the scrollbar; the section uses 40
-	// DIPs of horizontal padding. Label, gap and control fit at 448 DIPs.
-	for _, width := range []int{640, 320, 447, 448, 449} {
+	// The section uses 40 DIPs of horizontal padding. Label, gap and
+	// control fit at 432 DIPs.
+	for _, width := range []int{640, 320, 431, 432, 433} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			tt, _ := nativeSettingsFormTestFields(width)
 			var startX float32
@@ -67,7 +67,7 @@ func TestNativeSettingsFormResponsiveFields(t *testing.T) {
 					t.Fatalf("missing visible label %q: %+v", title, label)
 				}
 				field := nativeSettingsFormTestAccess(t, tt, ui.RoleTextField, title).Bounds
-				if width >= 448 {
+				if width >= 432 {
 					if label.X+label.W > field.X || label.Y >= field.Y+field.H || field.Y >= label.Y+label.H {
 						t.Errorf("wide label/control must share a row: label=%+v field=%+v", label, field)
 					}
@@ -82,7 +82,7 @@ func TestNativeSettingsFormResponsiveFields(t *testing.T) {
 				} else {
 					nativeSettingsFormTestNear(t, "field input starting edge", field.X, startX)
 				}
-				nativeSettingsFormTestInside(t, title, field, 20, 0, float32(width)-20-nativeSettingsScrollbarGutter, 500)
+				nativeSettingsFormTestInside(t, title, field, 20, 0, float32(width)-20, 500)
 			}
 		})
 	}
@@ -141,7 +141,7 @@ func TestNativeSettingsFormLabelsFocusInputs(t *testing.T) {
 	}
 }
 
-func TestNativeSettingsFormMaxWidthAndToggleAlignment(t *testing.T) {
+func TestNativeSettingsFormFillsWidthAndToggleAlignment(t *testing.T) {
 	for _, width := range []int{320, 640, 1200} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			enabled := false
@@ -157,8 +157,8 @@ func TestNativeSettingsFormMaxWidthAndToggleAlignment(t *testing.T) {
 			if !ok {
 				t.Fatal("missing form width probe")
 			}
-			wantWidth := float32(min(width, 760)) - nativeSettingsScrollbarGutter
-			nativeSettingsFormTestNear(t, "form maximum width", form.W, wantWidth)
+			wantWidth := float32(width)
+			nativeSettingsFormTestNear(t, "form available width", form.W, wantWidth)
 			toggle := nativeSettingsFormTestAccess(t, tt, ui.RoleSwitch, "Enable feature").Bounds
 			nativeSettingsFormTestNear(t, "switch right edge", toggle.X+toggle.W, form.X+form.W-20)
 			label, ok := tt.Find("Enable feature")
@@ -358,7 +358,9 @@ func TestNativeSettingsFormSaveAlignsWithContentOnResize(t *testing.T) {
 						} else if save.Bounds != sharedSaveBounds {
 							t.Fatalf("save moved after switching tab at width %d: tab=%s got=%+v want=%+v", width, tab.title, save.Bounds, sharedSaveBounds)
 						}
-						expectedRight := float32(226) + min(float32(width)-246, nativeSettingsPageWidth) - nativeSettingsScrollbarGutter
+						expectedRight := float32(width) - 20
+						screen := nativeSettingsFormTestAccess(t, tt, ui.RoleButton, "息屏").Bounds
+						nativeSettingsFormTestNear(t, "save and header right edge", save.Bounds.X+save.Bounds.W, screen.X+screen.W)
 						nativeSettingsFormTestNear(t, fmt.Sprintf("%s/%d shared page right edge", tab.title, width), control.X+control.W+20, expectedRight)
 						nativeSettingsFormTestNear(t, fmt.Sprintf("%s/%d save and form right edge", tab.title, width), save.Bounds.X+save.Bounds.W, control.X+control.W+20)
 						nativeSettingsFormTestInside(t, "save button", save.Bounds, 206, 0, float32(width)-20, 937)

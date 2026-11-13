@@ -39,7 +39,7 @@ func (a *nativeUI) groupedSettingsView(c *ui.Context, key, title string, groups 
 	if *section < 0 || *section >= len(groups) {
 		*section = 0
 	}
-	ui.Row(c.Key(key + "-settings-layout")).Label(title + "设置分组").FillWidth().MaxWidth(nativeSettingsPageWidth).Grow(1).MinHeight(0).Gap(nativeSettingsNavigationGap).AlignItems(ui.Stretch).Children(func() {
+	ui.Row(c.Key(key + "-settings-layout")).Label(title + "设置分组").FillWidth().MinWidth(0).Grow(1).MinHeight(0).Gap(nativeSettingsNavigationGap).AlignItems(ui.Stretch).Children(func() {
 		ui.Column(c.Key(key+"-settings-sidebar")).Label(title+"设置导航").Width(nativeSettingsNavigationWidth).Shrink(0).Padding(8).Gap(4).Radius(14).Background(t.Surface).Border(1, t.Border.Alpha(0.45)).Children(func() {
 			for index, group := range groups {
 				selected := *section == index
