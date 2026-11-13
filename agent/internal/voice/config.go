@@ -22,6 +22,7 @@ type Config struct {
 	LLMModel          string  `json:"llmModel"`
 	ReasoningEffort   string  `json:"reasoningEffort,omitempty"`
 	LLMTools          bool    `json:"llmTools"`
+	MemoryMode        string  `json:"memoryMode"`
 	ContextWindowMode string  `json:"contextWindowMode"`
 	ContextWindow     int     `json:"contextWindow"`
 	ModelsDevEnabled  bool    `json:"modelsDevEnabled"`
@@ -107,6 +108,11 @@ type MemoryHost interface {
 	ConversationMemory() *brain.Memory
 }
 
+// LongTermMemoryHost optionally shares durable memories across voice connections.
+type LongTermMemoryHost interface {
+	LongTermMemory() *brain.LongTermMemory
+}
+
 // ModelCatalogHost shares public catalog data across voice connections.
 type ModelCatalogHost interface {
 	ModelsCatalog() *brain.ModelCatalog
@@ -115,6 +121,11 @@ type ModelCatalogHost interface {
 // NormalizeConfig applies local defaults. Credentials and installed assets are
 // checked only when an operation needs them, keeping audio diagnostics usable.
 func NormalizeConfig(c Config) (Config, error) {
+	var memoryErr error
+	c.MemoryMode, memoryErr = brain.NormalizeMemoryMode(c.MemoryMode)
+	if memoryErr != nil {
+		return c, memoryErr
+	}
 	var reasoningErr error
 	c.ReasoningEffort, reasoningErr = brain.NormalizeReasoningEffort(c.ReasoningEffort)
 	if reasoningErr != nil {

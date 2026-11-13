@@ -9,7 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-var nativeAssistantSections = [...]string{"基础设置", "对话服务"}
+var nativeAssistantSections = [...]string{"基础设置", "对话服务", "记忆"}
 var nativeVoiceSections = [...]string{"语音识别", "语音合成", "离线唤醒", "声音试听"}
 
 func nativeVoiceNavigate(t *testing.T, tt *ui.Tester, label string) {
@@ -58,7 +58,7 @@ func nativeVoiceClickRole(t *testing.T, tt *ui.Tester, role ui.Role, label strin
 	if !ok {
 		t.Fatalf("missing control: %s", label)
 	}
-	for _, title := range []string{"基础设置", "对话服务", "语音识别", "语音合成", "离线唤醒", "声音试听"} {
+	for _, title := range []string{"基础设置", "对话服务", "记忆", "语音识别", "语音合成", "离线唤醒", "声音试听"} {
 		viewport, found := tt.Find(title + "设置内容")
 		if !found {
 			continue

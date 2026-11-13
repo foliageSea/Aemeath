@@ -227,7 +227,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 			voiceIconButton(c, "voice-configure", "语音设置", voiceSettingsIcon, false, false, a.openVoiceSettings)
 			voiceIconButton(c, "voice-clear", "清空对话", voiceClearIcon, false, disabled, func() { a.voiceClearConfirm = true })
 		})
-		if ui.AlertDialog(c, &a.voiceClearConfirm, "清空对话？", "当前对话记录、上下文和累计用量将被清除，且无法恢复。", "取消", "清空") == 1 {
+		if ui.AlertDialog(c, &a.voiceClearConfirm, "清空对话？", "当前对话记录、上下文摘要和累计用量将被清除，且无法恢复。长期记忆会保留，可在助手设置的“记忆”中单独管理。", "取消", "清空") == 1 {
 			a.voiceCommand("clear", "")
 		}
 		ui.Box(c.Key("voice-conversation")).FillWidth().Grow(1).MinHeight(0).Clip().Children(func() {

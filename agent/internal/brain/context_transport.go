@@ -14,7 +14,8 @@ type requestScope struct {
 	generation  uint64
 	epoch       uint64
 	summary     bool
-	inputTokens int // local estimate, assigned only after the request passes its budget
+	background  bool // auxiliary memory extraction: count usage without changing active occupancy
+	inputTokens int  // local estimate, assigned only after the request passes its budget
 }
 
 // Count the actual serialized request payload, including tool definitions,
@@ -73,7 +74,7 @@ func (e *Engine) budgetRequest(req *http.Request) (*http.Request, requestScope, 
 	if !e.requestCurrentLocked(scope) {
 		return nil, scope, context.Canceled
 	}
-	if scope.generation == e.generation && !scope.summary {
+	if scope.generation == e.generation && !scope.summary && !scope.background {
 		if tools, ok := payload["tools"]; ok {
 			e.toolTokens = estimateJSON(tools)
 		}

@@ -96,8 +96,8 @@ func (a *nativeUI) voiceContextView(c *ui.Context, details bool) {
 	} else if stats.LastCompression == "failed" || stats.LastCompression == "fallback" {
 		summaryColor = t.Warning
 	}
-	estimateTooltip := fmt.Sprintf("按序列化请求估算，非精确分词；占用比例按输入预算计算，已扣除 %d Tokens 预留。达到 70%% 后台摘要，85%% 同步压缩，硬预算不足时进一步裁剪。文字对话与摘要跨闲置、重连和重启保留，不因闲置自动过期；手动清空对话会删除记忆与摘要。", stats.ReservedTokens)
-	usageTooltip := "累计 Tokens（本地估算），非精确分词，不等于服务商计费用量。按实际发送的请求（含历史上下文、工具定义和工具结果）及收到的输出（含可见推理和工具调用）估算，覆盖工具决策、回复与摘要请求。本地保存，启动后立即恢复并继续累计；闲置、重连、重启和自动压缩或预算裁剪均保留累计用量。仅手动清空对话会清零用量并删除保存记录；无保存用量时从 0 开始。"
+	estimateTooltip := fmt.Sprintf("按序列化请求估算，非精确分词；占用比例按输入预算计算，已扣除 %d Tokens 预留。达到 70%% 后台摘要，85%% 同步压缩，硬预算不足时进一步裁剪。文字对话与摘要跨闲置、重连和重启保留，不因闲置自动过期；手动清空对话会删除对话与摘要，保留长期记忆。", stats.ReservedTokens)
+	usageTooltip := "累计 Tokens（本地估算），非精确分词，不等于服务商计费用量。按实际发送的请求（含历史上下文、工具定义和工具结果）及收到的输出（含可见推理和工具调用）估算，覆盖工具决策、回复、摘要与长期记忆提炼请求。本地保存，启动后立即恢复并继续累计；闲置、重连、重启和自动压缩或预算裁剪均保留累计用量。仅手动清空对话会清零用量并删除保存记录；无保存用量时从 0 开始。"
 	if !details {
 		ui.Row(c.Key("voice-context")).Label("上下文与用量").FillWidth().MinWidth(0).Gap(12).AlignItems(ui.Center).Children(func() {
 			status := a.voiceComposerStatus()
@@ -154,6 +154,7 @@ func (a *nativeUI) voiceContextView(c *ui.Context, details bool) {
 			summaryDetail += " · " + nativeContextNumber(stats.SummaryTokens) + " Tokens"
 		}
 		nativeContextDetail(c, "摘要", summaryDetail, "", summaryColor)
+		nativeContextDetail(c, "长期记忆", fmt.Sprintf("%d 条 · 召回 %d 条 · %d Tokens（估算）", stats.MemoryEntries, stats.RecalledMemories, stats.MemoryTokens), "长期记忆独立保存；清空对话会保留。", t.TextMuted)
 		nativeContextDetail(c, "对话保留", fmt.Sprintf("%d 轮 · 压缩 %d 次 · 丢弃 %d 轮", stats.RetainedTurns, stats.Compressions, stats.DroppedTurns), "", t.TextMuted)
 		usage := fmt.Sprintf("输入 %s · 输出 %s · 总计 %s Tokens（本地估算）", nativeContextNumber(stats.LocalPromptTokens), nativeContextNumber(stats.LocalCompletionTokens), nativeContextNumber(stats.LocalTotalTokens))
 		nativeContextDetail(c, "累计用量", usage, usageTooltip, t.Text)

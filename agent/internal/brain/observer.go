@@ -119,13 +119,39 @@ func startTool(ctx context.Context, name, args string, title ...string) func(str
 				event.Status, event.Result = "failed", "Home Assistant 结果无效"
 			}
 		}
+		if isMemoryTool(name) && err == nil && ctx.Err() == nil {
+			var outcome struct {
+				OK *bool `json:"ok"`
+			}
+			if len(result) > maxTextBytes || json.Unmarshal([]byte(result), &outcome) != nil || outcome.OK == nil || !*outcome.OK {
+				event.Status, event.Result = "failed", "长期记忆操作未成功"
+			} else {
+				switch name {
+				case "memory_search":
+					event.Result = "长期记忆查询完成"
+				case "memory_save":
+					event.Result = "长期记忆已保存"
+				case "memory_forget":
+					event.Result = "长期记忆已删除"
+				}
+			}
+		}
 		observer.mu.Lock()
 		defer observer.mu.Unlock()
 		observer.observe(event)
 	}
 }
 
+func isMemoryTool(name string) bool {
+	return name == "memory_search" || name == "memory_save" || name == "memory_forget"
+}
+
 func toolArguments(name, args string) string {
+	// Memory arguments can contain private facts or credentials, including in
+	// rejected calls. Display no user-provided memory fields.
+	if isMemoryTool(name) {
+		return "{}"
+	}
 	if len(args) > 4096 {
 		return ""
 	}

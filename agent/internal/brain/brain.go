@@ -30,6 +30,8 @@ type Config struct {
 	HomeAssistant                   hamcp.Config
 	// Memory shares the conversation across Engines; nil keeps it per Engine.
 	Memory            *Memory
+	LongTermMemory    *LongTermMemory
+	MemoryMode        string
 	ContextWindow     int
 	AutoContextWindow bool
 	ModelsDev         *ModelCatalog
@@ -81,6 +83,14 @@ type Engine struct {
 	compCancel         context.CancelFunc
 	compWG             sync.WaitGroup
 	compressionTimeout time.Duration
+	longTerm           *LongTermMemory
+	memoryMode         string
+	recalled           []MemoryEntry
+	memoryJobs         chan memoryExtraction
+	memoryWG           sync.WaitGroup
+	memoryCancel       context.CancelFunc
+	memoryTimeout      time.Duration
+	memoryWorkEpoch    uint64
 }
 
 func New(ctx context.Context, cfg Config, host Host) (*Engine, error) {
@@ -96,6 +106,10 @@ func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSear
 		return nil, err
 	}
 	cfg.ReasoningEffort = effort
+	cfg.MemoryMode, err = NormalizeMemoryMode(cfg.MemoryMode)
+	if err != nil {
+		return nil, err
+	}
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	if cfg.Model == "" || len(cfg.Model) > 256 {
 		return nil, errors.New("brain: configure an OpenAI-compatible model")
@@ -140,6 +154,17 @@ func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSear
 		e.stats.LastCompression = e.memory.stats.LastCompression
 		e.memory.mu.Unlock()
 	}
+	e.longTerm, e.memoryMode = cfg.LongTermMemory, cfg.MemoryMode
+	e.memoryTimeout = 10 * time.Second
+	if e.longTerm != nil {
+		e.longTerm.Invalidate() // supersede extraction work from an earlier connection
+		if e.memoryMode != "off" {
+			e.persona += longTermInstructions
+			if !cfg.Tools {
+				e.persona += memoryPlainInstructions
+			}
+		}
+	}
 	maxTokens := 1024
 	cm, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{BaseURL: cfg.BaseURL, APIKey: strings.TrimSpace(cfg.APIKey), Model: cfg.Model, ReasoningEffort: openai.ReasoningEffortLevel(cfg.ReasoningEffort), MaxTokens: &maxTokens, HTTPClient: &http.Client{Timeout: 45 * time.Second, Transport: boundedTransport{engine: e}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}})
 	if err != nil {
@@ -157,6 +182,9 @@ func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSear
 		}
 		e.persona += contextToolInstructions
 		e.baseTools = append(deviceTools(host), webSearchTool(search))
+		if e.longTerm != nil && e.memoryMode != "off" {
+			e.baseTools = append(e.baseTools, e.longTermTools()...)
+		}
 		err = e.rebuildAgent(ctx, nil)
 		if err != nil {
 			lifeCancel()
@@ -166,6 +194,11 @@ func newWithWebSearch(ctx context.Context, cfg Config, host Host, search webSear
 	e.updateContextLocked()
 	if cfg.AutoContextWindow && cfg.ModelsDev != nil {
 		cfg.ModelsDev.RefreshAsync(lifeCtx)
+	}
+	if e.longTerm != nil && e.memoryMode == "auto" {
+		e.memoryJobs = make(chan memoryExtraction, 8)
+		e.memoryWG.Add(1)
+		go e.memoryLoop()
 	}
 	return e, nil
 }
@@ -223,6 +256,8 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	e.syncMemoryLocked()
 	generation := e.generation
 	ctx = context.WithValue(ctx, requestScopeKey{}, requestScope{generation: generation, epoch: e.memoryEpoch})
+	memoryScope := e.recallMemoriesLocked(text)
+	ctx = context.WithValue(ctx, memoryTurnKey{}, memoryScope)
 	e.mu.Unlock()
 	if err := e.resolveContextWindow(ctx, generation); err != nil {
 		return "", err
@@ -246,6 +281,12 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 	if prepErr != nil {
 		return "", prepErr
 	}
+	e.mu.Lock()
+	memoryScope.seen = make(map[string]bool, len(e.recalled))
+	for _, entry := range e.recalled {
+		memoryScope.seen[entry.ID] = true
+	}
+	e.mu.Unlock()
 	var out *schema.Message
 	var err error
 	if streaming {
@@ -288,6 +329,9 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		e.lastActive = time.Now()
 		e.updateContextLocked()
 		e.saveMemoryLocked()
+		if e.requestCurrentLocked(requestScope{generation: generation, epoch: e.memoryEpoch}) {
+			e.enqueueMemoryLocked(text, memoryScope)
+		}
 	}
 	e.mu.Unlock()
 	e.maybeCompress()
@@ -349,6 +393,9 @@ func (e *Engine) Close() error {
 		return nil
 	}
 	e.closed = true
+	if e.longTerm != nil && e.memoryJobs != nil && e.longTerm.Snapshot().Epoch == e.memoryWorkEpoch {
+		e.longTerm.Invalidate()
+	}
 	e.lifeCancel()
 	client := e.ha
 	if e.compCancel != nil {
@@ -358,6 +405,7 @@ func (e *Engine) Close() error {
 	e.publishStatsLocked()
 	e.mu.Unlock()
 	e.compWG.Wait()
+	e.memoryWG.Wait()
 	if client != nil {
 		if err := client.Close(); err != nil {
 			return errors.New("brain: cannot close Home Assistant connection")
@@ -369,6 +417,13 @@ func (e *Engine) Close() error {
 func (e *Engine) Clear() {
 	e.mu.Lock()
 	e.history = nil
+	e.recalled = nil
+	if e.memoryCancel != nil {
+		e.memoryCancel()
+	}
+	if e.longTerm != nil {
+		e.longTerm.Invalidate()
+	}
 	e.lastActive = time.Time{}
 	e.summary = ""
 	e.contextVersion++

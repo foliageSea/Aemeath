@@ -17,6 +17,7 @@ type nativeSettingsGroup struct {
 var nativeAssistantSettingsGroups = []nativeSettingsGroup{
 	{"general", "基础设置", voiceSettingsIcon},
 	{"conversation", "对话服务", sidebarSVG("<path d='M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-3 3V11.5A8.5 8.5 0 0 1 9.5 3h3A8.5 8.5 0 0 1 21 11.5Z'/><path d='M6 9h10M6 13h7'/>")},
+	{"memory", "记忆", sidebarSVG("<path d='M4 4h16v16H4zM8 8h8M8 12h8M8 16h5'/>")},
 }
 
 var nativeVoiceSettingsGroups = []nativeSettingsGroup{
@@ -67,6 +68,8 @@ func (a *nativeUI) groupedSettingsView(c *ui.Context, key, title string, groups 
 						a.voiceGeneralSettingsView(c)
 					case "conversation":
 						a.voiceConversationSettingsView(c)
+					case "memory":
+						a.memorySettingsView(c)
 					case "recognition":
 						a.voiceRecognitionSettingsView(c)
 					case "synthesis":

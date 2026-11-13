@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"aemeath/agent/internal/brain"
@@ -28,6 +29,7 @@ type cliOptions struct {
 	addr         string
 	magpieURL    string
 	voiceConfig  string
+	memoryFile   string
 	interval     time.Duration
 	verbose      bool
 	dryRun       bool
@@ -49,6 +51,7 @@ func parseArgs(args []string, output io.Writer) (cliOptions, error) {
 	flags.BoolVar(&opts.voiceEnabled, "voice", false, "enable the voice assistant using environment configuration")
 	flags.StringVar(&opts.voiceConfig, "voice-config", "", "voice configuration JSON file (enables voice)")
 	flags.BoolVar(&opts.standalone, "standalone", false, "use system default microphone and speaker without an ESP32 (enables voice)")
+	flags.StringVar(&opts.memoryFile, "memory-file", "", "long-term memory JSON file (default: user config directory/Aemeath/cli_memory.json; explicit empty path uses process memory)")
 	if err := flags.Parse(args); err != nil {
 		return opts, err
 	}
@@ -58,10 +61,13 @@ func parseArgs(args []string, output io.Writer) (cliOptions, error) {
 	if opts.interval <= 0 {
 		return opts, errors.New("interval must be positive")
 	}
-	var addrSet bool
+	var addrSet, memoryFileSet bool
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name == "addr" {
 			addrSet = true
+		}
+		if f.Name == "memory-file" {
+			memoryFileSet = true
 		}
 	})
 	if opts.standalone && addrSet {
@@ -76,6 +82,13 @@ func parseArgs(args []string, output io.Writer) (cliOptions, error) {
 		return opts, fmt.Errorf("proxy configuration: %w", err)
 	}
 	opts.network = network
+	if !memoryFileSet {
+		configDir, err := os.UserConfigDir()
+		if err != nil {
+			return opts, errors.New("cannot locate user configuration directory for long-term memory; set --memory-file explicitly")
+		}
+		opts.memoryFile = filepath.Join(configDir, "Aemeath", "cli_memory.json")
+	}
 	return opts, nil
 }
 
@@ -122,10 +135,12 @@ func main() {
 	backoff := time.Second
 	// CLI keeps the conversation across reconnects, in process memory only.
 	memory := brain.OpenMemory("")
+	// One long-term store is shared by standalone and every device reconnect.
+	longTermMemory := brain.OpenLongTermMemory(opts.memoryFile)
 	if opts.standalone {
 		log.Print("standalone: system default microphone and speaker; playback output: console (system speaker; effective only); no ESP32 connection")
 		attempt, cancel := context.WithCancel(ctx)
-		host := &cliVoiceHost{memory: memory}
+		host := &cliVoiceHost{memory: memory, longTermMemory: longTermMemory}
 		voiceDone := control.startStandalone(attempt, vcfg, host)
 		_ = stream(attempt, c, mp, nil, opts.interval, opts.verbose, host)
 		cancel()
@@ -152,7 +167,7 @@ func main() {
 		log.Printf("connected to %s", target)
 		backoff = time.Second
 		attempt, cancel := context.WithCancel(ctx)
-		host := &cliVoiceHost{conn: conn, memory: memory}
+		host := &cliVoiceHost{conn: conn, memory: memory, longTermMemory: longTermMemory}
 		voiceDone := control.start(attempt, target, vcfg, host)
 		err = stream(attempt, c, mp, conn, opts.interval, opts.verbose, host)
 		cancel()

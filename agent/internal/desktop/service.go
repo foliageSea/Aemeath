@@ -80,7 +80,8 @@ type Service struct {
 	haCancel        context.CancelFunc
 	voiceUpdates    chan struct{} // coalesced notifications for the desktop UI
 	voiceCommands   chan voice.Command
-	memory          *brain.Memory // voice conversation; outlives each device connection
+	memory          *brain.Memory         // voice conversation; outlives each device connection
+	longTermMemory  *brain.LongTermMemory // independent of conversation history and device connectivity
 	catalog         *brain.ModelCatalog
 	voiceSession    atomic.Uint64 // numbers voice connections; see voice.State.Session
 }
@@ -135,12 +136,15 @@ func newService(path string, settings Settings, deps dependencies) *Service {
 	ctx, cancel := context.WithCancel(netproxy.WithRouter(context.Background(), network))
 	s := &Service{path: path, deps: deps, ctx: ctx, network: network, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), runWake: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
 	memoryPath := ""
+	longTermMemoryPath := ""
 	catalogPath := ""
 	if path != "" {
 		memoryPath = filepath.Join(filepath.Dir(path), "voice_history.json")
+		longTermMemoryPath = filepath.Join(filepath.Dir(path), "agent_memory.json")
 		catalogPath = filepath.Join(filepath.Dir(path), "models_dev_cache.json")
 	}
 	s.memory = brain.OpenMemory(memoryPath)
+	s.longTermMemory = brain.OpenLongTermMemory(longTermMemoryPath)
 	s.catalog = brain.NewModelCatalog(catalogPath)
 	s.refreshModelCatalog(settings.Voice)
 	s.haWake = make(chan struct{}, 1)
@@ -167,6 +171,7 @@ func (s *Service) Snapshot() State {
 		}
 		state.Voice.Context = memory.ContextStatsForConfig(brain.Config{
 			BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, Persona: cfg.Persona, Tools: cfg.LLMTools,
+			LongTermMemory: s.longTermMemory, MemoryMode: cfg.MemoryMode,
 			ContextWindow: cfg.ContextWindow, AutoContextWindow: cfg.ContextWindowMode != "manual",
 			ModelsDev: catalog, ModelsDevProvider: cfg.ModelsDevProvider, ModelsDevModel: cfg.ModelsDevModel,
 		})
@@ -252,6 +257,10 @@ func (s *Service) SaveSettings(settings Settings) error {
 			return fmt.Errorf("apply network settings: %w", err)
 		}
 		s.networkRevision++
+	}
+	if old.Voice.MemoryMode != normalized.Voice.MemoryMode {
+		// Fence any background extraction before publishing the new mode or restarting voice.
+		s.longTermMemory.Invalidate()
 	}
 	s.state.Settings = normalized
 	haChanged := homeAssistantConfig(old.Voice) != homeAssistantConfig(normalized.Voice)
@@ -446,6 +455,7 @@ func (s *Service) Close() {
 		return
 	}
 	s.closed = true
+	s.longTermMemory.Invalidate()
 	s.cancel()
 	s.mu.Unlock()
 	s.stop()

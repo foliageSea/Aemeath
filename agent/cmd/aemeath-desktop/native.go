@@ -70,7 +70,7 @@ type nativeUI struct {
 	visibleKeys              map[string]bool
 	settingsTab              int
 	assistantSettingsSection int
-	assistantSettingsScroll  [2]ui.ScrollState
+	assistantSettingsScroll  [3]ui.ScrollState
 	voiceSettingsSection     int
 	voiceSettingsScroll      [4]ui.ScrollState
 	voiceHistory             []nativeVoiceTurn
@@ -88,6 +88,7 @@ type nativeUI struct {
 	homeAssistant            nativeHAState
 	background               nativeBackgroundState
 	backgroundOps            nativeBackgroundOps
+	memories                 nativeMemoryState
 	haProbe                  func(context.Context, hamcp.Config) ([]hamcp.Tool, error)
 }
 
@@ -113,6 +114,9 @@ func (a *nativeUI) refresh() {
 	}
 	a.recordMetrics()
 	a.recordVoice()
+	if a.memoryManagerVisible() && a.memories.loaded {
+		a.loadMemories()
+	}
 	if !a.busy["login"] {
 		a.login = a.loginRead()
 	}

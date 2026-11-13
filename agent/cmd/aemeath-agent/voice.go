@@ -208,9 +208,12 @@ type cliVoiceHost struct {
 	conn           *link.Conn
 	metrics, quota string
 	memory         *brain.Memory
+	longTermMemory *brain.LongTermMemory
 }
 
 func (h *cliVoiceHost) ConversationMemory() *brain.Memory { return h.memory }
+
+func (h *cliVoiceHost) LongTermMemory() *brain.LongTermMemory { return h.longTermMemory }
 
 func (h *cliVoiceHost) LockComputer(ctx context.Context) error { return sessionlock.Lock(ctx) }
 

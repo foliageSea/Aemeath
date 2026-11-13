@@ -14,6 +14,8 @@ type contextConfigKey struct {
 	auto, tools                   bool
 	catalog                       *ModelCatalog
 	catalogProvider, catalogModel string
+	longTerm                      *LongTermMemory
+	memoryMode                    string
 }
 
 func contextConfigFor(cfg Config) contextConfigKey {
@@ -27,6 +29,8 @@ func contextConfigFor(cfg Config) contextConfigKey {
 	}
 	window, _ := NormalizeContextWindow(cfg.ContextWindow)
 	key := contextConfigKey{baseURL: catalogServiceKey(base), model: strings.TrimSpace(cfg.Model), persona: persona, window: window, auto: cfg.AutoContextWindow, tools: cfg.Tools}
+	key.longTerm = cfg.LongTermMemory
+	key.memoryMode, _ = NormalizeMemoryMode(cfg.MemoryMode)
 	if cfg.AutoContextWindow {
 		key.catalog, key.catalogProvider, key.catalogModel = cfg.ModelsDev, cfg.ModelsDevProvider, cfg.ModelsDevModel
 	}

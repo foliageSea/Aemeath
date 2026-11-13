@@ -27,6 +27,9 @@ type ContextStats struct {
 	ContextWindowReference string  `json:"contextWindowReference,omitempty"`
 	ContextInputLimit      int     `json:"contextInputLimit,omitempty"`
 	ReservedTokens         int     `json:"reservedTokens"`
+	MemoryEntries          int     `json:"memoryEntries"`
+	RecalledMemories       int     `json:"recalledMemories"`
+	MemoryTokens           int     `json:"memoryTokens"`
 	UsagePercent           float64 `json:"usagePercent"`
 	PromptTokens           int     `json:"promptTokens"`
 	CompletionTokens       int     `json:"completionTokens"`
@@ -77,7 +80,7 @@ func estimateMessages(messages []*schema.Message) int {
 }
 
 func (e *Engine) messagesLocked(persona, text string) []*schema.Message {
-	return contextMessages(persona, e.summary, e.history, text)
+	return contextMessagesWithMemory(persona, e.summary, e.history, text, e.recalled)
 }
 
 func contextMessages(persona, summary string, history []*schema.Message, text string) []*schema.Message {
@@ -93,7 +96,17 @@ func contextMessages(persona, summary string, history []*schema.Message, text st
 	return input
 }
 
+func contextMessagesWithMemory(persona, summary string, history []*schema.Message, text string, entries []MemoryEntry) []*schema.Message {
+	messages := contextMessages(persona, summary, history, text)
+	if memory := memoryRecallMessage(entries); memory != nil {
+		input := []*schema.Message{messages[0], memory}
+		return append(input, messages[1:]...)
+	}
+	return messages
+}
+
 func (e *Engine) updateContextLocked() {
+	e.updateMemoryStatsLocked()
 	e.stats.EstimatedTokens = estimateMessages(e.messagesLocked(e.persona+e.contextPrompt, "")) + e.toolTokens
 	e.stats.SummaryTokens = estimateTokens(e.summary)
 	e.stats.RetainedTurns = len(e.history) / 2
@@ -181,6 +194,17 @@ func (m *Memory) ContextStatsForConfig(cfg Config) ContextStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.contextStatsLocked()
+	mode, _ := NormalizeMemoryMode(cfg.MemoryMode)
+	var entries []MemoryEntry
+	if cfg.LongTermMemory != nil && mode != "off" {
+		snapshot := cfg.LongTermMemory.Snapshot()
+		s.MemoryEntries = len(snapshot.Entries)
+		if snapshot.Status != "unavailable" {
+			entries = boundedMemoryRecall(SearchMemories(snapshot.Entries, "", 20), 1024)
+		}
+	} else {
+		s.MemoryEntries, s.RecalledMemories, s.MemoryTokens = 0, 0, 0
+	}
 	if strings.TrimSpace(cfg.Model) == "" || (s.InputBudget > 0 && m.statsConfig == contextConfigFor(cfg)) {
 		return s
 	}
@@ -195,11 +219,20 @@ func (m *Memory) ContextStatsForConfig(cfg Config) ContextStats {
 	if persona == "" {
 		persona = DefaultPersona
 	}
+	if cfg.LongTermMemory != nil && mode != "off" {
+		persona += longTermInstructions
+		if !cfg.Tools {
+			persona += memoryPlainInstructions
+		}
+	}
 	toolTokens := 0
 	if cfg.Tools {
 		persona += contextToolInstructions
 		// Only schema metadata is read; these tool handlers are never invoked.
 		tools := append(deviceTools(nil), webSearchTool(nil))
+		if cfg.LongTermMemory != nil && mode != "off" {
+			tools = append(tools, (&Engine{}).longTermTools()...)
+		}
 		var err error
 		toolTokens, err = estimateToolSchemas(context.Background(), tools)
 		if err != nil {
@@ -210,7 +243,8 @@ func (m *Memory) ContextStatsForConfig(cfg Config) ContextStats {
 	for _, t := range m.turns {
 		history = append(history, schema.UserMessage(t.User), schema.AssistantMessage(t.Assistant, nil))
 	}
-	s.EstimatedTokens = estimateMessages(contextMessages(persona, m.summary, history, "")) + toolTokens
+	s.RecalledMemories, s.MemoryTokens = len(entries), memoryRecallTokens(entries)
+	s.EstimatedTokens = estimateMessages(contextMessagesWithMemory(persona, m.summary, history, "", entries)) + toolTokens
 	s.UsagePercent = 100 * float64(s.EstimatedTokens) / float64(s.InputBudget)
 	return s
 }
@@ -302,6 +336,11 @@ func (e *Engine) prepareContext(ctx context.Context, persona, text string) ([]*s
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Recall is expendable before conversation history or the current question.
+	for len(e.recalled) > 0 && estimateMessages(e.messagesLocked(persona, text))+e.toolTokens > e.stats.InputBudget {
+		e.recalled = e.recalled[:len(e.recalled)-1]
+	}
+	e.updateMemoryStatsLocked()
 	// A huge recent message may still require dropping complete pairs, even when
 	// there are fewer than four. The current question is never silently truncated.
 	changed := false
