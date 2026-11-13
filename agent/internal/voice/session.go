@@ -66,6 +66,9 @@ type session struct {
 	stageStarted               time.Time
 	reprompted                 bool
 	wireTurn, firstWireTurn    uint32
+	replayCache                []cachedReply
+	replayPCM                  []int16
+	replayCapture              bool
 	queuedAudio                []speechClip
 	generationDone             bool
 	cloudStarted, workDeadline time.Time
@@ -475,6 +478,10 @@ func (s *session) abort(notify bool) error {
 	s.active = false
 	s.closeOutput()
 	s.play = nil
+	s.replayPCM = nil
+	s.replayCapture = false
+	s.state.ReplayingTurn = 0
+	s.state.ReplayingKey = ""
 	s.queuedAudio = nil
 	s.generationDone = false
 	s.workDeadline = time.Time{}
@@ -515,6 +522,8 @@ func (s *session) begin() error {
 	return nil
 }
 func (s *session) submit(kind, text string, pcm []int16) {
+	s.replayCapture = kind == "text" || kind == "utterance" || kind == "respeak"
+	s.replayPCM = nil
 	c, cancel := context.WithTimeout(s.ctx, cloudWorkBudget)
 	s.cancelTurn = cancel
 	s.cloudStarted = time.Now()
@@ -528,6 +537,10 @@ func (s *session) submit(kind, text string, pcm []int16) {
 }
 func (s *session) command(c Command) error {
 	switch c.Kind {
+	case "replay":
+		return s.replay(c.Turn)
+	case "respeak":
+		return s.respeak(c.Text)
 	case "text":
 		text := strings.TrimSpace(c.Text)
 		if text == "" || len(c.Text) > 4096 {
@@ -594,6 +607,9 @@ func (s *session) command(c Command) error {
 			return err
 		}
 		s.generation++
+		s.replayCache = nil
+		s.state.ReplayTurns = nil
+		s.state.ReplayKeys = nil
 		s.state.ToolCalls = nil
 		s.state.Transcript = ""
 		s.state.Response = ""
@@ -948,9 +964,14 @@ func (s *session) result(r result) error {
 		s.state.TTSMillis = r.millis
 		return s.finishAudioStream(r.samples)
 	case "generation_done":
+		s.commitReplay()
 		s.generationDone = true
 		return s.nextSegment(false)
 	case "audio_segment":
+		s.captureReplay(r.pcm)
+		if r.final {
+			s.commitReplay()
+		}
 		s.generationDone = r.final
 		s.state.TTSMillis = r.millis
 		s.state.GeneratedSegments++
@@ -963,6 +984,8 @@ func (s *session) result(r result) error {
 		if len(r.pcm) == 0 || len(r.pcm) > maxPlaybackSamples {
 			return s.fail("audio_size", errors.New("empty or oversized playback audio"))
 		}
+		s.captureReplay(r.pcm)
+		s.commitReplay()
 		s.state.TTSMillis = r.millis
 		s.play = &playback{pcm: r.pcm}
 		s.deadline = time.Now().Add(time.Duration(len(r.pcm))*time.Second/sampleRate + 15*time.Second)

@@ -50,6 +50,12 @@ type Config struct {
 }
 
 type State struct {
+	// ReplayKeys and ReplayTurns identify complete cached replies in this
+	// connection (oldest first). ReplayingKey also covers TTS regeneration.
+	ReplayKeys        []string           `json:"replayKeys,omitempty"`
+	ReplayingKey      string             `json:"replayingKey,omitempty"`
+	ReplayTurns       []uint32           `json:"replayTurns,omitempty"`
+	ReplayingTurn     uint32             `json:"replayingTurn,omitempty"`
 	Context           brain.ContextStats `json:"context"`
 	ToolCalls         []brain.ToolCall   `json:"toolCalls,omitempty"`
 	HomeAssistant     hamcp.Status       `json:"homeAssistant"`
@@ -74,15 +80,18 @@ type State struct {
 	Session uint64 `json:"session"`
 }
 
-// Clone returns a snapshot with an independent tool event slice.
+// Clone returns a snapshot with independently owned slices.
 func (s State) Clone() State {
 	s.ToolCalls = append(s.ToolCalls[:0:0], s.ToolCalls...)
+	s.ReplayTurns = append(s.ReplayTurns[:0:0], s.ReplayTurns...)
+	s.ReplayKeys = append(s.ReplayKeys[:0:0], s.ReplayKeys...)
 	return s
 }
 
 type Command struct {
 	Kind string
 	Text string
+	Turn uint32 // source turn for replay; scoped to this voice connection
 }
 type Host interface {
 	Metrics() string

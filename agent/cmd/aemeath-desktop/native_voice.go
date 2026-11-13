@@ -244,7 +244,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 			} else {
 				ui.Scroll(c.Key("voice-messages")).Label("对话记录").Fill().MinHeight(0).ScrollbarInsets(0, 0, composerInset, 0).TrackScroll(&a.voiceScroll).Children(func() {
 					ui.Column(c).FillWidth().Padding(12, 12, composerInset+24).AlignItems(ui.Center).Children(func() {
-						ui.Column(c.Key("voice-reading-column")).FillWidth().MaxWidth(860).MinWidth(0).Gap(32).Children(func() {
+						ui.Column(c.Key("voice-reading-column")).FillWidth().MaxWidth(860).MinWidth(0).Gap(24).Children(func() {
 							for i, turn := range a.voiceHistory {
 								ui.Column(c.Key(fmt.Sprintf("voice-turn-%d", turn.id))).FillWidth().MinWidth(0).Gap(18).Children(func() {
 									a.voiceBubble(c, "你", turn.transcript, true, nativeVoiceMessageTime(turn.transcriptAt))
@@ -254,7 +254,10 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 										})
 									}
 									if turn.response != "" {
-										a.voiceBubble(c, "爱弥斯", turn.response, false, nativeVoiceMessageTime(turn.responseAt))
+										ui.Column(c.Key("assistant-message")).FillWidth().MinWidth(0).Gap(6).Children(func() {
+											a.voiceBubble(c, "爱弥斯", turn.response, false, nativeVoiceMessageTime(turn.responseAt))
+											a.voiceReplayView(c, turn)
+										})
 									} else if sameVoiceTurn(turn, state) && (state.Phase == "thinking" || state.Phase == "recognizing") {
 										a.voiceBubble(c, "爱弥斯", "正在思考…", false, "")
 									}

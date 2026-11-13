@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/hamcp"
@@ -123,18 +125,38 @@ func (s *Service) VoiceConversation() []brain.MemoryTurn { return s.memory.Turns
 // VoiceCommand queues user actions without blocking a UI or background sampler.
 func (s *Service) VoiceCommand(kind, text string) error {
 	switch kind {
-	case "wake", "cancel", "clear", "preview", "reference", "record_start", "record_stop", "record_cancel", "text":
+	case "wake", "cancel", "clear", "preview", "reference", "record_start", "record_stop", "record_cancel", "text", "replay", "respeak":
 	default:
 		return fmt.Errorf("unknown voice command %q", kind)
 	}
-	if len(text) > 4096 {
-		return errors.New("voice command text is too long (maximum 4096 bytes)")
+	limit := 4096
+	if kind == "respeak" {
+		limit = voice.MaxReplayTextBytes
+	}
+	if len(text) > limit {
+		return fmt.Errorf("voice command text is too long (maximum %d bytes)", limit)
+	}
+	if kind == "respeak" {
+		if !utf8.ValidString(text) || strings.TrimSpace(text) == "" {
+			return errors.New("saved reply text must be non-empty valid UTF-8")
+		}
+		text = strings.TrimSpace(text)
 	}
 	if kind == "text" {
 		text = strings.TrimSpace(text)
 		if text == "" {
 			return errors.New("voice command text must not be empty")
 		}
+	}
+	command := voice.Command{Kind: kind, Text: text}
+	var replaySession uint64
+	if kind == "replay" {
+		var err error
+		replaySession, command.Turn, err = parseVoiceReplayTarget(text)
+		if err != nil {
+			return err
+		}
+		command.Text = ""
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -147,12 +169,47 @@ func (s *Service) VoiceCommand(kind, text string) error {
 	if !s.state.Voice.Connected || s.voiceCommands == nil {
 		return ErrOffline
 	}
+	if kind == "replay" {
+		if replaySession != s.state.Voice.Session {
+			return errors.New("voice replay session has expired")
+		}
+		cached := false
+		for _, turn := range s.state.Voice.ReplayTurns {
+			if turn == command.Turn {
+				cached = true
+				break
+			}
+		}
+		if !cached {
+			return errors.New("voice replay audio is not cached for this turn")
+		}
+	}
 	select {
-	case s.voiceCommands <- voice.Command{Kind: kind, Text: text}:
+	case s.voiceCommands <- command:
 		return nil
 	default:
 		return errors.New("voice assistant is busy; try again shortly")
 	}
+}
+
+// parseVoiceReplayTarget accepts only decimal session:turn identifiers. Do not
+// trim whitespace or accept signs, prefixes, or extra separators from the UI.
+func parseVoiceReplayTarget(target string) (uint64, uint32, error) {
+	invalid := errors.New("voice replay target must be <session>:<turn> with non-zero uint64 session and uint32 turn")
+	sessionText, turnText, ok := strings.Cut(target, ":")
+	if !ok || sessionText == "" || turnText == "" ||
+		strings.Trim(sessionText, "0123456789") != "" || strings.Trim(turnText, "0123456789") != "" {
+		return 0, 0, invalid
+	}
+	session, err := strconv.ParseUint(sessionText, 10, 64)
+	if err != nil || session == 0 {
+		return 0, 0, invalid
+	}
+	turn, err := strconv.ParseUint(turnText, 10, 32)
+	if err != nil || turn == 0 {
+		return 0, 0, invalid
+	}
+	return session, uint32(turn), nil
 }
 
 // ReloadWakeModels reconnects the saved voice configuration after an explicit

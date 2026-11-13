@@ -224,6 +224,26 @@ func workerWithResponses(ctx context.Context, cfg Config, host Host, d dependenc
 					return
 				}
 			}
+			if w.kind == "respeak" {
+				if strings.TrimSpace(text) == "" || len(text) > MaxReplayTextBytes {
+					fail("synthesizing", errors.New("empty or oversized saved reply"))
+					return
+				}
+				err := segmentedSpeech(w.ctx, savedReplySpeech(text), speech, "", cfg.ReferenceAudio, func(c context.Context, r result) bool {
+					cw := w
+					cw.ctx = c
+					return publish(cw, r)
+				})
+				if err != nil {
+					var failure *pipelineFailure
+					if errors.As(err, &failure) {
+						publish(w, result{phase: "synthesizing", err: failure.err, millis: failure.millis})
+					} else {
+						fail("synthesizing", err)
+					}
+				}
+				return
+			}
 			if w.kind == "utterance" || w.kind == "text" {
 				if w.kind == "text" && (text == "" || len(w.text) > 4096) {
 					fail("thinking", errors.New("empty or oversized text input"))

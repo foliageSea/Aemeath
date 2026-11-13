@@ -17,7 +17,7 @@ func (s *session) startAudioStream() error {
 	s.play = &playback{streaming: true}
 	s.state.GeneratedSegments = 1
 	s.deadline = time.Now().Add(synthesisBudget + 15*time.Second)
-	s.emit(s.state)
+	s.emitState()
 	return s.startPlayback(true, 0)
 }
 func (s *session) appendAudioStream(pcm []int16) error {
@@ -34,6 +34,7 @@ func (s *session) appendAudioStream(pcm []int16) error {
 		p.pcm = p.pcm[:unread]
 		p.offset = 0
 	}
+	s.captureReplay(pcm)
 	p.pcm = append(p.pcm, pcm...)
 	p.received += len(pcm)
 	return s.pump()
@@ -43,6 +44,7 @@ func (s *session) finishAudioStream(samples int) error {
 	if p == nil || !p.streaming || p.inputEnded || samples <= 0 || samples != p.received {
 		return s.fail("stream_end", errors.New("stream sample count mismatch"))
 	}
+	s.commitReplay()
 	p.inputEnded = true
 	s.generationDone = true
 	// The backend has finished, but queued PCM still needs actual DMA drain.
