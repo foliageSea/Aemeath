@@ -60,6 +60,7 @@ type Engine struct {
 	model              *openai.ChatModel
 	agent              *react.Agent
 	persona            string
+	timeNow            func() time.Time // local snapshot clock; sampled once per user turn
 	gate               chan struct{}
 	mu                 sync.Mutex
 	generation         uint64
@@ -131,7 +132,7 @@ func newWithServices(ctx context.Context, cfg Config, host Host, search webSearc
 	}
 	lifeCtx, lifeCancel := context.WithCancel(context.Background())
 	config := contextConfigFor(cfg)
-	e := &Engine{persona: persona, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory, stats: contextCapacityStats(config), contextConfig: config, compressionTimeout: 20 * time.Second}
+	e := &Engine{persona: persona, timeNow: time.Now, gate: make(chan struct{}, 1), lifeCtx: lifeCtx, lifeCancel: lifeCancel, haFactory: defaultHomeAssistantFactory, memory: cfg.Memory, stats: contextCapacityStats(config), contextConfig: config, compressionTimeout: 20 * time.Second}
 	if e.memory != nil {
 		e.memory.mu.Lock()
 		e.memory.revision++ // a new connection invalidates older pending memory commits
@@ -241,12 +242,12 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		return "", ctx.Err()
 	}
 
-	persona := e.persona + haPrompt
-	if e.agent != nil {
-		persona += "\n本机日期提示（未进行外部校时）：" + time.Now().Format("2006-01-02")
-	}
+	// Keep one fresh snapshot for the entire turn, including tool continuations
+	// and final speech. It participates in budgeting, but not durable history.
+	turnPrompt := haPrompt + timeSnapshotPrompt(e.timeNow())
+	persona := e.persona + turnPrompt
 	e.mu.Lock()
-	e.contextPrompt = haPrompt
+	e.contextPrompt = turnPrompt
 	e.mu.Unlock()
 	input, prepErr := e.prepareContext(ctx, persona, text)
 	if prepErr != nil {

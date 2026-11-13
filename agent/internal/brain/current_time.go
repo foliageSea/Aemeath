@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-const currentTimeInstructions = "涉及当前时间、今天/明天的日期、星期或跨时区时间时，先调用 get_current_time，以工具的本次结果为准，不依赖训练知识、旧轮次时间或未校时的本机日期提示。用户指定地区时传对应IANA时区。网络时间不可用而回退系统时间时必须说明来源，不能声称已完成外部校时。时间工具只查询，不会修改系统时钟，也不会创建提醒或定时任务。"
+const currentTimeInstructions = "普通本地时间、日期、星期和相对日期问题直接使用本轮时间快照，不要调用 get_current_time。仅在用户明确要求外部校时、需要其他时区的可靠换算，或长任务确实需要刷新当前时刻时调用 get_current_time；指定地区时传对应IANA时区。本轮已取得所需时区的可用工具结果后直接复用，以该结果为准，不要重复查询。网络时间不可用而回退系统时间也是可用结果，说明来源后继续回答，不要为了外部校时反复重试，不能声称已完成外部校时。时间工具只查询，不会修改系统时钟，也不会创建提醒或定时任务。"
 
 type currentTimeFunc func(context.Context, string) (timeaware.Info, error)
 
@@ -49,7 +49,7 @@ func currentTimeTool(now currentTimeFunc) *deviceTool {
 		now = defaultCurrentTime
 	}
 	return &deviceTool{
-		info: &schema.ToolInfo{Name: "get_current_time", Desc: "读取外部真实时间，返回日期、星期、时区、UTC与Unix时间。询问现在几点、今天日期、明天星期或其他城市当前时间时使用；支持IANA时区，外部服务失败会明确标注系统时间回退。不会设置闹钟、提醒或修改系统时间。", ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+		info: &schema.ToolInfo{Name: "get_current_time", Desc: "按需查询外部时间，返回日期、星期、时区、UTC与Unix时间。普通本地时间、日期和星期直接使用本轮时间快照，不调用此工具。仅用于明确要求外部校时、其他时区可靠换算或长任务刷新；支持IANA时区，外部服务失败会明确标注系统时间回退，得到可用结果后不要重复查询。不会设置闹钟、提醒或修改系统时间。", ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"timezone": {Type: schema.String, Desc: "IANA时区，如Asia/Shanghai、Asia/Tokyo、Europe/London、America/New_York；省略取电脑本机时区"},
 		})},
 		run: func(ctx context.Context, args string) (string, error) {

@@ -163,6 +163,14 @@ func TestContextBackgroundSummaryKeepsAppendedTurn(t *testing.T) {
 	defer s.Close()
 	e := contextEngine(t, s, OpenMemory(""), false, nil)
 	seedContext(e, 10)
+	e.mu.Lock()
+	// Keep this scenario in the background-only range even when the per-turn
+	// system context grows: Reply must not wait for the blocked summarizer.
+	e.contextPrompt = timeSnapshotPrompt(e.timeNow())
+	requestTokens := estimateMessages(e.messagesLocked(e.persona+e.contextPrompt, "新消息")) + e.toolTokens
+	e.stats.InputBudget = requestTokens*100/80 + 1
+	e.updateContextLocked()
+	e.mu.Unlock()
 	e.maybeCompress()
 	<-entered
 	e.mu.Lock()

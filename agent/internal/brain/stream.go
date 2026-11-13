@@ -40,7 +40,7 @@ func (m *finalStreamModel) Stream(ctx context.Context, input []*schema.Message, 
 	// Its instruction is private to this request; final generation receives the
 	// original conversation and exact accumulated tool results instead.
 	selection := append([]*schema.Message(nil), input...)
-	selection = append(selection, schema.SystemMessage("本轮判断是否还需要调用任何可用工具，包括 get_current_time、web_search、设备工具和 Home Assistant 工具。结合用户的完整请求与本轮已有工具结果逐步执行：例如查询今年年底和明年初的最新安排，应先确认当前日期，再搜索对应年份的资料，拿到结果后才结束。需要工具时必须返回实际工具调用，不能只说“我先查一下”或描述计划；不要输出解释、旁白或用户回复。只有已取得回答所需的信息，或工具已明确失败且需要向用户说明时，才只输出 READY。不要生成最终回答。"))
+	selection = append(selection, schema.SystemMessage("本轮判断是否还需要调用任何可用工具，包括 get_current_time、web_search、设备工具和 Home Assistant 工具。结合用户的完整请求、本轮时间快照与已有工具结果逐步执行。普通本地时间、日期和星期已由快照提供，不要再调用 get_current_time；仅需外部校时、其他时区可靠换算或长任务刷新时才查询，已有可用结果不要重复调用。例如查询今年年底和明年初的最新安排，直接依据快照确定年份，再用 web_search 搜索对应年份的资料，拿到结果后才结束。需要工具时必须返回实际工具调用，不能只说“我先查一下”或描述计划；不要输出解释、旁白或用户回复。只有已取得回答所需的信息，或工具已明确失败且需要向用户说明时，才只输出 READY。不要生成最终回答。"))
 	opts = append(opts, model.WithMaxTokens(512))
 	var selected *schema.Message
 	for attempt := 0; attempt < 2; attempt++ {

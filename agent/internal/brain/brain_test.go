@@ -149,7 +149,7 @@ func TestPlainChatRetainsHistoryWithinBudgetAndClear(t *testing.T) {
 		if len(msgs) != want {
 			t.Errorf("request %d messages=%d want=%d", requestNo, len(msgs), want)
 		}
-		if msgs[0].(map[string]any)["content"] != "测试助手" {
+		if !strings.HasPrefix(msgs[0].(map[string]any)["content"].(string), "测试助手\n\n本轮时间快照：") {
 			t.Error("persona missing")
 		}
 		if requestNo == 11 && !cleared && msgs[1].(map[string]any)["content"] != "turn-0" {
