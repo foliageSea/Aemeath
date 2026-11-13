@@ -41,7 +41,6 @@ func newHAEngine(t *testing.T, s *httptest.Server, f *fakeHA) *Engine {
 		t.Fatal(err)
 	}
 	e.haFactory = func(hamcp.Config) (homeAssistantClient, error) { return f, nil }
-	e.authorizeTool = allowToolAuthorizationForTest // isolate MCP/schema behavior
 	t.Cleanup(func() { _ = e.Close() })
 	return e
 }
@@ -383,7 +382,6 @@ func TestHomeAssistantRealMCPAndEino(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	e.authorizeTool = allowToolAuthorizationForTest // isolate real MCP discovery/recovery
 	var events []ToolCall
 	ctx := WithToolObserver(context.Background(), func(c ToolCall) { events = append(events, c) })
 	for round := 0; round < 4; round++ {

@@ -61,8 +61,7 @@ func startTool(ctx context.Context, name, args string, title ...string) func(str
 			event.Status, event.Result = "failed", "工具调用失败"
 		} else {
 			var outcome struct {
-				OK   *bool  `json:"ok"`
-				Code string `json:"code"`
+				OK *bool `json:"ok"`
 			}
 			if json.Unmarshal([]byte(result), &outcome) == nil && outcome.OK != nil && !*outcome.OK {
 				event.Status, event.Result = "failed", "操作未成功，请检查系统支持和权限"
@@ -78,12 +77,6 @@ func startTool(ctx context.Context, name, args string, title ...string) func(str
 				}
 				if name == "lock_computer" {
 					event.Result = "锁屏请求未能提交，请检查系统支持和权限；电脑锁屏状态尚未确认"
-				}
-				switch outcome.Code {
-				case "not_authorized":
-					event.Result = "已拦截与当前请求无关或未经明确授权的工具调用，未执行"
-				case "authorization_unavailable":
-					event.Result = "工具执行前意图核对暂不可用，未执行"
 				}
 			} else {
 				switch name {

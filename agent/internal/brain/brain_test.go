@@ -81,9 +81,6 @@ func newEngine(t *testing.T, s *httptest.Server, tools bool, host Host) *Engine 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// These tests isolate the existing ReAct/transport behavior. Production
-	// admission is exercised without this seam in tool_authorization_test.go.
-	e.authorizeTool = allowToolAuthorizationForTest
 	return e
 }
 

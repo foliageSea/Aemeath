@@ -231,12 +231,15 @@ func (t *homeAssistantTool) InvokableRun(ctx context.Context, args string, _ ...
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
+	canonical, exactObject, argsErr := parseToolArguments(args)
 	var object map[string]any
-	if len(args) > 4096 || json.Unmarshal([]byte(args), &object) != nil || object == nil || t.validation.Validate(object) != nil {
+	if argsErr != nil || json.Unmarshal([]byte(args), &object) != nil || t.validation.Validate(object) != nil {
 		return fail("HA 参数无效：需要符合工具 schema 的 JSON 对象（最多4096字节）")
 	}
-	canonical, _ := json.Marshal(object)
-	key := t.original + ":" + string(canonical)
+	if t.token != "" && (strings.Contains(args, t.token) || haContainsSecret(exactObject, t.token)) {
+		return fail("HA 参数不能包含连接凭据")
+	}
+	key := t.original + ":" + canonical
 	attempts, _ := ctx.Value(haAttemptKey{}).(*haAttempts)
 	if attempts != nil {
 		attempts.mu.Lock()

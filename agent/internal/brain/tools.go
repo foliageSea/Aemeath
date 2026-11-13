@@ -34,7 +34,12 @@ func (t *deviceTool) InvokableRun(ctx context.Context, args string, _ ...tool.Op
 
 func deviceTools(host Host) []tool.BaseTool {
 	makeTool := func(name, desc string, params map[string]*schema.ParameterInfo, run func(context.Context, string) (string, error)) tool.BaseTool {
-		return &deviceTool{info: &schema.ToolInfo{Name: name, Desc: desc, ParamsOneOf: schema.NewParamsOneOfByParams(params)}, run: run}
+		return &deviceTool{info: &schema.ToolInfo{Name: name, Desc: desc, ParamsOneOf: schema.NewParamsOneOfByParams(params)}, run: func(ctx context.Context, args string) (string, error) {
+			if _, _, err := parseToolArguments(args); err != nil {
+				return "", err
+			}
+			return run(ctx, args)
+		}}
 	}
 	noArgs := map[string]*schema.ParameterInfo{}
 	return []tool.BaseTool{
