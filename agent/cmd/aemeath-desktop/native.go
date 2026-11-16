@@ -89,6 +89,7 @@ type nativeUI struct {
 	wakeAssetOps             nativeWakeAssetOps
 	wakeAdvanced             bool
 	homeAssistant            nativeHAState
+	remoteModels             nativeRemoteModels
 	background               nativeBackgroundState
 	backgroundOps            nativeBackgroundOps
 	memories                 nativeMemoryState

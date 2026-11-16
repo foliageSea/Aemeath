@@ -107,7 +107,7 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 	nativeSettingsSection(c, "voice-service-card", "服务连接", func() {
 		a.voiceField(c, "voice-llm-url", "OpenAI 服务地址", "https://api.openai.com/v1", &cfg.LLMBaseURL, false)
 		a.voiceField(c, "voice-llm-key", "OpenAI API 密钥", "输入 API 密钥", &cfg.LLMAPIKey, true)
-		a.voiceField(c, "voice-llm-model", "对话模型", "填写服务提供的模型名称", &cfg.LLMModel, false)
+		a.voiceModelSettingsView(c)
 	})
 	nativeSettingsSection(c, "voice-context-card", "上下文", func() {
 		// Both legacy flags must allow catalog access. Merely viewing settings must
