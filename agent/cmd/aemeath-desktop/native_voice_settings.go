@@ -110,8 +110,11 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 		a.voiceField(c, "voice-llm-model", "对话模型", "填写服务提供的模型名称", &cfg.LLMModel, false)
 	})
 	nativeSettingsSection(c, "voice-context-card", "上下文", func() {
-		autoContextWindow := cfg.ContextWindowMode != "manual"
-		if nativeSettingsToggle(c, "voice-context-auto", "自动读取模型上下文容量", &autoContextWindow, false) {
+		// Both legacy flags must allow catalog access. Merely viewing settings must
+		// not opt existing configurations into a new network request.
+		autoContextWindow := cfg.ContextWindowMode != "manual" && cfg.ModelsDevEnabled
+		if nativeSettingsToggle(c, "voice-context-auto", "自动获取上下文容量", &autoContextWindow, false) {
+			cfg.ModelsDevEnabled = autoContextWindow
 			cfg.ContextWindowMode = "manual"
 			if autoContextWindow {
 				cfg.ContextWindowMode = "auto"
@@ -119,15 +122,9 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 			a.edited()
 		}
 		if autoContextWindow {
-			ui.Column(c).FillWidth().MinWidth(0).Gap(16).Tooltip("从 models.dev 公共目录读取容量，未匹配时使用备用值，不向对话服务查询容量。后台下载不发送密钥或对话；目录容量不保证等于当前服务实际上限。").Children(func() {
-				if nativeSettingsToggle(c, "voice-models-dev", "使用 models.dev 查询上下文容量", &cfg.ModelsDevEnabled, false) {
-					a.edited()
-				}
-				if cfg.ModelsDevEnabled {
-					a.voiceField(c, "voice-models-dev-provider", "models.dev 服务商 ID", "留空按服务地址精确匹配，如 openai", &cfg.ModelsDevProvider, false)
-					a.voiceField(c, "voice-models-dev-model", "models.dev 模型 ID", "留空使用请求模型 ID；别名映射需填写服务商 ID", &cfg.ModelsDevModel, false)
-				}
-			})
+			ui.Text(c, "从 models.dev 获取容量，未匹配或获取失败时使用备用值。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap().Tooltip("后台下载公共目录，不向对话服务查询容量，不发送密钥或对话；目录容量不保证等于当前服务实际上限。")
+			a.voiceField(c, "voice-models-dev-provider", "models.dev 服务商 ID", "留空按服务地址精确匹配，如 openai", &cfg.ModelsDevProvider, false)
+			a.voiceField(c, "voice-models-dev-model", "models.dev 模型 ID", "留空使用请求模型 ID；别名映射需填写服务商 ID", &cfg.ModelsDevModel, false)
 		}
 		capacityLabel := "备用上下文容量（Tokens）"
 		capacityDescription := "自动读取失败时使用；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。"

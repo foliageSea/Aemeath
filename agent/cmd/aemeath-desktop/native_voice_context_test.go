@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,6 +251,47 @@ func TestNativeModelsDevTooltip(t *testing.T) {
 	}
 }
 
+func TestNativeContextSingleSwitchPreservesLegacySettings(t *testing.T) {
+	for _, mode := range []string{"", "auto", "manual"} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/catalog=%t", mode, enabled), func(t *testing.T) {
+				a, f, _, tt := nativeTest(t)
+				tt.SetSize(1000, 1000)
+				f.state.Settings.Voice.ContextWindowMode = mode
+				f.state.Settings.Voice.ModelsDevEnabled = enabled
+				f.state.Settings.Voice.ModelsDevProvider = "openai"
+				f.state.Settings.Voice.ModelsDevModel = "exact-model"
+				a.draft = copySettings(f.state.Settings)
+				a.refresh()
+				tt.Frame()
+				before := a.draft.Voice
+				nativeClick(t, tt, "设置")
+				nativeClick(t, tt, "助手")
+				nativeClick(t, tt, "对话服务")
+				wantAuto := mode != "manual" && enabled
+				control, ok := tt.AccessByRole(ui.RoleSwitch, "自动获取上下文容量")
+				if !ok || control.Checked != wantAuto {
+					t.Fatalf("incorrect combined switch state: %+v", control)
+				}
+				if _, ok := tt.AccessByRole(ui.RoleSwitch, "使用 models.dev 查询上下文容量"); ok {
+					t.Fatal("redundant catalog switch remains")
+				}
+				for _, label := range []string{"models.dev 服务商 ID", "models.dev 模型 ID", "备用上下文容量（Tokens）"} {
+					if _, ok := tt.AccessByRole(ui.RoleTextField, label); ok != wantAuto {
+						t.Fatalf("incorrect visibility for %s", label)
+					}
+				}
+				if _, ok := tt.AccessByRole(ui.RoleTextField, "手动上下文容量（Tokens）"); ok == wantAuto {
+					t.Fatal("incorrect manual capacity visibility")
+				}
+				if a.draft.Voice != before || a.dirty {
+					t.Fatal("viewing settings rewrote legacy configuration")
+				}
+			})
+		}
+	}
+}
+
 func TestNativeModelsDevSettingsSaveAndManualMode(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	tt.SetSize(1000, 1000)
@@ -259,7 +301,7 @@ func TestNativeModelsDevSettingsSaveAndManualMode(t *testing.T) {
 	if a.draft.Voice.ModelsDevEnabled {
 		t.Fatal("models.dev should be opt-in")
 	}
-	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "使用 models.dev 查询上下文容量")
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动获取上下文容量")
 	nativeVoiceEdit(t, tt, "models.dev 服务商 ID", "openai")
 	nativeVoiceEdit(t, tt, "models.dev 模型 ID", "exact-model")
 	tt.Key(0, ui.KeyTab)
@@ -273,12 +315,21 @@ func TestNativeModelsDevSettingsSaveAndManualMode(t *testing.T) {
 	if len(f.saves) != 1 || !f.saves[0].Voice.ModelsDevEnabled || f.saves[0].Voice.ModelsDevProvider != "openai" || f.saves[0].Voice.ModelsDevModel != "exact-model" {
 		t.Fatal("catalog settings were not saved")
 	}
-	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动读取模型上下文容量")
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动获取上下文容量")
 	if _, ok := tt.AccessByRole(ui.RoleSwitch, "使用 models.dev 查询上下文容量"); ok {
 		t.Fatal("manual mode still offers automatic catalog lookup")
 	}
-	if !a.draft.Voice.ModelsDevEnabled || a.draft.Voice.ModelsDevModel != "exact-model" {
-		t.Fatal("manual mode discarded saved catalog mapping")
+	if a.draft.Voice.ModelsDevEnabled || a.draft.Voice.ContextWindowMode != "manual" || a.draft.Voice.ModelsDevProvider != "openai" || a.draft.Voice.ModelsDevModel != "exact-model" {
+		t.Fatal("manual mode did not disable lookup or discarded saved catalog mapping")
+	}
+	nativeClick(t, tt, "保存设置")
+	nativeComplete(t, updates, tt)
+	if len(f.saves) != 2 || f.saves[1].Voice.ModelsDevEnabled || f.saves[1].Voice.ContextWindowMode != "manual" {
+		t.Fatal("disabled lookup was not saved")
+	}
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动获取上下文容量")
+	if !a.draft.Voice.ModelsDevEnabled || a.draft.Voice.ContextWindowMode != "auto" || a.draft.Voice.ModelsDevProvider != "openai" || a.draft.Voice.ModelsDevModel != "exact-model" {
+		t.Fatal("re-enabling lookup lost saved catalog mapping")
 	}
 }
 
@@ -372,6 +423,7 @@ func TestNativeContextWindowSettingsSurviveRefreshAndSave(t *testing.T) {
 	nativeClick(t, tt, "设置")
 	nativeClick(t, tt, "助手")
 	nativeClick(t, tt, "对话服务")
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动获取上下文容量")
 	nativeVoiceEdit(t, tt, "备用上下文容量（Tokens）", "131072")
 	tt.Key(0, ui.KeyTab)
 	if a.draft.Voice.ContextWindow != 131072 || !a.dirty {
@@ -382,8 +434,8 @@ func TestNativeContextWindowSettingsSurviveRefreshAndSave(t *testing.T) {
 	if a.draft.Voice.ContextWindow != 131072 {
 		t.Fatal("refresh discarded context capacity draft")
 	}
-	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动读取模型上下文容量")
-	if a.draft.Voice.ContextWindowMode != "manual" || !a.dirty {
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动获取上下文容量")
+	if a.draft.Voice.ContextWindowMode != "manual" || a.draft.Voice.ModelsDevEnabled || !a.dirty {
 		t.Fatal("manual context mode was not bound")
 	}
 	a.refresh()
@@ -396,16 +448,16 @@ func TestNativeContextWindowSettingsSurviveRefreshAndSave(t *testing.T) {
 	}
 	nativeClick(t, tt, "保存设置")
 	nativeComplete(t, updates, tt)
-	if len(f.saves) != 1 || f.saves[0].Voice.ContextWindow != 131072 || f.saves[0].Voice.ContextWindowMode != "manual" {
+	if len(f.saves) != 1 || f.saves[0].Voice.ContextWindow != 131072 || f.saves[0].Voice.ContextWindowMode != "manual" || f.saves[0].Voice.ModelsDevEnabled {
 		t.Fatal("manual context mode/capacity was not saved")
 	}
-	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动读取模型上下文容量")
-	if a.draft.Voice.ContextWindowMode != "auto" || a.draft.Voice.ContextWindow != 131072 {
+	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动获取上下文容量")
+	if a.draft.Voice.ContextWindowMode != "auto" || !a.draft.Voice.ModelsDevEnabled || a.draft.Voice.ContextWindow != 131072 {
 		t.Fatal("switching to auto lost fallback capacity")
 	}
 	nativeClick(t, tt, "保存设置")
 	nativeComplete(t, updates, tt)
-	if len(f.saves) != 2 || f.saves[1].Voice.ContextWindowMode != "auto" || f.saves[1].Voice.ContextWindow != 131072 {
+	if len(f.saves) != 2 || f.saves[1].Voice.ContextWindowMode != "auto" || f.saves[1].Voice.ContextWindow != 131072 || !f.saves[1].Voice.ModelsDevEnabled {
 		t.Fatal("auto mode/fallback capacity was not saved")
 	}
 }
