@@ -61,6 +61,7 @@ type nativeUI struct {
 	voiceShortcutGeneration  uint64
 	voiceShortcutNext        uint64
 	voiceShortcutClosed      bool
+	voiceShortcutCapture     nativeShortcutCapture
 	voiceHoldSession         uint64
 	voiceHoldStartTurn       uint32
 	voicePreview             string

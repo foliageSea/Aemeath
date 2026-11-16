@@ -5,6 +5,15 @@ func (a *nativeUI) globalVoiceKey(down bool) {
 		return
 	}
 	a.voiceKeyDown = down
+	if a.voiceShortcutCapture.open {
+		// Registered global keys may be consumed by the OS before the window
+		// receives them. Record that binding here without starting voice input.
+		if down {
+			a.voiceShortcutCapture.value = a.voiceGlobalKey
+			a.voiceShortcutCapture.error = ""
+		}
+		return
+	}
 	// Refresh before either edge: background windows may not have rendered a
 	// new snapshot, and a release must never target a replacement session.
 	a.snapshot = a.service.Snapshot()

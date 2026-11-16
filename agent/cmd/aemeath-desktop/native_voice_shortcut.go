@@ -24,6 +24,7 @@ func (a *nativeUI) installConfiguredVoiceHold(register func(string, func(bool)) 
 			return
 		}
 		a.voiceShortcutClosed = true
+		a.voiceShortcutCapture.open = false
 		a.voiceGlobalReady = false
 		a.voiceShortcutGeneration++
 		if a.voiceShortcutPending != nil {
@@ -164,6 +165,10 @@ func (a *nativeUI) voiceShortcutSettingsView(c *ui.Context) {
 			status = a.voiceGlobalError
 		}
 		ui.Text(c, status).Label("当前触发快捷键").FontSize(12).Wrap()
-		ui.Button(c.Key("voice-shortcut-default"), "恢复默认快捷键").OnClick(func() { a.draft.VoiceShortcut = ""; a.edited() })
+		nativeSettingsActions(c, "voice-shortcut-actions", func() {
+			ui.Button(c.Key("voice-shortcut-record"), "录入快捷键").Disabled(a.busy["save"]).OnClick(a.beginVoiceShortcutCapture)
+			ui.Button(c.Key("voice-shortcut-default"), "恢复默认快捷键").OnClick(func() { a.draft.VoiceShortcut = ""; a.edited() })
+		})
 	})
+	a.voiceShortcutCaptureView(c)
 }
