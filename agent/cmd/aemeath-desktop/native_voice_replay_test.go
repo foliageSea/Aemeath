@@ -83,12 +83,12 @@ func TestNativeVoiceRespeakExplicitForRestoredAndOldSessions(t *testing.T) {
 				label := "合成播放"
 				if cached {
 					label = "重播"
-					nativeVoiceAssertTooltip(t, tt, label, "重播本条回复的缓存语音，不会重新生成语音。")
+					nativeAssertNoTooltip(t, tt, label)
 					if tt.HasText("可能收费") {
 						t.Fatal("cached reply showed synthesis cost warning")
 					}
 				} else {
-					nativeVoiceAssertTooltip(t, tt, label, voiceReplayCostHint)
+					nativeAssertNoTooltip(t, tt, label)
 					if !tt.HasText("可能收费") {
 						t.Fatal("missing visible cost warning")
 					}
@@ -338,7 +338,7 @@ func TestNativeVoiceReplayMessageLayoutPreview(t *testing.T) {
 		ui.Column(c).FillWidth().Padding(20).Gap(24).Children(func() {
 			for i, turn := range turns {
 				ui.Column(c.Key(fmt.Sprint(i))).FillWidth().MinWidth(0).Gap(6).Children(func() {
-					a.voiceBubble(c, "爱弥斯", turn.response, false, "")
+					a.voiceBubble(c, "爱弥斯", turn.response, false)
 					a.voiceReplayView(c, turn)
 				})
 			}

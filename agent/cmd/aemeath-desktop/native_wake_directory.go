@@ -40,12 +40,12 @@ func (a *nativeUI) wakeDirectoryView(c *ui.Context, busy bool) {
 			ui.Column(c.Key("wake-directory-editor")).Label("模型目录设置").FillWidth().MinWidth(0).Padding(12).Gap(8).Radius(8).Background(t.Background.Alpha(0.55)).Border(1, t.Border.Alpha(0.45)).Children(func() {
 				ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "唤醒模型目录").FontSize(11).TextColor(t.TextMuted).Grow(1).MinWidth(0)
-					ui.Button(c.Key("wake-default-dir"), "恢复默认").Label("使用默认模型目录").Tooltip(defaultDir).FontSize(11).Height(24).Padding(3, 5).BorderWidth(0).Background(ui.Color{}).TextColor(t.Accent).Disabled(busy || usingDefault).OnClick(func() {
+					ui.Button(c.Key("wake-default-dir"), "恢复默认").Label("使用默认模型目录").FontSize(11).Height(24).Padding(3, 5).BorderWidth(0).Background(ui.Color{}).TextColor(t.Accent).Disabled(busy || usingDefault).OnClick(func() {
 						a.draft.Voice.WakeModelDir = defaultDir
 						a.edited()
 					})
 				})
-				if ui.TextInput(c.Key("voice-wake-dir"), &a.draft.Voice.WakeModelDir).Label("唤醒模型目录").Placeholder(defaultDir).Tooltip(target).FontSize(12).FillWidth().MinWidth(0).Height(34).Disabled(busy).Changed() {
+				if ui.TextInput(c.Key("voice-wake-dir"), &a.draft.Voice.WakeModelDir).Label("唤醒模型目录").Placeholder(defaultDir).FontSize(12).FillWidth().MinWidth(0).Height(34).Disabled(busy).Changed() {
 					a.edited()
 				}
 				ui.Text(c, "下载与检查均使用此目录，更改后请保存设置。").FontSize(11).TextColor(t.TextMuted).Wrap()

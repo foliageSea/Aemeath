@@ -72,7 +72,7 @@ func (a *nativeUI) header(c *ui.Context) {
 			screenLabel, screenIcon = "亮屏", screenMonitorOffIcon
 		}
 		disabled := !a.snapshot.Connected || !a.snapshot.ScreenKnown || a.busy["screen"]
-		toggle := ui.ButtonBase(c.Key("screen-toggle")).Label(screenLabel).Tooltip(screenLabel).Size(34, 34).Radius(10).Border(1, t.Border).Background(t.Surface).Disabled(disabled)
+		toggle := ui.ButtonBase(c.Key("screen-toggle")).Label(screenLabel).Size(34, 34).Radius(10).Border(1, t.Border).Background(t.Surface).Disabled(disabled)
 		if !disabled && toggle.Hovered() {
 			toggle.Background(t.SurfaceHover)
 		}

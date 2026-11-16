@@ -179,11 +179,14 @@ func TestNativeWakePhraseEditMarksDirtyAndPersists(t *testing.T) {
 	}
 }
 
-func nativeVoiceAssertTooltip(t *testing.T, tt *ui.Tester, label, want string) {
+func nativeAssertNoTooltip(t *testing.T, tt *ui.Tester, label string) {
 	t.Helper()
 	info, ok := tt.Access(label)
-	if !ok || info.Description != want {
-		t.Fatalf("tooltip for %s = %q (found=%v), want %q", label, info.Description, ok, want)
+	if !ok {
+		t.Fatalf("missing labeled control: %s", label)
+	}
+	if info.Description != "" {
+		t.Fatalf("unexpected tooltip for %s: %q", label, info.Description)
 	}
 }
 
@@ -235,8 +238,8 @@ func TestNativeVoiceCompactHeaderKeepsTwoRows(t *testing.T) {
 				if !tt.HasText("F8 按住说话") || tt.HasText(state.detail) {
 					t.Fatal("header did not abbreviate status and shortcut")
 				}
-				nativeVoiceAssertTooltip(t, tt, "离线唤醒状态", state.detail)
-				nativeVoiceAssertTooltip(t, tt, "语音快捷键提示", "全局 F8 · 后台也可按住说话 · 松开发送 · 最长 30 秒")
+				nativeAssertNoTooltip(t, tt, "离线唤醒状态")
+				nativeAssertNoTooltip(t, tt, "语音快捷键提示")
 				controls, ok := tt.Find("语音操作栏")
 				if !ok || header.Y+header.H > controls.Y || controls.Y+controls.H > float32(size[1])+1 {
 					t.Fatalf("header or controls escaped window: header=%+v controls=%+v", header, controls)
@@ -276,10 +279,10 @@ func TestNativeVoiceCompactConnectionState(t *testing.T) {
 		f.state.Voice.Connected, f.state.Voice.Phase = state.connected, state.phase
 		a.refresh()
 		tt.Frame()
-		if !tt.HasText(state.want) {
-			t.Fatalf("missing compact connection state: %s", state.want)
+		if !tt.HasText(state.want) || tt.HasText(state.detail) {
+			t.Fatalf("missing or unabbreviated compact connection state: %s", state.want)
 		}
-		nativeVoiceAssertTooltip(t, tt, state.want, state.detail)
+		nativeAssertNoTooltip(t, tt, state.want)
 		row, _ := tt.Find("助手连接状态")
 		text, ok := tt.Find(state.want)
 		if !ok || text.X < row.X || text.X+text.W > row.X+row.W+1 || text.Y < row.Y || text.Y+text.H > row.Y+row.H+1 {
@@ -318,7 +321,7 @@ func TestNativeVoiceCompactShortcutDynamicState(t *testing.T) {
 		if !tt.HasText(state.want) || tt.HasText(state.detail) {
 			t.Fatalf("shortcut did not abbreviate dynamic state: %s", state.want)
 		}
-		nativeVoiceAssertTooltip(t, tt, "语音快捷键提示", state.detail)
+		nativeAssertNoTooltip(t, tt, "语音快捷键提示")
 		row, _ := tt.Find("助手唤醒与快捷键")
 		hint, ok := tt.Find("语音快捷键提示")
 		if !ok || hint.X < row.X || hint.X+hint.W > row.X+row.W+1 || hint.Y < row.Y || hint.Y+hint.H > row.Y+row.H+1 {
@@ -354,7 +357,7 @@ func TestNativeVoiceWakeHintsUseSavedPhrase(t *testing.T) {
 					t.Fatalf("missing saved wake phrase hint: %s", text)
 				}
 			}
-			nativeVoiceAssertTooltip(t, tt, "离线唤醒状态", "离线唤醒：已就绪 · 请说「"+test.want+"」")
+			nativeAssertNoTooltip(t, tt, "离线唤醒状态")
 		})
 	}
 }

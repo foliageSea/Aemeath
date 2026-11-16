@@ -37,12 +37,10 @@ func (a *nativeUI) switchVoicePlaybackOutput(route string) {
 func (a *nativeUI) voicePlaybackOutputView(c *ui.Context) {
 	standalone := a.snapshot.Settings.RunMode == desktop.RunModeStandalone
 	output := nativeVoicePlaybackIndex(a.snapshot.Settings.Voice.PlaybackOutput)
-	hint := "播放位置：Agent 使用本机扬声器，监控台使用 ESP32 扬声器。切换后自动保存并重新连接语音，可能打断当前对话。"
 	if standalone {
 		output = 0
-		hint = "独立模式固定使用本机扬声器，设备模式的播放位置会保留。"
 	}
-	ui.Row(c.Key("voice-playback-shortcut")).Label("播放位置快捷切换").Tooltip(hint).Shrink(0).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("voice-playback-shortcut")).Label("播放位置快捷切换").Shrink(0).Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "播放位置").FontSize(11).TextColor(c.Theme().TextMuted).Shrink(0)
 		field := nativeSettingsSegmented(c, "voice-playback-quick", &output, "播放位置", "Agent", "监控台").Disabled(standalone || a.busy["save"])
 		if field.Changed() {

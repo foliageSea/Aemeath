@@ -117,7 +117,7 @@ func (a *nativeUI) modelCatalogSettingsView(c *ui.Context) {
 		if cfg.ModelsDevProvider != "" || cfg.ModelsDevModel != "" {
 			value = cfg.ModelsDevProvider + " / " + cfg.ModelsDevModel
 		}
-		return ui.Button(c.Key("choose"), "").Label("models.dev 模型").Tooltip(value).FillWidth().MinWidth(0).Height(36).Justify(ui.Start).Children(func() {
+		return ui.Button(c.Key("choose"), "").Label("models.dev 模型").FillWidth().MinWidth(0).Height(36).Justify(ui.Start).Children(func() {
 			ui.Text(c, value).Grow(1).MinWidth(0).SingleLine()
 			ui.Text(c, "选择").FontSize(12).TextColor(c.Theme().TextMuted)
 		}).OnClick(a.openModelCatalog)

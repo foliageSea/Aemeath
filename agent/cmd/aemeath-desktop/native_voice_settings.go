@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"aemeath/agent/internal/desktop"
 	"aemeath/agent/internal/wake"
 
@@ -122,7 +120,7 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 			a.edited()
 		}
 		if autoContextWindow {
-			ui.Text(c, "从 models.dev 获取容量，未匹配或获取失败时使用备用值。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap().Tooltip("后台下载公共目录，不向对话服务查询容量，不发送密钥或对话；目录容量不保证等于当前服务实际上限。")
+			ui.Text(c, "从 models.dev 获取容量，未匹配或获取失败时使用备用值。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 			a.modelCatalogSettingsView(c)
 		}
 		capacityLabel := "备用上下文容量（Tokens）"
@@ -136,7 +134,7 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 			if capacity == 0 {
 				capacity = 32768
 			}
-			field := ui.NumberInput(c, &capacity, 0, 2097152, 1024).Label(capacityLabel).FillWidth().MinWidth(0).Height(36).Tooltip(capacityDescription)
+			field := ui.NumberInput(c, &capacity, 0, 2097152, 1024).Label(capacityLabel).FillWidth().MinWidth(0).Height(36)
 			if field.Changed() {
 				cfg.ContextWindow = int(capacity)
 				a.edited()
@@ -238,7 +236,7 @@ func (a *nativeUI) voiceWakeSettingsView(c *ui.Context) {
 	a.wakeModelsView(c)
 	nativeSettingsSection(c, "voice-wake-threshold-card", "", func() {
 		nativeSettingsNumberField(c, "voice-wake-threshold", "唤醒阈值", func() ui.Element {
-			field := ui.NumberInput(c, &a.draft.Voice.WakeThreshold, 0.01, 1, 0.05).Label("唤醒阈值").FillWidth().MinWidth(0).Height(36).Tooltip("0.01–1，越高越严格。")
+			field := ui.NumberInput(c, &a.draft.Voice.WakeThreshold, 0.01, 1, 0.05).Label("唤醒阈值").FillWidth().MinWidth(0).Height(36)
 			if field.Changed() {
 				a.edited()
 			}
@@ -265,7 +263,7 @@ func (a *nativeUI) voiceSoundSettingsView(c *ui.Context) {
 		ui.Text(c, "Agent 使用当前电脑的扬声器；监控台使用 ESP32 设备扬声器。保存后生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
 		nativeSettingsField(c, "voice-volume-field", "播放音量", func() ui.Element {
 			volume := float64(cfg.Volume)
-			field := ui.Slider(c.Key("voice-volume"), &volume, 0, 100).Label("播放音量").Tooltip(fmt.Sprintf("%d%%", cfg.Volume)).FillWidth()
+			field := ui.Slider(c.Key("voice-volume"), &volume, 0, 100).Label("播放音量").FillWidth()
 			if field.Changed() {
 				cfg.Volume = int(volume)
 				a.edited()

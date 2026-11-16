@@ -120,7 +120,7 @@ func (a *nativeUI) sidebarHomeAssistant(c *ui.Context) {
 	} else if status.Error != "" {
 		label, color = "HA · 连接异常", t.Warning
 	}
-	ui.Button(c.Key("ha-sidebar-status"), "").Label("HA 连接详情").Tooltip(label).FillWidth().Shrink(0).Height(31).Padding(3, 7).Gap(9).BorderWidth(0).Radius(7).Background(color.Alpha(0.06)).AlignItems(ui.Center).Justify(ui.Start).Children(func() {
+	ui.Button(c.Key("ha-sidebar-status"), "").Label("HA 连接详情").FillWidth().Shrink(0).Height(31).Padding(3, 7).Gap(9).BorderWidth(0).Radius(7).Background(color.Alpha(0.06)).AlignItems(ui.Center).Justify(ui.Start).Children(func() {
 		ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(color)
 		ui.Text(c, label).FontSize(12).TextColor(color).Grow(1).MinWidth(0).SingleLine()
 		ui.Icon(c, sidebarChevronRight).Size(14, 14).Shrink(0).TextColor(t.TextMuted)
@@ -175,7 +175,7 @@ func (a *nativeUI) homeAssistantStatusView(c *ui.Context) {
 					title = tool.Name
 				}
 				ui.Column(c.Key(fmt.Sprintf("ha-discovered-%d", i))).FillWidth().MinWidth(0).Gap(3).Padding(5, 0).Children(func() {
-					ui.Text(c, title).FontSize(12).MaxLines(1).Ellipsis("…").Tooltip(title)
+					ui.Text(c, title).FontSize(12).MaxLines(1).Ellipsis("…")
 					ui.Text(c, tool.Name).FontSize(10).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 				})
 			}

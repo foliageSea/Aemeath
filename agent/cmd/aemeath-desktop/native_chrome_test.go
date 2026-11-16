@@ -73,7 +73,7 @@ func TestNativeTitleBarThemeToggle(t *testing.T) {
 			if dark {
 				firstSource, secondSource = secondSource, firstSource
 			}
-			nativeVoiceAssertTooltip(t, tt, label, label)
+			nativeAssertNoTooltip(t, tt, label)
 			before := tt.Image().RGBAAt(240, 20)
 			nativeClick(t, tt, label)
 			if len(nativeSources) != 1 || nativeSources[0] != firstSource {

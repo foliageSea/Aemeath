@@ -75,13 +75,13 @@ var (
 )
 
 // Keep the action's hit area comfortable while leaving message text dominant.
-func voiceReplayAction(c *ui.Context, key, label, hint string, icon *ui.SVG, disabled bool, action func()) {
+func voiceReplayAction(c *ui.Context, key, label string, icon *ui.SVG, disabled bool, action func()) {
 	t := c.Theme()
 	color := t.TextMuted
 	if disabled {
 		color = color.Alpha(0.5)
 	}
-	button := ui.ButtonBase(c.Key(key)).Label(label).Tooltip(hint).Height(28).Padding(0, 6).Gap(5).Shrink(0).Radius(6).AlignItems(ui.Center).Disabled(disabled)
+	button := ui.ButtonBase(c.Key(key)).Label(label).Height(28).Padding(0, 6).Gap(5).Shrink(0).Radius(6).AlignItems(ui.Center).Disabled(disabled)
 	if !disabled && button.Hovered() {
 		button.Background(t.SurfaceHover)
 	}
@@ -94,46 +94,42 @@ func voiceReplayAction(c *ui.Context, key, label, hint string, icon *ui.SVG, dis
 func (a *nativeUI) voiceReplayView(c *ui.Context, turn nativeVoiceTurn) {
 	available, replaying := a.voiceReplayState(turn)
 	state := a.snapshot.Voice
-	label, hint, status := "重播", "重播本条回复的缓存语音，不会重新生成语音。", ""
+	label, status := "重播", ""
 	disabled := a.voiceReplayDisabled(turn, available, replaying)
 	showCost := !available && !replaying
 	failed := state.Phase == "error" && state.ErrorStage == "synthesizing" && strings.TrimSpace(state.Response) == strings.TrimSpace(turn.response)
 	icon := voiceReplaySpeakerIcon
 	if replaying {
-		label, hint, icon = "停止", "停止合成或重播本条回复。", voiceReplayStopIcon
+		label, icon = "停止", voiceReplayStopIcon
 		status = "正在播放"
 		if state.Phase == "synthesizing" || state.Phase == "thinking" {
 			status = "正在合成…"
 		}
 	} else if !available {
-		label, hint = "合成播放", voiceReplayCostHint
+		label = "合成播放"
 		if a.voiceReplayIncomplete(turn) {
 			status, showCost = "语音生成中…", false
 		}
 	}
 	if failed && !replaying {
 		label, status = "重试", "合成失败"
-		hint = state.Error
 	}
 	text := strings.TrimSpace(turn.response)
 	if !replaying && (text == "" || !utf8.ValidString(text)) {
-		hint, status, showCost = "没有可朗读的有效回复文本。", "无有效回复文本", false
+		status, showCost = "无有效回复文本", false
 	} else if !replaying && len(text) > voice.MaxReplayTextBytes {
-		hint, status, showCost = fmt.Sprintf("回复文本超过 %d 字节，无法重播或重新合成语音。", voice.MaxReplayTextBytes), "回复过长，无法合成", false
-	}
-	if !state.Connected {
-		hint = "连接语音助手后可播放。"
+		status, showCost = "回复过长，无法合成", false
 	}
 	ui.Row(c.Key("voice-replay")).Label("回复语音操作").FillWidth().MinWidth(0).Padding(0, 0, 0, 48).Wrap().GapX(8).GapY(4).AlignItems(ui.Center).Children(func() {
 		if status != "" {
-			ui.Text(c.Key("status"), status).FontSize(11).TextColor(c.Theme().TextMuted).Tooltip(hint).MinWidth(0).Wrap()
+			ui.Text(c.Key("status"), status).FontSize(11).TextColor(c.Theme().TextMuted).MinWidth(0).Wrap()
 		}
 		// During the original reply's generation only show its muted status.
 		if !(a.voiceReplayIncomplete(turn) && !available && !replaying) {
-			voiceReplayAction(c, "action", label, hint, icon, disabled, func() { a.replayVoiceTurn(turn) })
+			voiceReplayAction(c, "action", label, icon, disabled, func() { a.replayVoiceTurn(turn) })
 		}
 		if showCost {
-			voiceReplayAction(c, "cost-info", "可能收费", voiceReplayCostHint, voiceReplayInfoIcon, false, func() { a.notify(nativeNoticeInfo, voiceReplayCostHint) })
+			voiceReplayAction(c, "cost-info", "可能收费", voiceReplayInfoIcon, false, func() { a.notify(nativeNoticeInfo, voiceReplayCostHint) })
 		}
 	})
 }

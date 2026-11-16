@@ -31,6 +31,9 @@ func TestNativeContextPercentageSharesFooterWithStatusWithoutProgress(t *testing
 				if _, ok := tt.Find("上下文占用（估算）"); ok {
 					t.Fatal("obsolete context progress bar remains")
 				}
+				for _, label := range []string{"上下文与用量", "上下文详情", "0.6%"} {
+					nativeAssertNoTooltip(t, tt, label)
+				}
 				context, ok := tt.Find("上下文")
 				if !ok {
 					t.Fatal("missing context footer text")
@@ -212,9 +215,9 @@ func TestNativeContextCapacitySources(t *testing.T) {
 		{"", "", "未获取，使用备用值"}, {"", "manual", "手动设置"},
 	} {
 		stats := brain.ContextStats{ContextWindowSource: tc.source, ContextWindowModel: model}
-		source, tooltip := nativeContextSourceText(stats, tc.mode)
-		if source != tc.want || !strings.Contains(tooltip, model) || strings.Contains(source, model) {
-			t.Fatalf("source/model rendering: %q / %q", source, tooltip)
+		source := nativeContextSourceText(stats, tc.mode)
+		if source != tc.want || strings.Contains(source, model) {
+			t.Fatalf("source/model rendering: %q, want %q without model ID", source, tc.want)
 		}
 	}
 	a, f, _, tt := nativeTest(t)
@@ -227,7 +230,7 @@ func TestNativeContextCapacitySources(t *testing.T) {
 		f.state.Voice.Context = brain.ContextStats{ContextWindowSource: source, ContextWindowModel: model, ContextWindow: 4096, InputBudget: 2253, EstimatedTokens: 1000}
 		a.refresh()
 		tt.Frame()
-		want, _ := nativeContextSourceText(f.state.Voice.Context, "auto")
+		want := nativeContextSourceText(f.state.Voice.Context, "auto")
 		if !nativeContextHasText(tt.Texts(), "4K · "+strings.ReplaceAll(want, "未获取，使用备用值", "使用备用值")) || nativeContextHasText(tt.Texts(), model) {
 			t.Fatalf("missing source or crowded model ID: %v", tt.Texts())
 		}
@@ -236,18 +239,6 @@ func TestNativeContextCapacitySources(t *testing.T) {
 			if !ok || r.W <= 0 || r.X < 206 || r.X+r.W > 760 || r.Y < 0 || r.Y+r.H > 600 {
 				t.Fatalf("source %s escaped compact window: %s %+v", source, label, r)
 			}
-		}
-	}
-}
-
-func TestNativeModelsDevTooltip(t *testing.T) {
-	source, tooltip := nativeContextSourceText(brain.ContextStats{ContextWindowSource: "modelsdev", ContextWindowModel: "private-model", ContextWindowReference: "openai/exact-model", ContextInputLimit: 65536}, "auto")
-	if source != "models.dev" {
-		t.Fatal("catalog is mislabeled as provider metadata")
-	}
-	for _, text := range []string{"本地缓存", "不是当前服务的实测上限", "openai/exact-model", "private-model", "65,536"} {
-		if !strings.Contains(tooltip, text) {
-			t.Fatalf("catalog tooltip missing %q: %s", text, tooltip)
 		}
 	}
 }

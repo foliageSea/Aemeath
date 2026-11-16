@@ -72,7 +72,7 @@ func (a *nativeUI) titleBar(c *ui.Context) {
 		if dark {
 			label, icon = "切换到亮色模式", nativeThemeSunIcon
 		}
-		toggle := ui.ButtonBase(c.Key("window-theme-toggle")).Label(label).Tooltip(label).
+		toggle := ui.ButtonBase(c.Key("window-theme-toggle")).Label(label).
 			Absolute().Right(room.Right+16).Top((height-buttonSize)/2).
 			Size(buttonSize, buttonSize).Radius(8).Background(ui.Transparent).Center()
 		if toggle.Hovered() {

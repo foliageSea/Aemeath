@@ -187,7 +187,7 @@ func (a *nativeUI) wakeModelsView(c *ui.Context) {
 				ui.Text(c, "请稍候…").FontSize(11).TextColor(t.TextMuted)
 			}
 		} else if current && state.err != nil && !state.canceled && !errors.Is(state.err, os.ErrNotExist) {
-			ui.Text(c, state.err.Error()).FontSize(11).TextColor(t.Warning).Wrap().MaxLines(3).Ellipsis("…").Tooltip(state.err.Error()).Selectable()
+			ui.Text(c, state.err.Error()).FontSize(11).TextColor(t.Warning).Wrap().MaxLines(3).Ellipsis("…").Selectable()
 		}
 		ui.Text(c, "首次下载约 33 MB，包含唤醒与语音检测模型。安装完成后可离线使用。").FontSize(11).TextColor(t.TextMuted).Wrap()
 		if current && state.ready && filepath.Clean(a.snapshot.Settings.Voice.WakeModelDir) != target {
