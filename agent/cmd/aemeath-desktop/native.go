@@ -36,6 +36,8 @@ type nativeUI struct {
 	snapshot                 desktop.State
 	draft                    desktop.Settings
 	page                     string
+	theme                    *ui.Theme // nil follows the system until the user switches appearance.
+	themeWrite               func(mygo.ThemeSource)
 	notice                   string
 	noticeType               nativeNoticeType
 	noticePending            bool
@@ -96,7 +98,7 @@ type nativeUI struct {
 func newNativeUI(service *desktop.Service) *nativeUI { return nativeState(service) }
 func nativeState(service nativeService) *nativeUI {
 	state := service.Snapshot()
-	a := &nativeUI{service: service, snapshot: state, draft: copySettings(state.Settings), page: "概览", busy: map[string]bool{}, loginRead: mygo.App.OpenAtLogin, loginWrite: mygo.App.SetOpenAtLogin}
+	a := &nativeUI{service: service, snapshot: state, draft: copySettings(state.Settings), page: "概览", busy: map[string]bool{}, loginRead: mygo.App.OpenAtLogin, loginWrite: mygo.App.SetOpenAtLogin, themeWrite: mygo.Theme.SetSource}
 	a.restoreVoiceHistory()
 	a.recordVoice()
 	return a
@@ -193,6 +195,9 @@ func (a *nativeUI) subscriptions() []desktop.Subscription {
 	return list
 }
 func (a *nativeUI) view(c *ui.Context) {
+	if a.theme != nil {
+		c.SetTheme(a.theme)
+	}
 	// Once the new turn leaves listening, the backend has already ended the
 	// hold (limit, mute, cancellation or error). Do not keep showing recording.
 	if a.voiceHold && a.snapshot.Voice.Turn != a.voiceHoldStartTurn && a.snapshot.Voice.Phase != "listening" && a.snapshot.Voice.Phase != "wake" {

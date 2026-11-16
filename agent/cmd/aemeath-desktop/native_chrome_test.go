@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -32,6 +33,13 @@ func TestNativeTitleBarReservesSystemButtons(t *testing.T) {
 				if math.Abs(float64(title.X+title.W/2-bar.W/2)) > 1 {
 					t.Fatalf("title is not centered in window: %+v", title)
 				}
+				toggle, ok := tt.AccessByRole(ui.RoleButton, "切换到暗色模式")
+				if !ok || toggle.Bounds.X < room.Left || toggle.Bounds.X+toggle.Bounds.W > bar.W-room.Right || toggle.Bounds.Y < 0 || toggle.Bounds.Y+toggle.Bounds.H > bar.H {
+					t.Fatalf("theme button overlaps native controls: %+v", toggle)
+				}
+				if title.X+title.W > toggle.Bounds.X {
+					t.Fatalf("title overlaps theme button: title=%+v button=%+v", title, toggle)
+				}
 				nav, ok := tt.AccessByRole(ui.RoleButton, "概览")
 				if !ok || nav.Bounds.Y < bar.H {
 					t.Fatalf("sidebar starts under system controls: %+v", nav)
@@ -43,6 +51,60 @@ func TestNativeTitleBarReservesSystemButtons(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestNativeTitleBarThemeToggle(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		t.Run(fmt.Sprintf("systemDark=%v", dark), func(t *testing.T) {
+			a, f, _, tt := nativeTest(t)
+			var nativeSources []mygo.ThemeSource
+			a.themeWrite = func(source mygo.ThemeSource) { nativeSources = append(nativeSources, source) }
+			tt.SetVibrancy(true)
+			tt.SetDark(dark)
+			if a.theme != nil {
+				t.Fatal("initial appearance should follow the system")
+			}
+			label, reverse := "切换到暗色模式", "切换到亮色模式"
+			if dark {
+				label, reverse = reverse, label
+			}
+			firstSource, secondSource := mygo.ThemeDark, mygo.ThemeLight
+			if dark {
+				firstSource, secondSource = secondSource, firstSource
+			}
+			nativeVoiceAssertTooltip(t, tt, label, label)
+			before := tt.Image().RGBAAt(240, 20)
+			nativeClick(t, tt, label)
+			if len(nativeSources) != 1 || nativeSources[0] != firstSource {
+				t.Fatalf("native blur appearance was not synchronized: %v", nativeSources)
+			}
+			if a.theme == nil || a.theme.Dark == dark {
+				t.Fatal("button did not switch appearance")
+			}
+			if after := tt.Image().RGBAAt(240, 20); after == before {
+				t.Fatal("title bar did not repaint with the new theme")
+			}
+			nativeClick(t, tt, "设置")
+			a.draft.Address = "unsaved.local"
+			a.edited()
+			a.refresh()
+			tt.SetDark(!dark)
+			tt.SetDark(dark)
+			if _, ok := tt.AccessByRole(ui.RoleButton, reverse); !ok {
+				t.Fatal("refresh, navigation or system appearance reset the selected theme")
+			}
+			nativeClick(t, tt, reverse)
+			if len(nativeSources) != 2 || nativeSources[1] != secondSource {
+				t.Fatalf("native blur appearance was not restored: %v", nativeSources)
+			}
+			if a.theme.Dark != dark || tt.Image().RGBAAt(240, 20) != before {
+				t.Fatal("second click did not restore the original appearance")
+			}
+			if a.page != "设置" || a.draft.Address != "unsaved.local" || !a.dirty || len(f.saves) != 0 {
+				t.Fatal("theme switching modified navigation or settings")
+			}
+		})
 	}
 }
 
