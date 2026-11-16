@@ -33,6 +33,22 @@ var (
 	nativeThemeSunIcon  = sidebarSVG("<circle cx='12' cy='12' r='4'/><path d='M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42'/>")
 )
 
+// setTheme keeps settings, title bar controls and native materials in sync.
+// A nil UI override lets the host apply system appearance changes each frame.
+func (a *nativeUI) setTheme(source mygo.ThemeSource) {
+	switch source {
+	case mygo.ThemeLight:
+		a.theme = ui.LightTheme()
+	case mygo.ThemeDark:
+		a.theme = ui.DarkTheme()
+	default:
+		source = mygo.ThemeSystem
+		a.theme = nil
+	}
+	// Context.SetTheme alone does not update native blur or window controls.
+	a.themeWrite(source)
+}
+
 func (a *nativeUI) titleBar(c *ui.Context) {
 	room := c.TitleBar()
 	// Reserve the actual native controls on either side (traffic lights on
@@ -67,14 +83,9 @@ func (a *nativeUI) titleBar(c *ui.Context) {
 		}).OnClick(func() {
 			source := mygo.ThemeDark
 			if dark {
-				a.theme = ui.LightTheme()
 				source = mygo.ThemeLight
-			} else {
-				a.theme = ui.DarkTheme()
 			}
-			// Context.SetTheme only colors the UI; native blur materials and
-			// window controls must switch appearance through the host as well.
-			a.themeWrite(source)
+			a.setTheme(source)
 		})
 	})
 }

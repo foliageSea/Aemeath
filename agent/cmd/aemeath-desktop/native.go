@@ -347,6 +347,22 @@ func (a *nativeUI) connectionSettingsView(c *ui.Context) {
 }
 
 func (a *nativeUI) generalSettingsView(c *ui.Context) {
+	nativeSettingsSection(c, "appearance-card", "外观", func() {
+		nativeSettingsField(c, "appearance-field", "颜色模式", func() ui.Element {
+			mode := 0
+			if a.theme != nil {
+				mode = 1
+				if a.theme.Dark {
+					mode = 2
+				}
+			}
+			field := nativeSettingsSegmented(c, "appearance-mode", &mode, "颜色模式", "跟随系统", "亮色", "暗色")
+			if field.Changed() {
+				a.setTheme([]mygo.ThemeSource{mygo.ThemeSystem, mygo.ThemeLight, mygo.ThemeDark}[mode])
+			}
+			return field
+		})
+	})
 	nativeSettingsSection(c, "login-card", "", func() {
 		enabled := a.login
 		if nativeSettingsToggle(c, "open-at-login", "开机启动", &enabled, a.busy["login"], "登录系统时启动") {
