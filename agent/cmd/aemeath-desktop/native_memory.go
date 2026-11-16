@@ -255,9 +255,6 @@ func (a *nativeUI) memorySettingsView(c *ui.Context) {
 			ui.Text(c, "正在读取记忆…").FontSize(12)
 			return
 		}
-		if m.editing {
-			a.memoryEditorView(c)
-		}
 		entries := nativeMemoryEntries(m.snapshot.Entries, m.query)
 		ui.Text(c, fmt.Sprintf("%d 条记忆", len(entries))).FontSize(12).TextColor(c.Theme().TextMuted)
 		if len(entries) == 0 {
@@ -279,6 +276,19 @@ func (a *nativeUI) memorySettingsView(c *ui.Context) {
 			})
 		}
 	})
+	title := "新增记忆"
+	if m.entry.ID != "" {
+		title = "编辑记忆"
+	}
+	dialog := ui.Modal(c.Key("memory-editor-dialog"), &m.editing, func() {
+		_, height := c.Size()
+		ui.Scroll(c.Key("memory-editor-scroll")).FillWidth().MinWidth(0).MaxHeight(max(0, height-120)).Children(func() {
+			a.memoryEditorView(c)
+		})
+	}).Label(title).Width(600)
+	if dialog.Dismissed() {
+		m.generation++
+	}
 	clearDescription := "所有长期条目将被删除，且无法恢复。旧聊天原文会保留，之后的对话仍可能重新提炼记忆。"
 	if unavailable {
 		clearDescription = "记忆文件不可用。确认清空会覆盖现有记忆文件并恢复为空列表，原内容将无法恢复。旧聊天原文会保留。"
@@ -303,7 +313,7 @@ func (a *nativeUI) memoryEditorView(c *ui.Context) {
 			{"key", "记忆名称", &m.entry.Key},
 		} {
 			nativeSettingsField(c, "memory-"+field.key+"-field", field.title, func() ui.Element {
-				input := ui.TextInput(c.Key("memory-"+field.key), field.value).Label(field.title).FillWidth().MinWidth(0).Height(36)
+				input := ui.TextInput(c.Key("memory-"+field.key), field.value).Label(field.title).AutoFocus().FillWidth().MinWidth(0).Height(36)
 				if input.Changed() {
 					m.generation++
 				}
@@ -340,9 +350,9 @@ func (a *nativeUI) memoryEditorView(c *ui.Context) {
 				a.saveMemory()
 			})
 		}
-		nativeSettingsActions(c, "memory-editor-actions", func() {
-			ui.Button(c.Key("memory-save"), "保存条目").Disabled(a.busy["memory-write"] || m.conflict || strings.TrimSpace(m.entry.Key) == "" || strings.TrimSpace(m.entry.Content) == "" || len([]rune(m.entry.Content)) > 256).OnClick(a.saveMemory)
-			ui.Button(c.Key("memory-cancel"), "取消编辑").OnClick(func() { m.editing = false; m.generation++ })
+		ui.Row(c.Key("memory-editor-actions")).FillWidth().MinWidth(0).Wrap().Gap(8).AlignItems(ui.Center).Justify(ui.End).Children(func() {
+			ui.Button(c.Key("memory-save"), "保存").Disabled(a.busy["memory-write"] || m.conflict || strings.TrimSpace(m.entry.Key) == "" || strings.TrimSpace(m.entry.Content) == "" || len([]rune(m.entry.Content)) > 256).OnClick(a.saveMemory)
+			ui.Button(c.Key("memory-cancel"), "取消").OnClick(func() { m.editing = false; m.generation++ })
 		})
 	})
 }

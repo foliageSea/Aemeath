@@ -72,14 +72,14 @@ func TestNativeMemoriesCreateEditSearchDeleteWhileOffline(t *testing.T) {
 	nativeMemoryButton(t, tt, "新增记忆")
 	nativeVoiceEdit(t, tt, "记忆名称", "饮品")
 	nativeVoiceEdit(t, tt, "记忆正文", "喜欢绿茶")
-	nativeMemoryButton(t, tt, "保存条目")
+	nativeMemoryButton(t, tt, "保存")
 	nativeComplete(t, updates, tt)
 	if a.dirty || len(f.store.Snapshot().Entries) != 1 || !tt.HasText("喜欢绿茶") {
 		t.Fatal("offline entry was not saved independently of settings")
 	}
 	nativeMemoryButton(t, tt, "编辑记忆 饮品")
 	nativeVoiceEdit(t, tt, "记忆正文", "喜欢乌龙茶")
-	nativeMemoryButton(t, tt, "保存条目")
+	nativeMemoryButton(t, tt, "保存")
 	nativeComplete(t, updates, tt)
 	if f.store.Snapshot().Entries[0].Content != "喜欢乌龙茶" {
 		t.Fatal("edit did not persist")
@@ -102,6 +102,72 @@ func TestNativeMemoriesCreateEditSearchDeleteWhileOffline(t *testing.T) {
 	}
 }
 
+func TestNativeMemoryEditorUsesModalAndCancelsWithoutSaving(t *testing.T) {
+	a, f, updates, tt := nativeMemoryTest(t)
+	if _, ok := tt.AccessByRole(ui.RoleTextField, "记忆名称"); ok {
+		t.Fatal("editor is visible before opening")
+	}
+	nativeMemoryButton(t, tt, "新增记忆")
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "新增记忆"); !ok || !tt.Focused("记忆名称") {
+		t.Fatal("add form did not open as an autofocused dialog")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleTextField, "搜索记忆"); ok {
+		t.Fatal("background controls remain accessible while editing")
+	}
+	nativeVoiceEdit(t, tt, "记忆名称", "未保存")
+	nativeVoiceEdit(t, tt, "记忆正文", "不应写入")
+	nativeMemoryButton(t, tt, "取消")
+	if a.memories.editing || len(f.store.Snapshot().Entries) != 0 {
+		t.Fatal("cancel saved the draft or left the editor open")
+	}
+	seed, err := f.store.Save(brain.MemoryEntry{Key: "饮品", Category: "preference", Content: "喜欢绿茶"}, f.store.Snapshot().Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.loadMemories()
+	nativeComplete(t, updates, tt)
+	nativeMemoryButton(t, tt, "编辑记忆 饮品")
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "编辑记忆"); !ok || a.memories.entry != seed {
+		t.Fatal("edit form did not open a prefilled dialog")
+	}
+	nativeVoiceEdit(t, tt, "记忆正文", "未保存的修改")
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.memories.editing || f.store.Snapshot().Entries[0].Content != "喜欢绿茶" {
+		t.Fatal("Escape saved changes or left the editor open")
+	}
+	nativeMemoryButton(t, tt, "新增记忆")
+	if a.memories.entry.Key != "" || a.memories.entry.Content != "" {
+		t.Fatal("new dialog reused a cancelled draft")
+	}
+	tt.ClickAt(5, 5)
+	tt.Frame()
+	if a.memories.editing {
+		t.Fatal("clicking the backdrop did not dismiss the editor")
+	}
+}
+
+func TestNativeMemoryEditorModalFitsSmallWindow(t *testing.T) {
+	_, _, _, tt := nativeMemoryTest(t)
+	tt.SetSize(800, 600)
+	nativeMemoryButton(t, tt, "新增记忆")
+	dialog, ok := tt.AccessByRole(ui.RoleDialog, "新增记忆")
+	if !ok || dialog.Bounds.X < 0 || dialog.Bounds.Y < 0 || dialog.Bounds.X+dialog.Bounds.W > 800 || dialog.Bounds.Y+dialog.Bounds.H > 600 {
+		t.Fatalf("dialog outside window: %+v", dialog)
+	}
+	cancel, ok := tt.AccessByRole(ui.RoleButton, "取消")
+	content, found := tt.AccessByRole(ui.RoleTextField, "记忆正文")
+	if !ok || !found || cancel.Bounds.X+cancel.Bounds.W < content.Bounds.X+content.Bounds.W-1 || cancel.Bounds.X+cancel.Bounds.W > content.Bounds.X+content.Bounds.W+1 {
+		t.Fatal("modal actions are not right-aligned with the form")
+	}
+	for _, label := range []string{"记忆名称", "记忆正文", "保存", "取消"} {
+		r, ok := tt.Find(label)
+		if !ok || r.X < dialog.Bounds.X || r.Y < dialog.Bounds.Y || r.X+r.W > dialog.Bounds.X+dialog.Bounds.W || r.Y+r.H > dialog.Bounds.Y+dialog.Bounds.H {
+			t.Fatalf("control outside dialog: %s %+v", label, r)
+		}
+	}
+}
+
 func TestNativeMemorySaveCannotAdoptConcurrentDeletionRevision(t *testing.T) {
 	a, f, updates, tt := nativeMemoryTest(t)
 	gate := make(chan struct{})
@@ -114,14 +180,14 @@ func TestNativeMemorySaveCannotAdoptConcurrentDeletionRevision(t *testing.T) {
 	nativeMemoryButton(t, tt, "新增记忆")
 	nativeVoiceEdit(t, tt, "记忆名称", "饮品")
 	nativeVoiceEdit(t, tt, "记忆正文", "喜欢绿茶")
-	nativeMemoryButton(t, tt, "保存条目")
+	nativeMemoryButton(t, tt, "保存")
 	nativeVoiceEdit(t, tt, "记忆正文", "喜欢乌龙茶")
 	close(gate)
 	nativeComplete(t, updates, tt)
 	if !a.memories.editing || a.memories.entry.Content != "喜欢乌龙茶" || a.memories.expected != 1 || a.memories.snapshot.Revision != 2 {
 		t.Fatal("save callback adopted an unrelated newer revision or lost draft")
 	}
-	nativeMemoryButton(t, tt, "保存条目")
+	nativeMemoryButton(t, tt, "保存")
 	nativeComplete(t, updates, tt)
 	if !a.memories.conflict || len(f.store.Snapshot().Entries) != 0 || a.memories.entry.Content != "喜欢乌龙茶" {
 		t.Fatal("stale editor silently resurrected deleted memory")
@@ -142,7 +208,7 @@ func TestNativeMemoryConflictPreservesDraftAndRequiresReview(t *testing.T) {
 	if _, err := f.store.Save(seed, f.store.Snapshot().Revision); err != nil {
 		t.Fatal(err)
 	}
-	nativeMemoryButton(t, tt, "保存条目")
+	nativeMemoryButton(t, tt, "保存")
 	nativeComplete(t, updates, tt)
 	if !a.memories.conflict || a.memories.entry.Content != "喜欢乌龙茶" || !a.memories.editing {
 		t.Fatal("conflict discarded editor")
@@ -164,7 +230,7 @@ func TestNativeMemorySaveKeepsTypingWhilePending(t *testing.T) {
 	nativeVoiceEdit(t, tt, "记忆正文", "喜欢绿茶")
 	gate := make(chan struct{})
 	f.saveGate = gate
-	nativeMemoryButton(t, tt, "保存条目")
+	nativeMemoryButton(t, tt, "保存")
 	nativeVoiceEdit(t, tt, "记忆正文", "喜欢乌龙茶")
 	close(gate)
 	nativeComplete(t, updates, tt)
@@ -174,7 +240,7 @@ func TestNativeMemorySaveKeepsTypingWhilePending(t *testing.T) {
 	if f.store.Snapshot().Entries[0].Content != "喜欢绿茶" {
 		t.Fatal("save did not capture immutable input")
 	}
-	nativeMemoryButton(t, tt, "保存条目")
+	nativeMemoryButton(t, tt, "保存")
 	nativeComplete(t, updates, tt)
 	if len(f.store.Snapshot().Entries) != 1 || f.store.Snapshot().Entries[0].Content != "喜欢乌龙茶" {
 		t.Fatal("second save created duplicate or lost newer input")
