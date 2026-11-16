@@ -224,6 +224,7 @@ func (a *nativeUI) voiceView(c *ui.Context) {
 					a.voiceHoldHintView(c)
 				})
 			})
+			a.voicePlaybackOutputView(c)
 			voiceIconButton(c, "voice-configure", "语音设置", voiceSettingsIcon, false, false, a.openVoiceSettings)
 			voiceIconButton(c, "voice-clear", "清空对话", voiceClearIcon, false, disabled, func() { a.voiceClearConfirm = true })
 		})

@@ -252,12 +252,7 @@ func (a *nativeUI) voiceSoundSettingsView(c *ui.Context) {
 	cfg := &a.draft.Voice
 	nativeSettingsSection(c, "voice-sound-card", "", func() {
 		nativeSettingsField(c, "voice-playback-output-field", "播放位置", func() ui.Element {
-			// Preserve legacy config routes: "console" plays on the computer
-			// running Agent; "agent" (and the default) plays on the ESP32 monitor.
-			output := 1
-			if cfg.PlaybackOutput == "console" {
-				output = 0
-			}
+			output := nativeVoicePlaybackIndex(cfg.PlaybackOutput)
 			field := nativeSettingsSegmented(c, "voice-playback-output", &output, "播放位置", "Agent", "监控台").Disabled(a.draft.RunMode == desktop.RunModeStandalone)
 			if field.Changed() {
 				cfg.PlaybackOutput = []string{"console", "agent"}[output]
