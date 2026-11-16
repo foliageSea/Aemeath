@@ -90,6 +90,7 @@ type nativeUI struct {
 	wakeAdvanced             bool
 	homeAssistant            nativeHAState
 	remoteModels             nativeRemoteModels
+	modelCatalogPicker       nativeModelCatalogPicker
 	background               nativeBackgroundState
 	backgroundOps            nativeBackgroundOps
 	memories                 nativeMemoryState

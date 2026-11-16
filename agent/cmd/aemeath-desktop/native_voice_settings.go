@@ -123,8 +123,7 @@ func (a *nativeUI) voiceConversationSettingsView(c *ui.Context) {
 		}
 		if autoContextWindow {
 			ui.Text(c, "从 models.dev 获取容量，未匹配或获取失败时使用备用值。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap().Tooltip("后台下载公共目录，不向对话服务查询容量，不发送密钥或对话；目录容量不保证等于当前服务实际上限。")
-			a.voiceField(c, "voice-models-dev-provider", "models.dev 服务商 ID", "留空按服务地址精确匹配，如 openai", &cfg.ModelsDevProvider, false)
-			a.voiceField(c, "voice-models-dev-model", "models.dev 模型 ID", "留空使用请求模型 ID；别名映射需填写服务商 ID", &cfg.ModelsDevModel, false)
+			a.modelCatalogSettingsView(c)
 		}
 		capacityLabel := "备用上下文容量（Tokens）"
 		capacityDescription := "自动读取失败时使用；0 为默认 32768（32K），范围 8192–2097152。保存后重连生效。"

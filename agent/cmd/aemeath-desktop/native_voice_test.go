@@ -20,7 +20,7 @@ func nativeVoiceNavigate(t *testing.T, tt *ui.Tester, label string) {
 		section = "基础设置"
 	case "OpenAI 服务地址", "OpenAI API 密钥", "Tavily API 密钥", "对话模型", "启用 Agent 工具",
 		"自动获取上下文容量", "备用上下文容量（Tokens）", "手动上下文容量（Tokens）",
-		"models.dev 服务商 ID", "models.dev 模型 ID":
+		"models.dev 模型":
 		section = "对话服务"
 	case "MiMo 服务地址", "MiMo API 密钥":
 		section = "语音识别"

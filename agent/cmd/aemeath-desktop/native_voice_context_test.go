@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -276,9 +277,17 @@ func TestNativeContextSingleSwitchPreservesLegacySettings(t *testing.T) {
 				if _, ok := tt.AccessByRole(ui.RoleSwitch, "使用 models.dev 查询上下文容量"); ok {
 					t.Fatal("redundant catalog switch remains")
 				}
-				for _, label := range []string{"models.dev 服务商 ID", "models.dev 模型 ID", "备用上下文容量（Tokens）"} {
+				for _, label := range []string{"备用上下文容量（Tokens）"} {
 					if _, ok := tt.AccessByRole(ui.RoleTextField, label); ok != wantAuto {
 						t.Fatalf("incorrect visibility for %s", label)
+					}
+				}
+				if _, ok := tt.AccessByRole(ui.RoleButton, "models.dev 模型"); ok != wantAuto {
+					t.Fatal("incorrect catalog picker visibility")
+				}
+				for _, label := range []string{"models.dev 服务商 ID", "models.dev 模型 ID"} {
+					if _, ok := tt.AccessByRole(ui.RoleTextField, label); ok {
+						t.Fatal("manual catalog ID field remains")
 					}
 				}
 				if _, ok := tt.AccessByRole(ui.RoleTextField, "手动上下文容量（Tokens）"); ok == wantAuto {
@@ -302,9 +311,12 @@ func TestNativeModelsDevSettingsSaveAndManualMode(t *testing.T) {
 		t.Fatal("models.dev should be opt-in")
 	}
 	nativeVoiceClickRole(t, tt, ui.RoleSwitch, "自动获取上下文容量")
-	nativeVoiceEdit(t, tt, "models.dev 服务商 ID", "openai")
-	nativeVoiceEdit(t, tt, "models.dev 模型 ID", "exact-model")
-	tt.Key(0, ui.KeyTab)
+	a.modelCatalogPicker.load = func(context.Context) ([]brain.ModelCatalogProvider, error) {
+		return []brain.ModelCatalogProvider{{ID: "openai", Models: []string{"exact-model"}}}, nil
+	}
+	nativeVoiceClickRole(t, tt, ui.RoleButton, "models.dev 模型")
+	nativeComplete(t, updates, tt)
+	nativeClick(t, tt, "openai / exact-model")
 	a.refresh()
 	tt.Frame()
 	if !a.draft.Voice.ModelsDevEnabled || a.draft.Voice.ModelsDevProvider != "openai" || a.draft.Voice.ModelsDevModel != "exact-model" {
