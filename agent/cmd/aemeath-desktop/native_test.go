@@ -516,8 +516,8 @@ func TestNativeDescriptionsStayConcise(t *testing.T) {
 				t.Errorf("%s still shows removed explanation %q", page, removed)
 			}
 		}
-		if page == "订阅" && (!tt.HasText("暂无额度") || !tt.HasText("已隐藏")) {
-			t.Fatal("concise subscription states missing")
+		if page == "订阅" && (!tt.HasText("暂无额度") || tt.HasText("已隐藏")) {
+			t.Fatal("empty quota should show a concise empty state, not saved subscription cards")
 		}
 		if page == "设置" && !tt.HasText("未保存") {
 			t.Fatal("concise unsaved state missing")

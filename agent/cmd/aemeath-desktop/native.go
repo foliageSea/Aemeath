@@ -166,10 +166,21 @@ func (a *nativeUI) save() {
 	a.saveWithVoiceShortcut()
 }
 func (a *nativeUI) subscriptions() []desktop.Subscription {
-	list := append([]desktop.Subscription{}, a.draft.Subscriptions...)
+	// Preferences determine order and visibility, never account membership.
+	// On fetch errors the service retains the last successful quota snapshot.
+	present := map[string]bool{}
+	if a.snapshot.Quota != nil {
+		for _, account := range a.snapshot.Quota.Accounts {
+			present[account.Name] = true
+		}
+	}
+	list := []desktop.Subscription{}
 	seen := map[string]bool{}
-	for _, s := range list {
-		seen[s.Name] = true
+	for _, s := range a.draft.Subscriptions {
+		if present[s.Name] {
+			list = append(list, s)
+			seen[s.Name] = true
+		}
 	}
 	if a.snapshot.Quota != nil {
 		for _, account := range a.snapshot.Quota.Accounts {

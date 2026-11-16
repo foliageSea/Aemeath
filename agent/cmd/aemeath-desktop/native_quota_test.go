@@ -194,11 +194,9 @@ func TestNativeQuotaHiddenUnavailableAndBusyDrag(t *testing.T) {
 	a, f, updates, tt := nativeTest(t)
 	a.draft.Subscriptions = []desktop.Subscription{{Name: "A"}, {Name: "unavailable", Hidden: true}, {Name: "B"}, {Name: "C"}}
 	nativeClick(t, tt, "订阅")
-	quotaPointerDrag(t, tt, "unavailable", "A", true)
-	nativeComplete(t, updates, tt)
-	assertQuotaNames(t, a, "unavailable", "A", "B", "C")
-	if !a.subscriptions()[0].Hidden {
-		t.Fatal("reorder lost unavailable hidden preference")
+	assertQuotaNames(t, a, "A", "B", "C")
+	if _, exists := tt.Find("拖动 unavailable"); exists {
+		t.Fatal("absent account rendered a placeholder")
 	}
 	gate := make(chan struct{})
 	f.gate = gate
@@ -207,18 +205,21 @@ func TestNativeQuotaHiddenUnavailableAndBusyDrag(t *testing.T) {
 		t.Fatal("busy transition changed list structure")
 	}
 	quotaPointerDrag(t, tt, "C", "A", true)
-	a.reorderSubscriptions([]int{3}, 0)
+	a.reorderSubscriptions([]int{2}, 0)
 	nativeClick(t, tt, "隐藏 C")
-	if a.subscriptions()[3].Hidden {
+	if a.subscriptions()[2].Hidden {
 		t.Fatal("busy visibility action was not rejected")
 	}
-	assertQuotaNames(t, a, "unavailable", "A", "B", "C")
+	assertQuotaNames(t, a, "A", "B", "C")
 	close(gate)
 	nativeComplete(t, updates, tt)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.saves) != 2 || !f.state.Settings.Subscriptions[2].Hidden {
+	if len(f.saves) != 1 || !f.state.Settings.Subscriptions[2].Hidden {
 		t.Fatal("visibility click changed order or busy drag saved")
+	}
+	if got := f.state.Settings.Subscriptions[1]; got.Name != "unavailable" || !got.Hidden {
+		t.Fatal("visibility save discarded absent account preference")
 	}
 }
 func TestNativeQuotaRowsRefreshAfterAsyncSaveAndNewQuota(t *testing.T) {

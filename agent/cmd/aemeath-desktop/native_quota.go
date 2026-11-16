@@ -30,7 +30,7 @@ func (a *nativeUI) toggleSubscription(name string) {
 	for i := range list {
 		if list[i].Name == name {
 			list[i].Hidden = !list[i].Hidden
-			a.draft.Subscriptions = list
+			a.draft.Subscriptions = mergeSubscriptionPreferences(a.draft.Subscriptions, list)
 			a.saveSubscriptions()
 			return
 		}
@@ -45,12 +45,32 @@ func (a *nativeUI) reorderSubscriptions(rows []int, to int) {
 	if slices.Equal(list, reordered) {
 		return
 	}
-	a.draft.Subscriptions = reordered
+	a.draft.Subscriptions = mergeSubscriptionPreferences(a.draft.Subscriptions, reordered)
 	a.saveSubscriptions()
 }
 
+// mergeSubscriptionPreferences updates live rows without discarding preferences
+// for absent accounts. Their slots are retained for a later reappearance.
+func mergeSubscriptionPreferences(saved, live []desktop.Subscription) []desktop.Subscription {
+	present := make(map[string]bool, len(live))
+	for _, sub := range live {
+		present[sub.Name] = true
+	}
+	out := make([]desktop.Subscription, 0, len(saved)+len(live))
+	next := 0
+	for _, sub := range saved {
+		if !present[sub.Name] {
+			out = append(out, sub)
+		} else {
+			out = append(out, live[next])
+			next++
+		}
+	}
+	return append(out, live[next:]...)
+}
+
 // to is an insertion boundary in the original list: zero for the beginning,
-// len(list) for the end. Hidden and temporarily unavailable accounts participate.
+// len(list) for the end. Hidden accounts participate; absent accounts do not.
 func moveSubscriptions(list []desktop.Subscription, rows []int, to int) []desktop.Subscription {
 	if to < 0 || to > len(list) {
 		return list
