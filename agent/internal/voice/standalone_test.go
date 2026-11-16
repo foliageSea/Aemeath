@@ -101,12 +101,15 @@ func TestStandaloneSpeechPathsUseLocalOutput(t *testing.T) {
 	for _, kind := range []string{"reference", "preview", "text", "hold", "wake", "keyword", "fish"} {
 		t.Run(kind, func(t *testing.T) {
 			dep := fakeDependencies()
-			output := &fakeConsoleOutput{}
-			output.allowDrain.Store(true)
+			// Each clip gets its own output; the wake cue is the first clip.
+			var outputs []*fakeConsoleOutput
 			dep.newOutput = func(c Config) (consoleOutput, error) {
 				if c.PlaybackOutput != "console" || c.Volume != 63 {
 					t.Errorf("effective local route: %+v", c.PlaybackOutput)
 				}
+				output := &fakeConsoleOutput{}
+				output.allowDrain.Store(true)
+				outputs = append(outputs, output)
 				return output, nil
 			}
 			cfg := Config{Enabled: true, PlaybackOutput: "agent", MiMoAPIKey: "fake", LLMModel: "fake", Volume: 63}
@@ -146,7 +149,9 @@ func TestStandaloneSpeechPathsUseLocalOutput(t *testing.T) {
 				} else {
 					h.feed(t, 9, 1)
 				}
+				h.until(t, func(s State) bool { return s.Phase == "wake" })
 				h.until(t, func(s State) bool { return s.Phase == "listening" })
+				h.feed(t, 5, cueTailFrames)
 				h.feed(t, 7, 3)
 				h.feed(t, 0, endSilenceSamples/frameSamples)
 			case "fish":
@@ -161,7 +166,18 @@ func TestStandaloneSpeechPathsUseLocalOutput(t *testing.T) {
 			if cfg.PlaybackOutput != "agent" {
 				t.Fatal("saved configuration changed")
 			}
-			pcm, finished, closed := output.snapshot()
+			wantOutputs := 1
+			if kind == "wake" || kind == "keyword" {
+				wantOutputs = 2
+				cue, finished, closed := outputs[0].snapshot()
+				if len(cue) != len(wakeCuePCM) || !finished || !closed {
+					t.Fatalf("wake cue playback incomplete: %d %v %v", len(cue), finished, closed)
+				}
+			}
+			if len(outputs) != wantOutputs {
+				t.Fatalf("local outputs=%d want=%d", len(outputs), wantOutputs)
+			}
+			pcm, finished, closed := outputs[len(outputs)-1].snapshot()
 			if len(pcm) != 641 || !finished || !closed {
 				t.Fatalf("local playback incomplete: %d %v %v", len(pcm), finished, closed)
 			}
@@ -263,7 +279,16 @@ func TestStandaloneDisabledAndPermissionFailureDoNotStartCloud(t *testing.T) {
 func TestStandalonePlaybackCannotWakeItselfAndManualHoldInterrupts(t *testing.T) {
 	dep := fakeDependencies()
 	output := &fakeConsoleOutput{}
-	dep.newOutput = func(Config) (consoleOutput, error) { return output, nil }
+	opened := 0
+	dep.newOutput = func(Config) (consoleOutput, error) {
+		opened++
+		if opened == 1 {
+			return output, nil // reference keeps playing until interrupted
+		}
+		cue := &fakeConsoleOutput{}
+		cue.allowDrain.Store(true)
+		return cue, nil
+	}
 	dep.newDetector = func(Config) (detector, error) { return &fakeDetector{hitAt: frameSamples, end: frameSamples}, nil }
 	h := standaloneHarness(t, Config{Enabled: true}, dep)
 	h.commands <- Command{Kind: "reference"}

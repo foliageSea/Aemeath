@@ -255,11 +255,11 @@ func TestFishStreamSessionBackpressureCancellationAndStaleIsolation(t *testing.T
 				if e != nil {
 					return e
 				}
-				phase := "idle"
 				if action == "wake" {
-					phase = "listening"
-				}
-				if e = d.untilPhase(phase); e != nil {
+					if _, e = d.completeWakeCue(); e != nil {
+						return e
+					}
+				} else if e = d.untilPhase("idle"); e != nil {
 					return e
 				}
 				select {

@@ -63,7 +63,19 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 				if err := d.untilPhase("wake"); err != nil {
 					return err
 				}
-				if err := d.untilPhase("listening"); err != nil {
+				cueTurn, err := d.completeWakeCue()
+				if err != nil {
+					return err
+				}
+				tail := func() error {
+					for range cueTailFrames {
+						if err := frame(0); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
+				if err := tail(); err != nil {
 					return err
 				}
 				if follow == "initial_silence" {
@@ -81,10 +93,9 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 					<-d.ctx.Done()
 					return nil
 				}
-				for i := 0; i < 40; i++ {
-					if err := frame(0); err != nil {
-						return err
-					}
+				// The user says only the wake word again after the cue.
+				if err := phrase(7); err != nil {
+					return err
 				}
 				for {
 					m, err := d.until("state")
@@ -94,12 +105,19 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 					if m.State == "error" {
 						return fmt.Errorf("wake-only became error: %+v", m)
 					}
-					if m.State == "listening" && m.Text != "" {
-						if m.Turn != 1 || !strings.Contains(m.Text, "继续说出问题") {
+					if m.State == "wake" && m.Text != "" {
+						if m.Turn != cueTurn+1 || !strings.Contains(m.Text, "继续说出问题") {
 							return fmt.Errorf("bad reprompt: %+v", m)
 						}
 						break
 					}
+				}
+				// The reprompt plays the cue again before listening.
+				if _, err := d.completeWakeCue(); err != nil {
+					return err
+				}
+				if err := tail(); err != nil {
+					return err
 				}
 				switch follow {
 				case "question":
@@ -110,7 +128,7 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					if tr.Turn != 1 || tr.Text != "现在几点了" {
+					if tr.Turn != cueTurn+2 || tr.Text != "现在几点了" {
 						return fmt.Errorf("bad continued transcript: %+v", tr)
 					}
 					if _, err = d.until("response"); err != nil {

@@ -120,22 +120,25 @@ func TestSegmentedSessionPlaysBeforeLLMEOFAndIsolatesWireTurns(t *testing.T) {
 			commands, _, snapshots := sessionHarness(t, Config{Enabled: true, MiMoAPIKey: "test", LLMModel: "model"}, dep, func(d testDevice) error {
 				<-ready
 				commands <- Command{Kind: "wake"}
-				if err := d.untilPhase("listening"); err != nil {
+				cueTurn, err := d.completeWakeCue()
+				if err != nil {
 					return err
 				}
-				if err := d.mic(0, 9); err != nil {
+				seq, err := d.micFrames(0, 0, cueTailFrames)
+				if err != nil {
 					return err
 				}
-				for i := uint32(1); i <= 40; i++ {
-					if err := d.mic(i, 0); err != nil {
-						return err
-					}
+				if seq, err = d.micFrames(seq, 9, 1); err != nil {
+					return err
+				}
+				if _, err = d.micFrames(seq, 0, 40); err != nil {
+					return err
 				}
 				first, err := d.until("playback_start")
 				if err != nil {
 					return err
 				}
-				if first.Turn != 1 {
+				if first.Turn != cueTurn+1 {
 					return fmt.Errorf("initial wire turn=%d", first.Turn)
 				}
 				select {

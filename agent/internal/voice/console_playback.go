@@ -77,7 +77,9 @@ func (s *session) pumpConsole() error {
 	if err != nil {
 		return s.fail("playback", err)
 	}
-	if started && !p.playing {
+	if started && !p.playing && s.wakeCue {
+		p.playing = true
+	} else if started && !p.playing {
 		p.playing = true
 		if s.state.FirstAudioMillis == 0 {
 			s.state.FirstAudioMillis = max(1, time.Since(s.cloudStarted).Milliseconds())
@@ -90,8 +92,11 @@ func (s *session) pumpConsole() error {
 		if !p.ended || !p.playing {
 			return s.fail("playback", errors.New("console playback drained before rendered audio"))
 		}
-		s.state.PlayedSegments++
 		s.closeOutput()
+		if s.wakeCue {
+			return s.finishWakeCue()
+		}
+		s.state.PlayedSegments++
 		s.play = nil
 		return s.nextSegment(true)
 	}

@@ -72,6 +72,9 @@ type session struct {
 	queuedAudio                []speechClip
 	generationDone             bool
 	cloudStarted, workDeadline time.Time
+	wakeCue                    bool
+	wakeCueNotice              string
+	cueTail                    int
 }
 
 // Run connects once to /voice. It never retries and never downloads assets.
@@ -483,6 +486,9 @@ func (s *session) abort(notify bool) error {
 	s.state.ReplayingTurn = 0
 	s.state.ReplayingKey = ""
 	s.queuedAudio = nil
+	s.wakeCue = false
+	s.wakeCueNotice = ""
+	s.cueTail = 0
 	s.generationDone = false
 	s.workDeadline = time.Time{}
 	s.deadline = time.Time{}
@@ -585,16 +591,7 @@ func (s *session) command(c Command) error {
 		if err := s.begin(); err != nil {
 			return err
 		}
-		if err := s.phase("wake"); err != nil {
-			return err
-		}
-		s.capture = &capture{}
-		s.manualFixed = s.vad == nil
-		if s.manualFixed {
-			s.state.Error = s.diagnostic + "; manual recording uses a fixed 6 second window"
-		}
-		s.deadline = time.Now().Add(40 * time.Second)
-		return s.phase("listening")
+		return s.startWakeCue("")
 	case "cancel":
 		if err := s.abort(true); err != nil {
 			return err
@@ -720,28 +717,15 @@ func (s *session) microphonePCM(pcm []int16) error {
 			return s.fail("wake", err)
 		}
 		if hit {
-			end := s.detector.KeywordEndSamples()
-			// Never include keyword audio without a valid detector endpoint.
-			suffix := 0
-			if end > 0 && end <= s.kwsSamples {
-				suffix = int(s.kwsSamples - end)
-			}
-			// begin resets the detector and ring while canceling the old turn.
-			p := s.ring.tail(suffix)
-			if err = s.command(Command{Kind: "wake"}); err != nil {
-				return err
-			}
-			for len(p) > 0 {
-				n := min(frameSamples, len(p))
-				speech, e := s.vad.Speech(p[:n])
-				if e != nil {
-					return s.fail("vad", e)
-				}
-				s.capture.feed(p[:n], speech)
-				p = p[n:]
-			}
-			return nil
+			// Audio spoken before the wake cue finishes is intentionally
+			// discarded: the question is captured only after the cue.
+			return s.command(Command{Kind: "wake"})
 		}
+	}
+	if s.capture != nil && s.cueTail > 0 {
+		// Skip the cue's echo tail before VAD/capture see microphone audio.
+		s.cueTail -= len(pcm)
+		return nil
 	}
 	if s.capture != nil {
 		var speech bool
@@ -841,6 +825,9 @@ func (s *session) control(b []byte) error {
 		}
 		if s.play != nil && m.Turn == s.wireTurn && s.play.seq > 0 && !s.play.playing {
 			s.play.playing = true
+			if s.wakeCue {
+				return nil
+			}
 			if s.state.FirstAudioMillis == 0 {
 				s.state.FirstAudioMillis = max(1, time.Since(s.cloudStarted).Milliseconds())
 			}
@@ -853,6 +840,9 @@ func (s *session) control(b []byte) error {
 		if s.play != nil && m.Turn == s.wireTurn {
 			if !s.play.ended || !s.play.playing {
 				return s.fail("bad_played", errors.New("playback acknowledgement arrived before rendered audio"))
+			}
+			if s.wakeCue {
+				return s.finishWakeCue()
 			}
 			s.state.PlayedSegments++
 			s.play = nil
@@ -889,12 +879,9 @@ func (s *session) continueAfterWakeOnly(millis int64) error {
 		s.cancelTurn = nil
 	}
 	s.resetCapture()
-	s.capture = &capture{}
-	s.manualFixed = s.vad == nil
 	s.state.Error = s.diagnostic
 	s.state.ErrorStage = ""
-	s.deadline = time.Now().Add(40 * time.Second)
-	return s.phase("listening", "我在听，请继续说出问题")
+	return s.startWakeCue("我在听，请继续说出问题")
 }
 
 func (s *session) recordStageMillis(stage string, millis int64) {

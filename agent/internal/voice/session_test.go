@@ -284,7 +284,7 @@ func TestReferenceCreditsActualPlaybackAndDeferredInit(t *testing.T) {
 	}
 }
 
-func TestAutomaticWakeRetainsOnlyKeywordSuffixAndCompletesPipeline(t *testing.T) {
+func TestAutomaticWakePlaysCueBeforeQuestionAndCompletesPipeline(t *testing.T) {
 	dep := fakeDependencies()
 	det := &fakeDetector{hitAt: 640, end: 320}
 	v := &fakeVAD{}
@@ -308,13 +308,18 @@ func TestAutomaticWakeRetainsOnlyKeywordSuffixAndCompletesPipeline(t *testing.T)
 		if e := d.untilPhase("wake"); e != nil {
 			return e
 		}
-		if e := d.untilPhase("listening"); e != nil {
+		if _, e := d.completeWakeCue(); e != nil {
 			return e
 		}
-		for i := uint32(2); i < 42; i++ {
-			if e := d.mic(i, 0); e != nil {
-				return e
-			}
+		seq, e := d.micFrames(2, 0, cueTailFrames)
+		if e != nil {
+			return e
+		}
+		if seq, e = d.micFrames(seq, 7, 1); e != nil {
+			return e
+		}
+		if _, e = d.micFrames(seq, 0, 40); e != nil {
+			return e
 		}
 		transcript, e := d.until("transcript")
 		if e != nil {
@@ -349,7 +354,7 @@ func TestAutomaticWakeRetainsOnlyKeywordSuffixAndCompletesPipeline(t *testing.T)
 	select {
 	case p := <-captured:
 		if len(p) != 41*320 || p[0] != 7 {
-			t.Fatalf("keyword suffix lost/keyword included: len=%d first=%d", len(p), p[0])
+			t.Fatalf("question lost/keyword included: len=%d first=%d", len(p), p[0])
 		}
 		for _, v := range p {
 			if v == 99 {
@@ -375,7 +380,8 @@ func TestMicGapCancelsCaptureAndRecovers(t *testing.T) {
 	cmds, _, _ = sessionHarness(t, Config{Enabled: true}, dep, func(d testDevice) error {
 		<-ready
 		cmds <- Command{Kind: "wake"}
-		if e := d.untilPhase("listening"); e != nil {
+		cueTurn, e := d.completeWakeCue()
+		if e != nil {
 			return e
 		}
 		d.mic(0, 1)
@@ -384,7 +390,7 @@ func TestMicGapCancelsCaptureAndRecovers(t *testing.T) {
 		if e != nil {
 			return e
 		}
-		if m.Turn != 1 {
+		if m.Turn != cueTurn+1 {
 			return errors.New("wrong cancel turn")
 		}
 		eMsg, e := d.until("error")
@@ -398,7 +404,7 @@ func TestMicGapCancelsCaptureAndRecovers(t *testing.T) {
 			return e
 		}
 		cmds <- Command{Kind: "wake"}
-		if e = d.untilPhase("listening"); e != nil {
+		if _, e = d.completeWakeCue(); e != nil {
 			return e
 		}
 		cmds <- Command{Kind: "cancel"}

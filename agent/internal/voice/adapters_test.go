@@ -79,10 +79,10 @@ func TestManualCaptureAvailableWithoutWakeAssetsAndRedactsErrors(t *testing.T) {
 	cmds, _, snapshots := sessionHarness(t, Config{Enabled: true, MiMoAPIKey: "private-mimo-key"}, dep, func(d testDevice) error {
 		<-ready
 		cmds <- Command{Kind: "wake"}
-		if e := d.untilPhase("listening"); e != nil {
+		if _, e := d.completeWakeCue(); e != nil {
 			return e
 		}
-		for i := uint32(0); i < 300; i++ {
+		for i := uint32(0); i < 300+cueTailFrames; i++ {
 			if e := d.mic(i, 1); e != nil {
 				return e
 			}

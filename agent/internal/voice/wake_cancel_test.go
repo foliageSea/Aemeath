@@ -11,135 +11,124 @@ import (
 	"aemeath/agent/internal/brain"
 )
 
-func TestWakeKeywordRestartsEveryActiveStageWithQuestionSuffix(t *testing.T) {
+func TestWakeKeywordRestartsEveryActiveStageWithWakeCue(t *testing.T) {
 	for _, phase := range []string{"listening", "recognizing", "thinking", "synthesizing", "speaking"} {
-		for _, delay := range []int{2 * frameSamples, preRollSamples + frameSamples} {
-			t.Run(fmt.Sprintf("%s/delay_%d", phase, delay), func(t *testing.T) {
-				s := toolTestSession(t)
-				s.epoch = 42
-				s.wireTurn, s.firstWireTurn = 1, 1
-				s.state.Phase = phase
-				s.state.WakeReady = true
-				s.state.Transcript = "原问题"
-				s.state.Response = "已有回复"
-				oldCalls := []brain.ToolCall{{ID: 1, Name: "web_search", Status: "running"}}
-				s.state.ToolCalls = oldCalls
-				// The endpoint is inside a frame; recognition arrives after question
-				// audio has already passed through the old capture/cloud/playback.
-				end := frameSamples + frameSamples/2
-				hitAt := 2*frameSamples + delay
-				s.detector = &fakeDetector{hitAt: int64(hitAt), end: int64(end)}
-				s.vad = &fakeVAD{}
-				if phase == "listening" {
-					s.capture = &capture{}
+		t.Run(phase, func(t *testing.T) {
+			s := toolTestSession(t)
+			s.epoch = 42
+			s.wireTurn, s.firstWireTurn = 1, 1
+			s.state.Phase = phase
+			s.state.WakeReady = true
+			s.state.Transcript = "原问题"
+			s.state.Response = "已有回复"
+			oldCalls := []brain.ToolCall{{ID: 1, Name: "web_search", Status: "running"}}
+			s.state.ToolCalls = oldCalls
+			hitAt := 3 * frameSamples
+			s.detector = &fakeDetector{hitAt: int64(hitAt), end: frameSamples}
+			s.vad = &fakeVAD{}
+			if phase == "listening" {
+				s.capture = &capture{}
+			}
+			s.play = &playback{pcm: []int16{1}, streaming: phase == "speaking"}
+			s.queuedAudio = []speechClip{{pcm: []int16{2}}}
+			workCtx, cancel := context.WithCancel(s.ctx)
+			defer cancel()
+			s.cancelTurn = cancel
+			s.deadline = time.Now().Add(time.Minute)
+			s.workDeadline = s.deadline
+			recordFrame(t, s, 11)
+			if !s.active || workCtx.Err() != nil || s.state.Turn != 1 {
+				t.Fatal("ordinary audio interrupted the turn")
+			}
+			// The question spoken immediately after the keyword is discarded.
+			recordFrame(t, s, 99)
+			recordFrame(t, s, 7)
+			if !s.active || s.state.Phase != "wake" || s.state.Turn != 2 || workCtx.Err() != context.Canceled {
+				t.Fatalf("turn not restarted: active=%v turn=%d phase=%s context=%v", s.active, s.state.Turn, s.state.Phase, workCtx.Err())
+			}
+			if s.capture != nil || !s.wakeCue || s.play == nil || len(s.play.pcm) != len(wakeCuePCM) || len(s.queuedAudio) != 0 || s.deadline.IsZero() || !s.workDeadline.IsZero() || s.cancelTurn != nil {
+				t.Fatal("restart retained old playback/work or did not start the wake cue")
+			}
+			if oldCalls[0].Status != "canceled" || len(s.state.ToolCalls) != 0 || s.state.Transcript != "" || s.state.Response != "" {
+				t.Fatal("restart did not settle old tools and clear turn state")
+			}
+			noRecordWork(t, s)
+			// Further keyword hits are not under test after the restart.
+			s.detector = &fakeDetector{}
+			before := s.state.Clone()
+			for _, late := range []result{
+				{phase: "audio_segment", pcm: []int16{3}},
+				{phase: "audio_stream_start"},
+				{phase: "audio_stream_chunk", pcm: []int16{3}},
+				{phase: "transcript", text: "迟到的问题"},
+				{phase: "response", text: "迟到的回复"},
+				{phase: "thinking", err: errors.New("old failure")},
+				{phase: "wake_only"},
+				{phase: "generation_done"},
+				{phase: "context", context: &brain.ContextStats{}},
+				{toolCall: &brain.ToolCall{ID: 2, Name: "web_search", Status: "running"}},
+			} {
+				late.turn, late.generation = 1, s.generation
+				if err := s.result(late); err != nil {
+					t.Fatal(err)
 				}
-				s.play = &playback{pcm: []int16{1}, streaming: phase == "speaking"}
-				s.queuedAudio = []speechClip{{pcm: []int16{2}}}
-				workCtx, cancel := context.WithCancel(s.ctx)
-				defer cancel()
-				s.cancelTurn = cancel
-				s.deadline = time.Now().Add(time.Minute)
-				s.workDeadline = s.deadline
-				recordFrame(t, s, 11)
-				if !s.active || workCtx.Err() != nil || s.state.Turn != 1 {
-					t.Fatal("ordinary audio interrupted the turn")
+			}
+			for _, kind := range []string{"cancel", "played", "error"} {
+				recordControl(t, s, message{Type: kind, Turn: 1})
+			}
+			if !reflect.DeepEqual(before, s.state) || !s.wakeCue || len(s.queuedAudio) != 0 || s.capture != nil {
+				t.Fatal("late old-turn result or device event affected the new turn")
+			}
+			// Speech during the cue is never captured.
+			recordFrame(t, s, 6)
+			completeWakeCueDirect(t, s)
+			if len(s.capture.pcm) != 0 {
+				t.Fatal("audio before the cue finished leaked into capture")
+			}
+			for range cueTailFrames {
+				recordFrame(t, s, 5)
+			}
+			if len(s.capture.pcm) != 0 || s.capture.speech {
+				t.Fatal("cue echo tail reached capture")
+			}
+			recordFrame(t, s, 8)
+			for i := 0; i < endSilenceSamples/frameSamples; i++ {
+				recordFrame(t, s, 0)
+			}
+			w := nextRecordWork(t, s)
+			defer s.cancelTurn()
+			if w.turn != 2 || w.kind != "utterance" || w.ctx.Err() != nil || len(w.pcm) != frameSamples+endSilenceSamples {
+				t.Fatalf("bad new question work: turn=%d kind=%s samples=%d context=%v", w.turn, w.kind, len(w.pcm), w.ctx.Err())
+			}
+			for i, sample := range w.pcm {
+				want := int16(0)
+				if i < frameSamples {
+					want = 8
 				}
-				for offset := frameSamples; offset < hitAt; offset += frameSamples {
-					pcm := make([]int16, frameSamples)
-					for i := range pcm {
-						pcm[i] = 7
-						if offset+i < end {
-							pcm[i] = 99
-						}
-					}
-					if err := s.microphone(encodeAudio(audioFrame{Kind: kindMicrophone, Epoch: s.epoch, Seq: s.nextMic, PCM: pcm})); err != nil {
-						t.Fatal(err)
-					}
+				if sample != want {
+					t.Fatalf("ASR audio[%d]=%d want=%d", i, sample, want)
 				}
-				if !s.active || s.state.Phase != "listening" || s.state.Turn != 2 || workCtx.Err() != context.Canceled {
-					t.Fatalf("turn not restarted: active=%v turn=%d phase=%s context=%v", s.active, s.state.Turn, s.state.Phase, workCtx.Err())
-				}
-				if s.capture == nil || s.play != nil || len(s.queuedAudio) != 0 || s.deadline.IsZero() || !s.workDeadline.IsZero() || s.cancelTurn != nil {
-					t.Fatal("restart retained old playback/work or lost new capture deadline")
-				}
-				if oldCalls[0].Status != "canceled" || len(s.state.ToolCalls) != 0 || s.state.Transcript != "" || s.state.Response != "" {
-					t.Fatal("restart did not settle old tools and clear turn state")
-				}
-				wantSuffix := min(hitAt-end, preRollSamples)
-				if len(s.capture.pcm) != wantSuffix || s.capture.elapsed != wantSuffix {
-					t.Fatalf("suffix length=%d elapsed=%d want=%d", len(s.capture.pcm), s.capture.elapsed, wantSuffix)
-				}
-				for _, sample := range s.capture.pcm {
-					if sample != 7 {
-						t.Fatalf("old audio or keyword leaked into new capture: %d", sample)
-					}
-				}
-				noRecordWork(t, s)
-				before := s.state.Clone()
-				for _, late := range []result{
-					{phase: "audio_segment", pcm: []int16{3}},
-					{phase: "audio_stream_start"},
-					{phase: "audio_stream_chunk", pcm: []int16{3}},
-					{phase: "transcript", text: "迟到的问题"},
-					{phase: "response", text: "迟到的回复"},
-					{phase: "thinking", err: errors.New("old failure")},
-					{phase: "wake_only"},
-					{phase: "generation_done"},
-					{phase: "context", context: &brain.ContextStats{}},
-					{toolCall: &brain.ToolCall{ID: 2, Name: "web_search", Status: "running"}},
-				} {
-					late.turn, late.generation = 1, s.generation
-					if err := s.result(late); err != nil {
-						t.Fatal(err)
-					}
-				}
-				for _, kind := range []string{"cancel", "played", "error"} {
-					recordControl(t, s, message{Type: kind, Turn: 1})
-				}
-				if !reflect.DeepEqual(before, s.state) || s.play != nil || len(s.queuedAudio) != 0 || len(s.capture.pcm) != wantSuffix {
-					t.Fatal("late old-turn result or device event affected the new turn")
-				}
-				recordFrame(t, s, 8)
-				for i := 0; i < endSilenceSamples/frameSamples; i++ {
-					recordFrame(t, s, 0)
-				}
-				w := nextRecordWork(t, s)
-				defer s.cancelTurn()
-				if w.turn != 2 || w.kind != "utterance" || w.ctx.Err() != nil || len(w.pcm) != wantSuffix+frameSamples+endSilenceSamples {
-					t.Fatalf("bad new question work: turn=%d kind=%s samples=%d context=%v", w.turn, w.kind, len(w.pcm), w.ctx.Err())
-				}
-				for i, sample := range w.pcm {
-					want := int16(0)
-					if i < wantSuffix {
-						want = 7
-					} else if i < wantSuffix+frameSamples {
-						want = 8
-					}
-					if sample != want {
-						t.Fatalf("ASR audio[%d]=%d want=%d", i, sample, want)
-					}
-				}
-			})
-		}
+			}
+		})
 	}
 }
 
-func TestWakeKeywordInvalidEndpointExcludesBufferedAudio(t *testing.T) {
-	for _, end := range []int64{0, -1, 2 * frameSamples} {
+func TestWakeKeywordDiscardsBufferedAudio(t *testing.T) {
+	for _, end := range []int64{0, -1, frameSamples / 2} {
 		t.Run(fmt.Sprint(end), func(t *testing.T) {
 			s := recordTestSession(t)
 			s.state.WakeReady = true
 			s.detector = &fakeDetector{hitAt: frameSamples, end: end}
 			s.vad = &fakeVAD{}
 			recordFrame(t, s, 99)
-			if s.state.Turn != 2 || s.capture == nil || len(s.capture.pcm) != 0 {
-				t.Fatal("invalid endpoint included keyword audio or failed to restart")
+			if s.state.Turn != 2 || s.state.Phase != "wake" || s.capture != nil || !s.wakeCue {
+				t.Fatal("keyword did not restart into the wake cue")
 			}
 		})
 	}
 }
 
-func TestWakeKeywordDuringPlaybackAcceptsContinuousQuestion(t *testing.T) {
+func TestWakeKeywordDuringPlaybackPlaysCueBeforeQuestion(t *testing.T) {
 	dep := fakeDependencies()
 	dep.newDetector = func(c Config) (detector, error) {
 		if c.WakePhrase != "爱弥斯" {
@@ -175,7 +164,7 @@ func TestWakeKeywordDuringPlaybackAcceptsContinuousQuestion(t *testing.T) {
 		if err = d.untilPhase("speaking"); err != nil {
 			return err
 		}
-		// The complete question arrives before the delayed KWS decision.
+		// Audio before and while the cue plays is not part of the question.
 		for seq, value := range []int16{99, 7, 8} {
 			if err = d.mic(uint32(seq), value); err != nil {
 				return err
@@ -195,19 +184,28 @@ func TestWakeKeywordDuringPlaybackAcceptsContinuousQuestion(t *testing.T) {
 		if wake.State != "wake" || wake.Turn <= start.Turn {
 			return fmt.Errorf("expected immediate fresh wake, got %+v", wake)
 		}
-		if err = d.untilPhase("listening"); err != nil {
+		cueTurn, err := d.completeWakeCue()
+		if err != nil {
 			return err
 		}
-		for seq := uint32(3); seq < 3+endSilenceSamples/frameSamples; seq++ {
-			if err = d.mic(seq, 0); err != nil {
-				return err
-			}
+		seq, err := d.micFrames(3, 0, cueTailFrames)
+		if err != nil {
+			return err
+		}
+		if seq, err = d.micFrames(seq, 7, 1); err != nil {
+			return err
+		}
+		if seq, err = d.micFrames(seq, 8, 1); err != nil {
+			return err
+		}
+		if _, err = d.micFrames(seq, 0, endSilenceSamples/frameSamples); err != nil {
+			return err
 		}
 		transcript, err := d.until("transcript")
 		if err != nil {
 			return err
 		}
-		if transcript.Text != "新问题" || transcript.Turn != wake.Turn {
+		if transcript.Text != "新问题" || transcript.Turn != cueTurn+1 {
 			return fmt.Errorf("new question not recognized on new turn: %+v", transcript)
 		}
 		if _, err = d.until("playback_start"); err != nil {
