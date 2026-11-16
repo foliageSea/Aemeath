@@ -47,7 +47,7 @@ func parseArgs(args []string, output io.Writer) (cliOptions, error) {
 	flags.DurationVar(&opts.interval, "interval", time.Second, "sample interval")
 	flags.BoolVar(&opts.verbose, "v", false, "log every frame")
 	flags.BoolVar(&opts.dryRun, "dry-run", false, "print frames to stdout instead of sending")
-	flags.StringVar(&opts.magpieURL, "magpie", magpie.DefaultBase, "Magpie gateway base URL for quota frames (empty disables)")
+	flags.StringVar(&opts.magpieURL, "magpie", "", "enable quota monitoring with a Magpie gateway base URL (default disabled; e.g. http://127.0.0.1:3425)")
 	flags.BoolVar(&opts.voiceEnabled, "voice", false, "enable the voice assistant using environment configuration")
 	flags.StringVar(&opts.voiceConfig, "voice-config", "", "voice configuration JSON file (enables voice)")
 	flags.BoolVar(&opts.standalone, "standalone", false, "use system default microphone and speaker without an ESP32 (enables voice)")

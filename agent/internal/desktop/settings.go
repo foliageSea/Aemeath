@@ -34,6 +34,7 @@ type Settings struct {
 	RunMode       string          `json:"runMode"`
 	Address       string          `json:"address"`
 	MagpieURL     string          `json:"magpieURL"`
+	MagpieEnabled bool            `json:"magpieEnabled"`
 	Subscriptions []Subscription  `json:"subscriptions"`
 	Voice         voice.Config    `json:"voice"`
 	Network       netproxy.Config `json:"network"`
@@ -69,12 +70,14 @@ func normalizeSettings(in Settings) (Settings, error) {
 		return Settings{}, err
 	}
 	in.MagpieURL = strings.TrimRight(strings.TrimSpace(in.MagpieURL), "/")
-	if in.MagpieURL == "" {
-		in.MagpieURL = magpie.DefaultBase
-	}
-	u, err := url.Parse(in.MagpieURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return Settings{}, fmt.Errorf("invalid Magpie URL: %q", in.MagpieURL)
+	if in.MagpieEnabled {
+		if in.MagpieURL == "" {
+			in.MagpieURL = magpie.DefaultBase
+		}
+		u, err := url.Parse(in.MagpieURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return Settings{}, fmt.Errorf("invalid Magpie URL: %q", in.MagpieURL)
+		}
 	}
 	in.Subscriptions = append([]Subscription{}, in.Subscriptions...)
 	seen := map[string]bool{}

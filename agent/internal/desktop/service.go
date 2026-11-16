@@ -63,7 +63,8 @@ type Service struct {
 	deps            dependencies
 	ctx             context.Context
 	network         *netproxy.Router
-	networkRevision uint64 // rejects quota results started before a routing change
+	quotaRevision   uint64             // rejects results from any previous Magpie configuration
+	quotaCancel     context.CancelFunc // cancels the active quota request on settings changes
 	cancel          context.CancelFunc
 	closed          bool
 	wg              sync.WaitGroup
@@ -86,7 +87,7 @@ type Service struct {
 	voiceSession    atomic.Uint64 // numbers voice connections; see voice.State.Session
 }
 
-// New loads preferences and starts local sampling (1s) and quota polling (30s).
+// New loads preferences and starts local sampling (1s) and quota polling (30s, when enabled).
 // Device forwarding remains stopped until Start is called.
 func New(configPath string) (*Service, error) {
 	settings, err := loadSettings(configPath)
@@ -247,16 +248,20 @@ func (s *Service) SaveSettings(settings Settings) error {
 	if err := persistSettings(s.path, normalized); err != nil {
 		return fmt.Errorf("save settings: %w", err)
 	}
+	// Serialize publication with device sends: no old quota may be forwarded
+	// after a disabling SaveSettings returns. The sender snapshots under sendMu.
+	s.sendMu.Lock()
 	s.mu.Lock()
 	old := s.state.Settings
 	networkChanged := old.Network != normalized.Network
+	quotaChanged := networkChanged || old.MagpieURL != normalized.MagpieURL || old.MagpieEnabled != normalized.MagpieEnabled
 	if networkChanged {
 		// Normalize already succeeded; lifeMu prevents Close during publication.
 		if err := s.network.Update(normalized.Network); err != nil {
 			s.mu.Unlock()
+			s.sendMu.Unlock()
 			return fmt.Errorf("apply network settings: %w", err)
 		}
-		s.networkRevision++
 	}
 	if old.Voice.MemoryMode != normalized.Voice.MemoryMode {
 		// Fence any background extraction before publishing the new mode or restarting voice.
@@ -284,10 +289,15 @@ func (s *Service) SaveSettings(settings Settings) error {
 		}
 		signal(s.runWake)
 	}
-	if networkChanged || old.MagpieURL != normalized.MagpieURL {
+	if quotaChanged {
+		s.quotaRevision++
+		if s.quotaCancel != nil {
+			s.quotaCancel()
+		}
 		s.state.Quota, s.state.QuotaError = nil, ""
 	}
 	s.mu.Unlock()
+	s.sendMu.Unlock()
 	if haChanged {
 		signal(s.haWake)
 	}
@@ -297,7 +307,7 @@ func (s *Service) SaveSettings(settings Settings) error {
 		s.refreshModelCatalog(normalized.Voice)
 	}
 	signal(s.updates)
-	if networkChanged || old.MagpieURL != normalized.MagpieURL {
+	if quotaChanged {
 		signal(s.quotaWake)
 	}
 	return nil
@@ -412,11 +422,16 @@ func (s *Service) setScreen(request context.Context, on bool, brightness int) er
 }
 
 // RefreshQuotas synchronously refreshes the full UI list, including when stopped.
+// A disabled Magpie backend is a no-op, including for manual refreshes.
 func (s *Service) RefreshQuotas() error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return ErrClosed
+	}
+	if !s.state.Settings.MagpieEnabled {
+		s.mu.Unlock()
+		return nil
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
@@ -426,12 +441,21 @@ func (s *Service) RefreshQuotas() error {
 	if err := s.ctx.Err(); err != nil {
 		return ErrClosed
 	}
-	s.mu.RLock()
-	base, revision := s.state.Settings.MagpieURL, s.networkRevision
-	s.mu.RUnlock()
-	frame, err := s.deps.quota(s.ctx, base)
 	s.mu.Lock()
-	if s.ctx.Err() == nil && s.state.Settings.MagpieURL == base && s.networkRevision == revision {
+	if !s.state.Settings.MagpieEnabled {
+		s.mu.Unlock()
+		return nil
+	}
+	base, revision := s.state.Settings.MagpieURL, s.quotaRevision
+	ctx, cancel := context.WithCancel(s.ctx)
+	s.quotaCancel = cancel
+	s.mu.Unlock()
+	defer cancel()
+	frame, err := s.deps.quota(ctx, base)
+	s.mu.Lock()
+	s.quotaCancel = nil // quotaMu prevents another request from starting yet
+	accepted := ctx.Err() == nil && s.state.Settings.MagpieEnabled && s.quotaRevision == revision
+	if accepted {
 		if err != nil {
 			s.state.QuotaError = err.Error()
 		} else {
@@ -439,6 +463,9 @@ func (s *Service) RefreshQuotas() error {
 		}
 	}
 	s.mu.Unlock()
+	if !accepted {
+		return context.Canceled
+	}
 	if err == nil {
 		signal(s.updates)
 	}
@@ -627,14 +654,20 @@ func (s *Service) forward(ctx context.Context, conn connection) error {
 	}
 	incoming := conn.Incoming()
 	var lastQuota *proto.QuotaFrame
+	var lastQuotaRevision uint64
 	for {
-		state := s.Snapshot()
 		s.sendMu.Lock()
+		state := s.Snapshot()
 		if state.Metrics != nil {
 			err = conn.Send(ctx, state.Metrics)
 		}
 		quota := magpie.ForDevice(orderedQuota(state.Quota, state.Settings.Subscriptions))
-		quotaChanged := !reflect.DeepEqual(quota, lastQuota)
+		s.mu.RLock()
+		quotaRevision := s.quotaRevision
+		s.mu.RUnlock()
+		// A disable/re-enable can occur between two sends. Its generation must
+		// still force forwarding a fresh, otherwise identical quota frame.
+		quotaChanged := state.Settings.MagpieEnabled && (!reflect.DeepEqual(quota, lastQuota) || (quota != nil && quotaRevision != lastQuotaRevision))
 		if err == nil && quotaChanged {
 			payload := quota
 			if payload == nil {
@@ -642,7 +675,7 @@ func (s *Service) forward(ctx context.Context, conn connection) error {
 			}
 			err = conn.Send(ctx, payload)
 			if err == nil {
-				lastQuota = quota
+				lastQuota, lastQuotaRevision = quota, quotaRevision
 			}
 		}
 		s.sendMu.Unlock()

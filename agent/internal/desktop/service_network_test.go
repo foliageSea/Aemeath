@@ -227,8 +227,7 @@ func TestNetworkSaveDiscardsOldQuotaResult(t *testing.T) {
 	if err := s.SaveSettings(settings); err != nil {
 		t.Fatal(err)
 	}
-	// Allow only the old request to finish, then observe the new blocked request.
-	release <- struct{}{}
+	// Changing routing cancels the old request and wakes a new blocked request.
 	if next() != 2 {
 		t.Fatal("routing save did not wake quota refresh")
 	}

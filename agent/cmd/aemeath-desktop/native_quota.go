@@ -124,6 +124,15 @@ func joinNonEmpty(sep string, parts ...string) string {
 	return strings.Join(kept, sep)
 }
 func (a *nativeUI) quotaListView(c *ui.Context) {
+	if !a.snapshot.Settings.MagpieEnabled {
+		ui.Text(c, "额度监控已关闭").TextColor(c.Theme().TextMuted)
+		ui.Text(c, "可在设置 → 连接中开启额度监控，保存后生效。").TextColor(c.Theme().TextMuted).Wrap()
+		ui.Button(c.Key("quota-settings"), "前往连接设置").OnClick(func() {
+			a.page = "设置"
+			a.settingsTab = nativeSettingsConnectionTab
+		})
+		return
+	}
 	q := a.snapshot.Quota
 	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Children(func() {

@@ -314,7 +314,18 @@ func (a *nativeUI) connectionSettingsView(c *ui.Context) {
 			}
 			return field
 		})
-		a.voiceField(c, "magpie-url", "Magpie 网关", "http://127.0.0.1:3425", &a.draft.MagpieURL, false)
+		enabled := a.draft.MagpieEnabled
+		if nativeSettingsToggle(c, "magpie-enabled", "额度监控", &enabled, false) {
+			a.draft.MagpieEnabled = enabled
+			a.edited()
+		}
+		nativeSettingsField(c, "magpie-url", "Magpie 网关", func() ui.Element {
+			field := ui.TextInput(c.Key("input"), &a.draft.MagpieURL).Label("Magpie 网关").Placeholder("http://127.0.0.1:3425").Disabled(!a.draft.MagpieEnabled).FillWidth().MinWidth(0).Height(36)
+			if field.Changed() {
+				a.edited()
+			}
+			return field
+		})
 	})
 	a.networkSettingsView(c)
 }

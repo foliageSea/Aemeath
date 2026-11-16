@@ -12,6 +12,23 @@ import (
 	"time"
 )
 
+func TestCLIMagpieMonitoringIsOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"--standalone"}, ""},
+		{[]string{"--magpie="}, ""},
+		{[]string{"--magpie=http://127.0.0.1:3425"}, "http://127.0.0.1:3425"},
+	} {
+		opts, err := parseArgs(tc.args, io.Discard)
+		if err != nil || opts.magpieURL != tc.want {
+			t.Fatalf("parseArgs(%q): magpie=%q err=%v, want %q", tc.args, opts.magpieURL, err, tc.want)
+		}
+	}
+}
+
 func TestCLIProxyArgsNormalizeModesAndPreserveInactiveURL(t *testing.T) {
 	for _, tc := range []struct {
 		name string

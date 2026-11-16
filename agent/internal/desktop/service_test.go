@@ -114,7 +114,7 @@ func testDeps() dependencies {
 }
 func testService(t *testing.T, deps dependencies) *Service {
 	t.Helper()
-	settings, err := normalizeSettings(Settings{})
+	settings, err := normalizeSettings(Settings{MagpieEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestPreferencesPersistenceAndOwnership(t *testing.T) {
 	if s.Snapshot().Settings.Subscriptions[0].Name != "账户A" {
 		t.Fatal("snapshot aliases service preferences")
 	}
-	if err := s.SaveSettings(Settings{MagpieURL: ":bad"}); err == nil {
+	if err := s.SaveSettings(Settings{MagpieEnabled: true, MagpieURL: ":bad"}); err == nil {
 		t.Fatal("invalid URL accepted")
 	}
 	if err := s.SaveSettings(Settings{Subscriptions: []Subscription{{Name: "A"}, {Name: "A"}}}); err == nil {
@@ -506,7 +506,7 @@ func TestNewSurvivesRealDialFailureAndReconnects(t *testing.T) {
 	}))
 	defer server.Close()
 	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := persistSettings(path, Settings{Address: strings.TrimPrefix(server.URL, "http://"), MagpieURL: server.URL, Subscriptions: []Subscription{}}); err != nil {
+	if err := persistSettings(path, Settings{MagpieEnabled: true, Address: strings.TrimPrefix(server.URL, "http://"), MagpieURL: server.URL, Subscriptions: []Subscription{}}); err != nil {
 		t.Fatal(err)
 	}
 	service, err := New(path)
