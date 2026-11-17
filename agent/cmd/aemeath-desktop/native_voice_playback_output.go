@@ -41,7 +41,10 @@ func (a *nativeUI) voicePlaybackOutputView(c *ui.Context) {
 		output = 0
 	}
 	ui.Row(c.Key("voice-playback-shortcut")).Label("播放位置快捷切换").Shrink(0).Gap(6).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "播放位置").FontSize(11).TextColor(c.Theme().TextMuted).Shrink(0)
+		// Keep the selector accessible by name; omit its redundant caption in compact windows.
+		if width, _ := c.Size(); width >= 1000 {
+			ui.Text(c, "播放位置").FontSize(11).TextColor(c.Theme().TextMuted).Shrink(0)
+		}
 		field := nativeSettingsSegmented(c, "voice-playback-quick", &output, "播放位置", "Agent", "监控台").Disabled(standalone || a.busy["save"])
 		if field.Changed() {
 			a.switchVoicePlaybackOutput([]string{"console", "agent"}[output])

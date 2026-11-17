@@ -117,6 +117,7 @@ func sameVoiceTurn(turn nativeVoiceTurn, state voice.State) bool {
 
 // Keep a bounded, in-memory transcript of turns observed by this window.
 func (a *nativeUI) recordVoice() {
+	a.syncVoiceNotice()
 	s := a.snapshot.Voice
 	if a.voiceCleared {
 		if s.Turn == a.voiceClearTurn && s.Session == a.voiceClearSession {
@@ -202,40 +203,31 @@ func (a *nativeUI) voicePathLabel() string {
 
 func (a *nativeUI) voiceView(c *ui.Context) {
 	t := c.Theme()
+	a.syncVoiceNotice()
 	state := a.snapshot.Voice
-	disabled := a.voiceDisabled()
 	ui.Column(c.Key("voice-chat")).FillWidth().Grow(1).MinHeight(0).Gap(16).Children(func() {
-		ui.Row(c.Key("voice-toolbar")).Label("语音助手状态栏").FillWidth().Shrink(0).Gap(10).Padding(0, 0, 12).BorderWidth(0, 0, 1, 0).BorderColor(t.Border.Alpha(0.5)).AlignItems(ui.Center).Children(func() {
-			voiceAvatar(c, 40)
-			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-				ui.Row(c.Key("voice-connection")).Label("助手连接状态").FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "爱弥斯").Bold().FontSize(15).Shrink(0)
-					connection := "未连接"
-					if state.Connected {
-						connection = "已连接 · " + nativeVoicePhase(state.Phase)
-					}
-					ui.Text(c, "· "+connection).MinWidth(0).FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
-					ui.Text(c.Key("voice-path"), a.voicePathLabel()).Label(a.voicePathLabel()).Grow(1).MinWidth(0).FontSize(11).TextColor(t.TextMuted).SingleLine().Ellipsis("…")
-				})
-				ui.Row(c.Key("voice-header-hints")).Label("助手唤醒与快捷键").FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
-					a.voiceStatusView(c)
-					ui.Text(c, "·").FontSize(11).TextColor(t.TextMuted).Shrink(0)
-					a.voiceHoldHintView(c)
-				})
-			})
-			a.voicePlaybackOutputView(c)
-			voiceIconButton(c, "voice-configure", "语音设置", voiceSettingsIcon, false, false, a.openVoiceSettings)
-			voiceIconButton(c, "voice-clear", "清空对话", voiceClearIcon, false, disabled, func() { a.voiceClearConfirm = true })
-		})
+		a.voiceHeaderView(c)
 		if ui.AlertDialog(c, &a.voiceClearConfirm, "清空对话？", "当前对话记录、上下文摘要和累计用量将被清除，且无法恢复。长期记忆会保留，可在助手设置的“记忆”中单独管理。", "取消", "清空") == 1 {
 			a.voiceCommand("clear", "")
 		}
-		ui.Box(c.Key("voice-conversation")).FillWidth().Grow(1).MinHeight(0).Clip().Children(func() {
+		conversation := ui.Box(c.Key("voice-conversation")).FillWidth().Grow(1).MinHeight(0).Clip()
+		conversation.Children(func() {
 			composerInset := max(156, a.voiceControlsHeight) + 16
+			if conversation.Bounds().H == 0 {
+				// Bounds are from the previous frame; settle the first appearance before choosing an empty-state size.
+				c.Invalidate()
+			}
+			emptyHeight := max(0, conversation.Bounds().H-composerInset)
 			if len(a.voiceHistory) == 0 {
-				ui.Column(c.Key("voice-empty")).Label("对话记录").Fill().MinHeight(0).Padding(0, 0, composerInset).Clip().Center().Children(func() {
-					ui.Column(c).MaxWidth(400).FillWidth().Padding(16).Gap(12).AlignItems(ui.Center).Children(func() {
-						voiceAvatar(c, 88)
+				ui.Column(c.Key("voice-empty")).Label("对话记录").Absolute().Top(0).Left(0).Right(0).Bottom(composerInset).MinHeight(0).Clip().Center().Children(func() {
+					if emptyHeight < 100 {
+						ui.Text(c, "可在下方输入文字开始对话").Label("对话空态内容").FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
+						return
+					}
+					ui.Column(c).Label("对话空态内容").MaxWidth(400).FillWidth().Padding(8).Gap(12).AlignItems(ui.Center).Children(func() {
+						if emptyHeight >= 240 {
+							voiceAvatar(c, 88)
+						}
 						ui.Text(c, "和爱弥斯聊一聊").FontSize(22).Bold().TextAlign(ui.Center)
 						ui.Text(c, fmt.Sprintf("说出「%s」，或点击手动唤醒开始对话。", a.savedWakePhrase())).FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
 						ui.Text(c, "也可以在下方输入文字开始对话。").FontSize(12).TextColor(t.TextMuted).Wrap().TextAlign(ui.Center)
@@ -286,23 +278,23 @@ func (a *nativeUI) sendVoiceText() {
 
 func (a *nativeUI) voiceControlsView(c *ui.Context) {
 	t := c.Theme()
-	// Blur only the backdrop; the composer contents stay sharp.
-	card := ui.Column(c.Key("voice-controls")).Label("语音操作栏").Absolute().Left(0).Right(0).Bottom(0).MinWidth(0).Radius(16).Border(1, t.Border.Alpha(0.55)).Material(glass.Blur{Radius: 20})
-	if height := card.Bounds().H; height > 0 && height != a.voiceControlsHeight {
+	stack := ui.Column(c.Key("voice-input-stack")).Label("语音输入与提示").Absolute().Left(0).Right(0).Bottom(0).MinWidth(0).Gap(8)
+	if height := stack.Bounds().H; height > 0 && height != a.voiceControlsHeight {
 		a.voiceControlsHeight = height
 		c.Invalidate()
 	}
-	if card.FocusWithin() {
-		card.BorderColor(t.Accent.Alpha(0.55))
-	}
-	card.Children(func() {
-		ui.Column(c.Key("voice-controls-tint")).FillWidth().MinWidth(0).Radius(16).Background(t.Surface.Alpha(0.72)).Children(func() {
-			a.voiceTextInputView(c)
-			a.voiceContextView(c, true)
-			_, supported := a.service.(nativeVoiceService)
-			if !supported || a.snapshot.Voice.Error != "" || a.voiceGlobalError != "" || a.snapshot.Voice.Notice != "" {
-				ui.Column(c.Key("voice-notices")).FillWidth().MinWidth(0).Padding(0, 16, 12).Gap(4).Children(func() { a.voiceNoticeView(c) })
-			}
+	stack.Children(func() {
+		a.voiceNoticeView(c)
+		// Blur only the backdrop; the composer contents stay sharp.
+		card := ui.Column(c.Key("voice-controls")).Label("语音操作栏").FillWidth().MinWidth(0).Radius(16).Border(1, t.Border.Alpha(0.55)).Material(glass.Blur{Radius: 20})
+		if card.FocusWithin() {
+			card.BorderColor(t.Accent.Alpha(0.55))
+		}
+		card.Children(func() {
+			ui.Column(c.Key("voice-controls-tint")).FillWidth().MinWidth(0).Radius(16).Background(t.Surface.Alpha(0.72)).Children(func() {
+				a.voiceTextInputView(c)
+				a.voiceContextView(c, true)
+			})
 		})
 	})
 }
@@ -441,22 +433,6 @@ func nativeVoicePhaseColor(t *ui.Theme, state voice.State) ui.Color {
 		return t.Accent
 	default:
 		return t.TextMuted
-	}
-}
-
-func (a *nativeUI) voiceNoticeView(c *ui.Context) {
-	t, state := c.Theme(), a.snapshot.Voice
-	if _, supported := a.service.(nativeVoiceService); !supported {
-		ui.Text(c, "当前服务不支持语音操作，请更新桌面应用。").FontSize(12).TextColor(t.Warning).Wrap()
-	}
-	if state.Error != "" {
-		ui.Text(c, "语音提示："+state.Error).FontSize(12).TextColor(t.Warning).Wrap().MaxLines(2).Ellipsis("…").Selectable()
-	}
-	if a.voiceGlobalError != "" {
-		ui.Text(c, a.voiceGlobalError).FontSize(12).TextColor(t.Warning).Wrap()
-	}
-	if state.Notice != "" {
-		ui.Text(c, state.Notice).FontSize(12).Wrap().MaxLines(2).Ellipsis("…")
 	}
 }
 

@@ -43,7 +43,8 @@ func TestNativeVoicePlaybackQuickSwitch(t *testing.T) {
 				nativeClick(t, tt, choice.label)
 				nativeComplete(t, updates, tt)
 				nativeAssertPlaybackSelection(t, tt, choice.label)
-				if len(f.saves) != i+1 || f.saves[i].Voice.PlaybackOutput != choice.route || a.draft.Voice.PlaybackOutput != choice.route || a.dirty || !tt.HasText(choice.path) {
+				_, accessiblePath := tt.Access(choice.path)
+				if len(f.saves) != i+1 || f.saves[i].Voice.PlaybackOutput != choice.route || a.draft.Voice.PlaybackOutput != choice.route || a.dirty || !accessiblePath {
 					t.Fatalf("quick switch did not persist %s and update the path", choice.label)
 				}
 			}

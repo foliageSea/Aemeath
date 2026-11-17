@@ -190,7 +190,7 @@ func nativeAssertNoTooltip(t *testing.T, tt *ui.Tester, label string) {
 	}
 }
 
-func TestNativeVoiceCompactHeaderKeepsTwoRows(t *testing.T) {
+func TestNativeVoiceCompactHeaderKeepsSeparatePathRow(t *testing.T) {
 	for _, size := range [][2]int{{760, 577}, {1100, 900}, {1762, 883}} {
 		for _, dark := range []bool{false, true} {
 			a, f, _, tt := nativeTest(t)
@@ -221,8 +221,17 @@ func TestNativeVoiceCompactHeaderKeepsTwoRows(t *testing.T) {
 					t.Fatal("missing first header row")
 				}
 				second, ok := tt.Find("助手唤醒与快捷键")
-				if !ok || first.Y+first.H > second.Y+1 || second.Y+second.H > header.Y+header.H+1 || header.H > 60 {
-					t.Fatalf("header is not compact two-row layout: size=%v dark=%v header=%+v first=%+v second=%+v", size, dark, header, first, second)
+				if !ok || first.Y+first.H > second.Y+1 || second.Y+second.H > header.Y+header.H+1 {
+					t.Fatalf("header status rows are not compact: size=%v dark=%v header=%+v first=%+v second=%+v", size, dark, header, first, second)
+				}
+				path, found := tt.Access(a.voicePathLabel())
+				if !found || path.Bounds.W <= 0 || path.Bounds.H <= 0 || path.Bounds.X < header.X || path.Bounds.X+path.Bounds.W > header.X+header.W+1 || path.Bounds.Y < header.Y || path.Bounds.Y+path.Bounds.H > header.Y+header.H+1 {
+					t.Fatalf("missing accessible path in header: %+v header=%+v", path, header)
+				}
+				for _, row := range []ui.Rect{first, second} {
+					if path.Bounds.Y < row.Y+row.H && path.Bounds.Y+path.Bounds.H > row.Y {
+						t.Fatalf("audio path shares a status row: path=%+v row=%+v", path.Bounds, row)
+					}
 				}
 				for _, label := range []string{"离线唤醒状态", state.want, "语音快捷键提示"} {
 					box, found := tt.Find(label)
@@ -271,10 +280,10 @@ func TestNativeVoiceCompactConnectionState(t *testing.T) {
 		connected           bool
 		phase, want, detail string
 	}{
-		{false, "idle", "· 未连接", "语音通道：未连接"},
-		{false, "speaking", "· 未连接", "语音通道：未连接"},
-		{true, "idle", "· 已连接 · 待命", "语音通道：已连接 · 待命"},
-		{true, "speaking", "· 已连接 · 正在说话", "语音通道：已连接 · 正在说话"},
+		{false, "idle", "未连接", "语音通道：未连接"},
+		{false, "speaking", "未连接", "语音通道：未连接"},
+		{true, "idle", "已连接", "· 已连接 · 待命"},
+		{true, "speaking", "已连接", "· 已连接 · 正在说话"},
 	} {
 		f.state.Voice.Connected, f.state.Voice.Phase = state.connected, state.phase
 		a.refresh()
@@ -384,8 +393,15 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	f.state.Voice.Error = "找不到唤醒模型"
 	a.refresh()
 	nativeClick(t, tt, "语音助手")
-	if !tt.HasText("唤醒未就绪") || !tt.HasText("语音提示：找不到唤醒模型") {
+	if !tt.HasText("唤醒未就绪") || !tt.HasText("语音异常") || !tt.HasText("语音暂不可用，仍可发送文字消息") {
 		t.Fatal("missing models were not diagnosed")
+	}
+	if tt.HasText("语音提示：找不到唤醒模型") || tt.HasText("原始信息："+f.state.Voice.Error) {
+		t.Fatal("raw error must stay hidden before opening details")
+	}
+	nativeClick(t, tt, "查看语音异常详情")
+	if !tt.HasText("原始信息：" + f.state.Voice.Error) {
+		t.Fatal("voice error details did not expose the original diagnostic")
 	}
 	tt.SetSize(1100, 3200)
 	for _, label := range []string{"手动唤醒", "取消对话", "清空对话"} {
@@ -430,7 +446,7 @@ func TestNativeVoiceCommandsRemainAvailableWithoutWakeModels(t *testing.T) {
 	f.state.Voice.GeneratedSegments, f.state.Voice.PlayedSegments = 3, 1
 	a.refresh()
 	tt.Frame()
-	for _, text := range []string{"唤醒已就绪", "· 已连接 · 正在说话", "现在电脑忙吗？", "我来帮你看看。"} {
+	for _, text := range []string{"唤醒已就绪", "已连接", "现在电脑忙吗？", "我来帮你看看。"} {
 		if !tt.HasText(text) {
 			t.Fatalf("updated voice state not displayed: %s", text)
 		}

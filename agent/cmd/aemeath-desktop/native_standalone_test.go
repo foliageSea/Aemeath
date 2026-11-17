@@ -61,7 +61,7 @@ func TestNativeStandaloneStatusAndVoiceControlsIgnoreDeviceConnection(t *testing
 	if !tt.HasText("独立模式 · 就绪") || tt.HasText("设备未连接") {
 		t.Fatal("standalone sidebar depends on device status")
 	}
-	if !tt.HasText("语音路径：本机麦克风 → 本机扬声器") {
+	if _, ok := tt.Access("语音路径：本机麦克风 → 本机扬声器"); !ok {
 		t.Fatal("missing standalone voice path")
 	}
 	if a.voiceDisabled() {
@@ -70,7 +70,7 @@ func TestNativeStandaloneStatusAndVoiceControlsIgnoreDeviceConnection(t *testing
 	f.state.Voice.Phase = "speaking"
 	a.refresh()
 	tt.Frame()
-	if !tt.HasText("语音路径：本机麦克风 → 本机扬声器 · 播放时暂停自动唤醒，可手动打断") {
+	if _, ok := tt.Access("语音路径：本机麦克风 → 本机扬声器 · 播放时暂停自动唤醒，可手动打断"); !ok || !tt.HasText("播放时暂停自动唤醒，可手动打断") {
 		t.Fatal("missing automatic wake pause hint")
 	}
 	nativeClick(t, tt, "设置")

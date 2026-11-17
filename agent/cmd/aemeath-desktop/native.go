@@ -83,6 +83,7 @@ type nativeUI struct {
 	voiceCleared             bool
 	voiceClearConfirm        bool
 	voiceContextExpanded     bool
+	voiceNotice              nativeVoiceNoticeState
 	voiceClearTurn           uint32
 	voiceClearSession        uint64
 	wakeAssets               nativeWakeAssets

@@ -88,8 +88,11 @@ func (a *nativeUI) voiceContextView(c *ui.Context, details bool) {
 		ui.Row(c.Key("voice-context")).Label("上下文与用量").FillWidth().MinWidth(0).Gap(12).AlignItems(ui.Center).Children(func() {
 			status := a.voiceComposerStatus()
 			ui.Row(c.Key("voice-footer-status")).Label("当前对话状态").Grow(1).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(nativeVoicePhaseColor(t, a.snapshot.Voice))
-				ui.Text(c, status).FontSize(11).TextColor(t.TextMuted).MinWidth(0).SingleLine().Ellipsis("…")
+				// Errors have a dedicated banner above the composer, not a second footer alert.
+				if a.snapshot.Voice.Phase != "error" {
+					ui.Box(c).Size(6, 6).Shrink(0).Radius(3).Background(nativeVoicePhaseColor(t, a.snapshot.Voice))
+					ui.Text(c, status).FontSize(11).TextColor(t.TextMuted).MinWidth(0).SingleLine().Ellipsis("…")
+				}
 			})
 			ui.Row(c).Shrink(0).MinWidth(0).Wrap().GapX(10).GapY(6).AlignItems(ui.Center).Children(func() {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
