@@ -6,6 +6,8 @@
 #include "ui/dashboard.h"
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -186,7 +188,9 @@ static void text_message(const uint8_t *data, size_t len, bool discard_round)
         const char *state=string(j,"state"), *text=string(j,"text");
         if (!state) { fail_round("bad_state","Missing voice state"); goto done; }
         bool valid=!strcmp(state,"idle") || !strcmp(state,"wake") || !strcmp(state,"listening") || !strcmp(state,"recognizing") || !strcmp(state,"thinking") || !strcmp(state,"synthesizing") || !strcmp(state,"speaking") || !strcmp(state,"error");
-        if (!valid || (!turn && strcmp(state,"idle"))) { fail_round("bad_state","Invalid voice state"); goto done; }
+        // Connection setup can fail before any turn exists (for example audio_init).
+        // Error is terminal presentation, not a request to open a zero-numbered round.
+        if (!valid || (!turn && strcmp(state,"idle") && strcmp(state,"error"))) { fail_round("bad_state","Invalid voice state"); goto done; }
         if (turn>s_turn) { abort_round(false); s_turn=turn; s_error_until=0; }
         if (!strcmp(state,"speaking")) goto done; // DMA completion owns speaking
         if (!strcmp(state,"idle")) { if (s_play.active) goto done; abort_round(true); }
@@ -384,7 +388,8 @@ static void capture(void *arg)
             portENTER_CRITICAL(&s_lock); bool metering=s_mic_meter; portEXIT_CRITICAL(&s_lock);
             if (metering) voice_page_level(peak/32768.0f);
         }
-        voice_ws_send(epoch,true,frame,sizeof(frame));
+        if (voice_ws_send(epoch,true,frame,sizeof(frame)) && seq==1)
+            ESP_LOGI("voice","capture streaming: 16000 Hz mono, %u samples/frame, epoch %"PRIu32,VOICE_FRAME_SAMPLES,epoch);
     }
 }
 bool voice_transport_receive(uint32_t epoch, bool binary, uint8_t *data, size_t len)
@@ -437,6 +442,11 @@ esp_err_t voice_init(void)
     if (!s_events || !s_text || !s_controls) { delete_events(); return ESP_ERR_NO_MEM; }
     TaskHandle_t worker_handle=NULL;
     if (xTaskCreate(worker,"voice",8192,NULL,5,&worker_handle)!=pdPASS) { delete_events(); return ESP_ERR_NO_MEM; }
-    if (xTaskCreate(capture,"voice_mic",12288,NULL,5,NULL)!=pdPASS) { vTaskDelete(worker_handle); delete_events(); return ESP_ERR_NO_MEM; }
+    // This task processes PCM/AEC and queues network output; it never executes
+    // cache-disabled flash operations. Its large working stack is CPU-only, not
+    // DMA/ISR memory. Keep those 12 KiB in PSRAM rather than starving I2S DMA.
+    // The permanent task has no deletion path (WithCaps tasks require
+    // vTaskDeleteWithCaps if one is introduced). The worker remains internal.
+    if (xTaskCreateWithCaps(capture,"voice_mic",12288,NULL,5,NULL,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS) { vTaskDelete(worker_handle); delete_events(); return ESP_ERR_NO_MEM; }
     return ESP_OK;
 }

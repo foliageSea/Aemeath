@@ -76,11 +76,13 @@ static void vTaskDelay(unsigned ticks) { (void)ticks; ++host_delays; }
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 #define MALLOC_CAP_INTERNAL 4
+#define MALLOC_CAP_DMA 8
 static void *heap_caps_calloc(size_t n, size_t size, int caps)
 { (void)caps; return calloc(n, size); }
 static void *heap_caps_aligned_alloc(size_t alignment, size_t size, int caps)
 { (void)caps; return aligned_alloc(alignment, (size + alignment - 1) / alignment * alignment); }
 static size_t heap_caps_get_free_size(int caps) { (void)caps; return 1000000; }
+static size_t heap_caps_get_largest_free_block(int caps) { (void)caps; return 1000000; }
 
 static bool host_pa;
 static unsigned host_pa_on_calls, host_pa_off_calls;
@@ -111,8 +113,11 @@ struct host_channel;
 typedef struct host_channel *i2s_chan_handle_t;
 typedef bool (*host_i2s_callback)(i2s_chan_handle_t, i2s_event_data_t *, void *);
 typedef struct { host_i2s_callback on_sent, on_recv; } i2s_event_callbacks_t;
-struct host_channel { i2s_event_callbacks_t callbacks; void *ctx; bool enabled; };
+struct host_channel { i2s_event_callbacks_t callbacks; void *ctx; bool enabled, allocated, initialized; };
 static struct host_channel host_tx, host_rx;
+static i2s_chan_handle_t host_i2s_fail_init;
+static unsigned host_i2s_init_calls, host_i2s_enable_calls, host_i2s_deletes;
+static unsigned host_codec_ctrl_creates;
 typedef struct { int dma_desc_num, dma_frame_num; bool auto_clear_after_cb, auto_clear_before_cb; } i2s_chan_config_t;
 typedef struct { int clk_cfg, slot_cfg; struct { int mclk, bclk, ws, dout, din; } gpio_cfg; } i2s_std_config_t;
 #define I2S_NUM_0 0
@@ -127,15 +132,23 @@ static int i2s_new_channel(const i2s_chan_config_t *config, i2s_chan_handle_t *t
     assert(config->dma_desc_num == 4 && config->dma_frame_num == 320);
     assert(!config->auto_clear_after_cb && !config->auto_clear_before_cb);
     memset(&host_tx, 0, sizeof(host_tx)); memset(&host_rx, 0, sizeof(host_rx));
+    host_tx.allocated = host_rx.allocated = true;
     *tx = &host_tx; *rx = &host_rx; return ESP_OK;
 }
 static int i2s_channel_init_std_mode(i2s_chan_handle_t channel, const i2s_std_config_t *config)
-{ (void)channel; assert(config->clk_cfg == 16000); return ESP_OK; }
+{
+    assert(channel->allocated && config->clk_cfg == 16000);
+    ++host_i2s_init_calls;
+    if (channel == host_i2s_fail_init) return ESP_ERR_NO_MEM;
+    channel->initialized = true; return ESP_OK;
+}
 static int i2s_channel_register_event_callback(i2s_chan_handle_t channel, const i2s_event_callbacks_t *callbacks, void *ctx)
 { channel->callbacks = *callbacks; channel->ctx = ctx; return ESP_OK; }
-static int i2s_channel_enable(i2s_chan_handle_t channel) { channel->enabled = true; return ESP_OK; }
+static int i2s_channel_enable(i2s_chan_handle_t channel)
+{ assert(channel->allocated && channel->initialized); ++host_i2s_enable_calls; channel->enabled = true; return ESP_OK; }
 static int i2s_channel_disable(i2s_chan_handle_t channel) { channel->enabled = false; return ESP_OK; }
-static int i2s_del_channel(i2s_chan_handle_t channel) { (void)channel; return ESP_OK; }
+static int i2s_del_channel(i2s_chan_handle_t channel)
+{ assert(channel->allocated && !channel->enabled); ++host_i2s_deletes; memset(channel, 0, sizeof(*channel)); return ESP_OK; }
 
 typedef struct { int bits_per_sample, channel, sample_rate, mclk_multiple; } esp_codec_dev_sample_info_t;
 typedef struct audio_codec_if audio_codec_if_t;
@@ -164,7 +177,7 @@ static const audio_codec_if_t host_codec = {host_codec_fs, host_codec_enable, ho
 static const audio_codec_ctrl_if_t host_ctrl = {0};
 static const audio_codec_gpio_if_t host_gpio = {0};
 static const audio_codec_ctrl_if_t *audio_codec_new_i2c_ctrl(const audio_codec_i2c_cfg_t *config)
-{ assert(config->bus_handle); return &host_ctrl; }
+{ assert(config->bus_handle); ++host_codec_ctrl_creates; return &host_ctrl; }
 static const audio_codec_gpio_if_t *audio_codec_new_gpio(void) { return &host_gpio; }
 static const audio_codec_if_t *es8311_codec_new(const es8311_codec_cfg_t *config)
 { assert(config->ctrl_if && config->gpio_if && config->use_mclk); return &host_codec; }

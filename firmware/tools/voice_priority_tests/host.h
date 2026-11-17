@@ -56,6 +56,12 @@ static void vQueueDelete(QueueHandle_t q) { free(q->data); free(q); }
 static int xTaskCreate(void (*f)(void *),const char *name,unsigned size,void *arg,int priority,TaskHandle_t *out) {
     (void)f; (void)name; (void)size; (void)arg; (void)priority; if(out) *out=(void *)1; return pdPASS;
 }
+static unsigned host_external_capture_tasks;
+static int xTaskCreateWithCaps(void (*f)(void *),const char *name,unsigned size,void *arg,int priority,TaskHandle_t *out,int caps) {
+    assert(!strcmp(name,"voice_mic") && size==12288 && caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+    host_external_capture_tasks++;
+    return xTaskCreate(f,name,size,arg,priority,out);
+}
 static void vTaskDelete(TaskHandle_t task) { (void)task; }
 static void vTaskDelay(unsigned ticks) { (void)ticks; }
 static void xTaskNotifyGive(TaskHandle_t task) { (void)task; }

@@ -2,6 +2,27 @@
 
 本次验证环境：macOS ARM64、Go 模块声明版本 1.27.3、ESP-IDF 6.0.2、LVGL 9.6.0~1、esp_codec_dev 1.6.2、sherpa-onnx Go/native 2.0.1。验证日期：2026-11-09。
 
+## I²S DMA 内存不足导致设备无法采音（2026-11-17）
+
+- 连接实板串口后确认根因：`i2s_alloc_dma_desc: allocate DMA buffer failed` → `i2s_channel_init_std_mode` → `audio init: ESP_ERR_NO_MEM`，发生在 codec 初始化之前，不是唤醒模型或 ASR 识别失败。原始记录见 [初始化失败串口日志](../firmware/build/voice-init-diagnostic.log)。
+- ESP32-S3 双工 I²S 需要内部 DMA 内存：每方向 4 × 320 × 2 声道 × 2 字节，即双向 PCM 缓冲共 10,240 字节，另有描述符及驱动分配；PSRAM 空闲不能替代内部 DMA 内存。原 48 KiB 内部预留还与 FreeRTOS 等内部专用分配共享，两个 voice 任务栈就占用 20 KiB。
+- `sdkconfig.defaults` 与本地实际构建配置均将内部预留提高到 128 KiB，普通 malloc 内部优先阈值从 4096 降到 1024 字节，让 UI/网络普通分配更早使用 PSRAM。保留 16 kHz／320 样本／4 DMA 块及 AEC，不削减音频协议或把 DMA 缓冲搬到 PSRAM。
+- 实测仅增大预留池仍不够：96 KiB 初始化后 DMA 空闲仅 803 字节，128 KiB 也仅 1367 字节，表明内部专用分配占主导。进一步将仅做 PCM/AEC 和同步入发送队列的 `voice_mic` 12 KiB CPU 工作栈通过 IDF `xTaskCreateWithCaps` 显式放在 PSRAM；任务 TCB、I²S DMA／描述符和 ISR 状态仍在内部 RAM，栈大小不缩减，保留不执行 flash/NVS 的边界；未来若添加该永久任务的删除路径必须使用 `vTaskDeleteWithCaps`。默认配置显式启用 `FREERTOS_TASK_CREATE_ALLOW_EXT_MEM`，主机会话测试断言 capture 栈能力和大小。
+- 音频初始化新增分阶段错误与 DMA 总空闲／最大连续块快照，成功时也记录余量；IDF 可能在返回失败前回收部分 DMA，因此失败快照不能当作失败瞬间的精确峰值。每个新连接在首个 AEC 处理后麦克风帧入发送队列时记录 `capture streaming`，不记录用户音频内容。
+- 新增 TX 和 RX DMA 初始化内存失败注入，各连续失败三次后成功重试，检查所有队列、AEC、codec、I²S 及陈旧 DMA 状态清理，且失败期间不配置 codec、不启用通道，重试后实际驱动播放回调。音频和 voice/WebSocket 主机 ASan/UBSan 测试以及 ESP-IDF 6.0.2 构建通过。
+
+- 经用户明确授权，最终仅向同一 ESP32-S3（MAC `E8:F6:0A:A5:B7:54`）应用偏移 `0x10000` 写入 5,446,480 字节，esptool 哈希校验通过；未写 bootloader、分区表、NVS 或背景分区。尝试读取原应用备份时多次出现串口 packet header 错误，未获得完整备份；随后的应用写入与哈希校验均成功。
+- 最终实板日志确认：新构建启动、96/128 KiB 对照后采用 128 KiB 预留与 PSRAM capture 栈；音频初始化后内部空闲 17,327 字节、DMA 空闲 13,599 字节、DMA 最大连续块 13,312 字节，随后 `capture streaming: 16000 Hz mono, 320 samples/frame`；观察到一次连接关闭后自动重连，新 epoch 再次开始采音，45 秒串口观察未出现 `audio init`／`capture/AEC failed`、内存不足或 panic。Wi-Fi、5% 背光和背景 revision 9 均恢复。记录见 [最终烧录后串口日志](../firmware/build/voice-dma-psram-stack-post-flash.log)。
+- 本次实机确认的是 codec／I²S／AEC 初始化、真实麦克风帧入队及重连恢复；未主动调用付费 ASR/LLM/TTS，没有声称真人唤醒成功率、扬声器音质或长时间压力测试完成。
+
+## 设备初始化错误被状态错误覆盖（2026-11-17）
+
+- 桌面日志确认：设备在首轮前报告 `Audio hardware initialization failed` 后，Agent 使用同一错误通路向设备回发 `error` 和 `state:error,turn:0`；旧固件拒绝零轮次非 idle 状态，回报 `Invalid voice state`，进而覆盖原始故障并反复回传。
+- Agent 收到设备错误后只取消本地录音、播放和云任务并发布错误快照，不向设备回显 cancel/error/state。自身的首轮前错误只发送 error 消息，兼容旧固件；正常活动轮次的本地错误仍按原协议通知设备。设备 `audio_unavailable` 会清除唤醒就绪标志，避免本地模型加载成功被误当作设备采集可用。
+- 固件允许 `turn:0` 的终止 error 状态，仍拒绝零轮次的唤醒、聆听、识别、思考、合成、播放和未知状态；后续正常轮次可继续开启。
+- 新增真实本地 WebSocket 回归，覆盖零轮次和活动轮次的设备错误无回显、原始错误脱敏保留、本地工作取消、首轮前本地错误兼容，以及活动轮次错误通知。完整 `go test -mod=readonly ./...`、`go vet -mod=readonly ./...`、`go test -mod=readonly -race -count=1 ./internal/voice` 均通过。固件主机会话回归使用实际 `voice.c` 配合 ASan/UBSan 验证零轮次校验和后续恢复；语音优先级／WebSocket 优先级及既有音频主机测试通过。ESP-IDF 6.0.2 的 `idf.py build` 编译通过。
+- 此协议修复阶段尚未确认原始音频初始化失败原因，也未烧录设备、替换正在运行的应用或调用付费云 API。后续串口定位和经用户授权的实板更新结果见上方“I²S DMA 内存不足”记录。
+
 ## 智能音箱式唤醒提示音（2026-11-16）
 
 - 唤醒交互改为“唤醒词 → 短提示音 → 提问”：语音唤醒、触屏唤醒、“手动唤醒”按钮以及仅识别到唤醒词后的重新聆听，都会先播放约 0.58 秒的语音提示“我在”（用当前 Fish reference_id 音色经 `agent/scripts/wake-cue-gen` 合成一次，裁剪静音、峰值归一化到 -3 dBFS，以 16 kHz 单声道 WAV 内置于 `agent/internal/voice/assets/wake_cue.wav`；唤醒时不调用云端），处于 `wake` 阶段；提示音实际播完（设备 `played` 或电脑输出排空）后才进入 `listening` 并开始录音。提示音结束前的麦克风音频、原先最多 2 秒的唤醒词后缀不再进入识别，不再支持连说“唤醒词 + 问题”。

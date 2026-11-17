@@ -4,7 +4,7 @@ static jmp_buf host_capture_exit;
 static bool host_capture_test;
 static unsigned host_capture_reads, host_capture_resets;
 static uint32_t host_epoch=17;
-static unsigned host_aborts, host_credits, host_played, host_audio_frames, host_cancel_turn, host_purges, host_ordered;
+static unsigned host_aborts, host_credits, host_played, host_audio_frames, host_cancel_turn, host_purges, host_ordered, host_errors;
 static esp_err_t host_start_result=ESP_ERR_NOT_FINISHED;
 static bool host_render_ready;
 static audio_render_t host_render;
@@ -20,6 +20,7 @@ bool voice_ws_send(uint32_t epoch,bool binary,const void *data,size_t len) {
         }
         return true;
     }
+    if(strstr(data,"\"type\":\"error\"")) host_errors++;
     if(strstr(data,"\"type\":\"credit\"")) host_credits++;
     if(strstr(data,"\"type\":\"played\"")) host_played++;
     if(strstr(data,"\"type\":\"cancel\"")) { cJSON *j=cJSON_Parse(data); assert(number(j,"turn",&host_cancel_turn)); cJSON_Delete(j); }
@@ -45,11 +46,14 @@ bool audio_play_queue(const voice_packet_t *packet,int volume) { (void)packet; (
 bool audio_render_poll(audio_render_t *render) { if(!host_render_ready) return false; *render=host_render; host_render_ready=false; return true; }
 static void setup(void) {
     delete_events();
+    unsigned created=host_external_capture_tasks;
     assert(voice_init()==ESP_OK);
+    assert(host_external_capture_tasks==created+1);
     host_epoch=s_epoch=17; s_turn=5; s_closed_turn=4; s_receive_order=s_discard_through=0;
     s_audio_ready=true; s_muted=s_start_pending=false;
     memset(&s_play,0,sizeof(s_play));
     host_aborts=host_credits=host_played=host_audio_frames=host_cancel_turn=host_purges=host_ordered=0;
+    host_errors=0;
     host_render_ready=false; host_start_result=ESP_ERR_NOT_FINISHED;
 }
 static void text(const char *json) {
@@ -174,7 +178,26 @@ static void test_capture_revision(void) {
     host_capture_test=false;
     assert(host_capture_reads==2 && host_capture_resets==2);
 }
+static void test_connection_error_state(void) {
+    setup(); s_turn=s_closed_turn=0;
+    text("{\"v\":1,\"type\":\"state\",\"epoch\":17,\"turn\":0,\"state\":\"error\",\"text\":\"Audio hardware initialization failed\"}");
+    priority_controls(); consume();
+    assert(!host_errors && !strcmp(s_phase,"error") && !s_play.active && s_turn==0 && s_closed_turn==0);
+    // Only terminal states may use turn zero; active/unknown phases remain invalid.
+    const char *invalid[]={"wake","listening","recognizing","thinking","synthesizing","speaking","unknown"};
+    for(size_t i=0;i<sizeof(invalid)/sizeof(invalid[0]);i++) {
+        char json[160];
+        snprintf(json,sizeof(json),"{\"v\":1,\"type\":\"state\",\"epoch\":17,\"turn\":0,\"state\":\"%s\"}",invalid[i]);
+        unsigned before=host_errors;
+        text(json); priority_controls(); consume();
+        assert(host_errors==before+1 && !s_play.active && s_turn==0);
+    }
+    text("{\"v\":1,\"type\":\"state\",\"epoch\":17,\"turn\":0,\"state\":\"idle\"}");
+    priority_controls(); consume(); assert(!strcmp(s_phase,"idle"));
+    text("{\"v\":1,\"type\":\"state\",\"epoch\":17,\"turn\":1,\"state\":\"listening\"}");
+    priority_controls(); consume(); assert(s_turn==1 && !strcmp(s_phase,"listening"));
+}
 int main(void) {
-    test_capture_revision(); test_scan_boundary(); test_remote_cancel(); test_audio_order(); test_validation(); test_local_barrier(); test_overflow();
+    test_connection_error_state(); test_capture_revision(); test_scan_boundary(); test_remote_cancel(); test_audio_order(); test_validation(); test_local_barrier(); test_overflow();
     delete_events(); puts("voice priority: order, validation, stale epochs, barriers, async start and overflow passed");
 }

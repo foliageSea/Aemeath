@@ -165,6 +165,7 @@ esp_err_t audio_init(void)
 {
     if (s_ready) return ESP_OK;
     esp_err_t err=ESP_ERR_NO_MEM;
+    const char *stage="queues";
     // PCM staging is CPU-copy data, not a DMA source. Keep its ~42 KiB in
     // PSRAM, reserving internal memory for actual I2S DMA buffers/descriptors.
     // The non-IRAM-safe I2S interrupt is masked whenever cache is unavailable.
@@ -174,7 +175,9 @@ esp_err_t audio_init(void)
     s_reference=heap_caps_calloc(1,sizeof(*s_reference),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     s_echo=heap_caps_aligned_alloc(16,sizeof(*s_echo),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if (!s_pending || !s_rendered || !s_captured || !s_reference || !s_echo) goto fail;
+    stage="AEC";
     if ((err=echo_reset())!=ESP_OK) goto fail;
+    stage="I2S channels";
     i2s_chan_config_t chan=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
     chan.dma_desc_num=DMA_BLOCKS; chan.dma_frame_num=VOICE_FRAME_SAMPLES;
     // Our callback supplies/clears released DMA buffers itself.
@@ -185,12 +188,18 @@ esp_err_t audio_init(void)
         .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO),
         .gpio_cfg={.mclk=BOARD_I2S_MCLK,.bclk=BOARD_I2S_BCLK,.ws=BOARD_I2S_WS,.dout=BOARD_I2S_DOUT,.din=BOARD_I2S_DIN},
     };
-    if ((err=i2s_channel_init_std_mode(s_tx,&cfg))!=ESP_OK || (err=i2s_channel_init_std_mode(s_rx,&cfg))!=ESP_OK) goto fail;
+    stage="I2S TX DMA";
+    if ((err=i2s_channel_init_std_mode(s_tx,&cfg))!=ESP_OK) goto fail;
+    stage="I2S RX DMA";
+    if ((err=i2s_channel_init_std_mode(s_rx,&cfg))!=ESP_OK) goto fail;
+    stage="I2S callbacks";
     i2s_event_callbacks_t callbacks={.on_sent=sent};
     if ((err=i2s_channel_register_event_callback(s_tx,&callbacks,NULL))!=ESP_OK) goto fail;
     callbacks=(i2s_event_callbacks_t){.on_recv=received};
     if ((err=i2s_channel_register_event_callback(s_rx,&callbacks,NULL))!=ESP_OK) goto fail;
+    stage="I2S enable";
     if ((err=i2s_channel_enable(s_tx))!=ESP_OK || (err=i2s_channel_enable(s_rx))!=ESP_OK) goto fail;
+    stage="codec control";
     audio_codec_i2c_cfg_t ctrl={.port=I2C_NUM_0,.bus_handle=board_i2c_bus(),.clock_speed_hz=BOARD_I2C_HZ,.addr=ES8311_CODEC_DEFAULT_ADDR};
     s_dac_ctrl=audio_codec_new_i2c_ctrl(&ctrl); ctrl.addr=ES7210_CODEC_DEFAULT_ADDR;
     s_adc_ctrl=audio_codec_new_i2c_ctrl(&ctrl); s_gpio=audio_codec_new_gpio();
@@ -200,17 +209,28 @@ esp_err_t audio_init(void)
     es7210_codec_cfg_t adc={.ctrl_if=s_adc_ctrl,.mic_selected=ES7210_SEL_MIC1|ES7210_SEL_MIC2};
     s_dac=es8311_codec_new(&dac); s_adc=es7210_codec_new(&adc);
     if (!s_dac || !s_adc) goto fail;
+    stage="codec configuration";
     esp_codec_dev_sample_info_t fs={.bits_per_sample=16,.channel=2,.sample_rate=VOICE_RATE,.mclk_multiple=256};
     if ((err=s_dac->set_fs(s_dac,&fs))!=ESP_OK || (err=s_adc->set_fs(s_adc,&fs))!=ESP_OK ||
         (err=s_dac->enable(s_dac,true))!=ESP_OK || (err=s_adc->enable(s_adc,true))!=ESP_OK ||
         (err=s_adc->set_mic_gain(s_adc,24))!=ESP_OK || (err=s_dac->set_vol(s_dac,-6))!=ESP_OK) goto fail;
     s_ready=true;
-    ESP_LOGI("audio","16k duplex + FD AEC (%d samples), ES7210 MIC1/2 -> mono, ES8311 DAC; free internal %u, PSRAM %u",
+    ESP_LOGI("audio","16k duplex + FD AEC (%d samples), ES7210 MIC1/2 -> mono, ES8311 DAC; free internal %u, DMA free %u, DMA largest %u, PSRAM %u",
         aec_get_chunksize(s_aec),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     return ESP_OK;
 fail:
+    // Snapshot the failing stage before our cleanup returns more allocations.
+    // IDF may already have unwound partial DMA allocations before returning.
+    ESP_LOGE("audio","init failed at %s: %s; internal free %u, DMA free %u, DMA largest %u, PSRAM free %u",
+        stage,esp_err_to_name(err),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     cleanup(); return err;
 }
 

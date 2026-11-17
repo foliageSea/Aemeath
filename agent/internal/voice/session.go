@@ -400,6 +400,11 @@ func (s *session) phase(phase string, notice ...string) error {
 		s.deadline = s.stageStarted.Add(budget + stageGrace)
 	}
 	s.emitState()
+	// Older v1 firmware only accepts idle before the first wire turn. Errors
+	// at connection scope already travel as error messages, not round states.
+	if phase == "error" && s.wireTurn == 0 {
+		return nil
+	}
 	return s.send(message{Type: "state", Turn: s.state.Turn, State: phase, Text: s.state.Notice})
 }
 func (s *session) resetCapture() {
@@ -659,11 +664,20 @@ func (s *session) fail(code string, err error) error {
 	if phaseBudget(s.state.Phase) > 0 && !s.stageStarted.IsZero() {
 		s.recordStageMillis(s.state.Phase, max(1, time.Since(s.stageStarted).Milliseconds()))
 	}
-	if e := s.abort(true); e != nil {
+	// A device error has already aborted the device round. Echoing it back
+	// can trigger another protocol error (especially error state at turn 0),
+	// hiding the original failure behind an unbounded error ping-pong.
+	if e := s.abort(code != "device"); e != nil {
 		return e
 	}
 	s.state.Error = s.safe(err.Error())
 	s.state.ErrorStage = failureStage(code, s.state.Phase)
+	if code == "device" {
+		s.state.Phase = "error"
+		s.state.Notice = ""
+		s.emitState()
+		return nil
+	}
 	if e := s.send(message{Type: "error", Turn: s.state.Turn, Code: code, Message: s.state.Error}); e != nil {
 		return e
 	}
@@ -856,6 +870,10 @@ func (s *session) control(b []byte) error {
 		}
 	case "error":
 		if m.Turn == s.wireTurn || m.Turn == 0 {
+			if m.Code == "audio_unavailable" {
+				// Models alone do not make wake usable when device capture failed.
+				s.state.WakeReady = false
+			}
 			return s.fail("device", fmt.Errorf("device voice error: %s", s.safe(m.Message)))
 		}
 	case "hello":

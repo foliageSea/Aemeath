@@ -346,8 +346,58 @@ static void test_capture_reset_discards_queued_output(void)
     puts("ok: capture reset drops queued/held RX and old native output, including audio during AEC creation");
 }
 
+static void test_dma_init_failure_cleanup_and_retry(void)
+{
+    fixture(512);
+    cleanup();
+    for (unsigned direction = 0; direction < 2; ++direction) {
+        host_i2s_fail_init = direction ? &host_rx : &host_tx;
+        for (unsigned attempt = 0; attempt < 3; ++attempt) {
+            unsigned creates = host_aec_creates;
+            unsigned init_calls = host_i2s_init_calls;
+            unsigned enables = host_i2s_enable_calls;
+            unsigned deletes = host_i2s_deletes;
+            unsigned controls = host_codec_ctrl_creates;
+            /* A failed retry must also purge stale completion/descriptor state. */
+            s_slots[0].ptr = dma[0]; s_slots[0].render.samples = 320;
+            s_next.render.samples = 320; s_cycles = 7; s_event_overflow = true;
+            s_rx_previous_valid = s_capture_started = s_start_pending = true;
+            host_pa = true;
+            assert(audio_init() == ESP_ERR_NO_MEM);
+            assert(host_i2s_init_calls == init_calls + direction + 1);
+            assert(host_i2s_enable_calls == enables);
+            assert(host_codec_ctrl_creates == controls);
+            assert(host_i2s_deletes == deletes + 2);
+            assert(!host_tx.allocated && !host_rx.allocated);
+            assert(!s_tx && !s_rx && !s_ready && !host_pa);
+            assert(!s_pending && !s_rendered && !s_captured);
+            assert(!s_reference && !s_echo && !s_aec);
+            assert(!s_dac && !s_adc && !s_dac_ctrl && !s_adc_ctrl && !s_gpio);
+            assert(host_aec_creates == creates + 1);
+            assert(host_aec_creates == host_aec_destroys);
+            assert(!s_cycles && !s_event_overflow && !s_next.render.samples);
+            assert(!s_rx_previous_valid && !s_capture_started && !s_start_pending);
+            for (unsigned i = 0; i < DMA_BLOCKS; ++i)
+                assert(!s_slots[i].ptr && !s_slots[i].render.samples);
+            int16_t out[VOICE_FRAME_SAMPLES];
+            assert(audio_capture(out) == ESP_ERR_INVALID_STATE);
+            assert(audio_play_start(42, 7) == ESP_ERR_INVALID_STATE);
+        }
+        host_i2s_fail_init = NULL;
+        assert(audio_init() == ESP_OK);
+        assert(s_ready && host_tx.initialized && host_rx.initialized);
+        assert(host_tx.enabled && host_rx.enabled);
+        /* Prove recovered callbacks and playback work, not just a success return. */
+        start_ready();
+        cleanup();
+        assert(host_aec_creates == host_aec_destroys);
+    }
+    puts("ok: repeated TX/RX DMA init failures release resources, skip codecs, and retry successfully");
+}
+
 int main(void)
 {
+    test_dma_init_failure_cleanup_and_retry();
     test_played_reference_volume_and_underrun();
     test_cancel_restart_and_pa_failures();
     test_pa_transition_and_repeated_abort();
