@@ -16,8 +16,11 @@ type State struct {
 	Metrics    *proto.Frame      `json:"metrics"`
 	Quota      *proto.QuotaFrame `json:"quota"`
 	Settings   Settings          `json:"settings"`
-	Page       string            `json:"page"`
-	Voice      voice.State       `json:"voice"`
+	// Page is the actual page last reported by the connected device, never a
+	// requested/default page. Older firmware leaves PageKnown false.
+	Page      string      `json:"page"`
+	PageKnown bool        `json:"pageKnown"`
+	Voice     voice.State `json:"voice"`
 	// Screen state as last reported by the device; ScreenKnown is false until the
 	// connected device reports (ScreenOn/Brightness are then only placeholders).
 	ScreenOn    bool  `json:"screenOn"`

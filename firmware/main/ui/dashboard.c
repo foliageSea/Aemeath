@@ -410,7 +410,10 @@ static void update_overlay(const net_status_t *ns)
 static void update_dots(void)
 {
     lv_obj_t *active = lv_tileview_get_tile_active(s_tiles);
-    int page = active ? lv_obj_get_index(active) : 0;
+    int page = active ? (int)lv_obj_get_index(active) : -1;
+    // All navigation paths converge here under the LVGL lock. Publish the real
+    // active tile, never a requested page or a metrics fallback before readiness.
+    server_publish_page(page);
     for (int i = 0; i < 3; i++) {
         lv_obj_set_style_bg_color(s_dots[i], lv_color_hex(i == page ? C_TEXT : C_BORDER), 0);
     }
@@ -635,6 +638,10 @@ void dashboard_create(void)
     build_overlay(scr);
     set_pill(C_DIM, "starting");
 
+    // LVGL leaves tile_act NULL until navigation/scroll; establish the actual
+    // initial tile explicitly before publishing any known page.
+    lv_tileview_set_tile(s_tiles, pc, LV_ANIM_OFF);
+    update_dots();
     lv_timer_create(tick_cb, 250, NULL);
     lvgl_port_unlock();
 }

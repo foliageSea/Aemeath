@@ -10,6 +10,8 @@
 bool host_accept_commands = true, host_last_muted;
 unsigned host_wakes, host_cancels, host_clears, host_mutes;
 unsigned host_screen_begins, host_screen_finishes;
+int host_published_page = -1;
+void server_publish_page(int page) { host_published_page = page; }
 bool voice_request_wake(void) { ++host_wakes; return host_accept_commands; }
 bool voice_request_cancel(void) { ++host_cancels; return host_accept_commands; }
 bool voice_request_clear(void) { ++host_clears; return host_accept_commands; }
@@ -82,7 +84,11 @@ int main(int argc, char **argv)
     lv_display_set_color_format(display, LV_COLOR_FORMAT_XRGB8888);
     lv_display_set_buffers(display, pixels, NULL, sizeof(pixels), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
+    assert(host_published_page == -1);
+    assert(!dashboard_show_page(DASHBOARD_PAGE_QUOTA));
+    assert(host_published_page == -1);
     dashboard_create();
+    assert(host_published_page == DASHBOARD_PAGE_METRICS);
     host_advance(250);
     voice_checks(argc > 1 ? argv[1] : ".");
     dashboard_checks();

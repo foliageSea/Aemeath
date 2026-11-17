@@ -13,7 +13,8 @@ import (
 
 type Conn struct {
 	ws       *websocket.Conn
-	incoming chan []byte
+	inbox    *inbox
+	readDone chan struct{}
 }
 
 func Dial(ctx context.Context, addr string) (*Conn, error) {
@@ -23,15 +24,16 @@ func Dial(ctx context.Context, addr string) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Conn{ws: ws, incoming: make(chan []byte, 16)}
-	// Reading keeps control frames flowing and surfaces device reports such as
-	// screen_state. Callers that ignore Incoming lose nothing: excess frames drop.
+	c := &Conn{ws: ws, inbox: newInbox(), readDone: make(chan struct{})}
+	// Keep control frames flowing even when callers do not consume Incoming.
+	// The independent dispatcher retains each latest valid device state.
 	go c.readLoop()
 	return c, nil
 }
 
 func (c *Conn) readLoop() {
-	defer close(c.incoming)
+	defer close(c.readDone)
+	defer c.inbox.stop()
 	for {
 		typ, b, err := c.ws.Read(context.Background())
 		if err != nil {
@@ -40,15 +42,14 @@ func (c *Conn) readLoop() {
 		if typ != websocket.MessageText {
 			continue
 		}
-		select {
-		case c.incoming <- b:
-		default:
-		}
+		c.inbox.enqueue(b)
 	}
 }
 
-// Incoming yields text frames sent by the device; it closes when the connection ends.
-func (c *Conn) Incoming() <-chan []byte { return c.incoming }
+// Incoming yields device text frames until disconnect or Close. Valid v1 page_state
+// and screen_state reports independently coalesce to their latest pending values;
+// other frames are best-effort. Pending frames are discarded on disconnect.
+func (c *Conn) Incoming() <-chan []byte { return c.inbox.incoming }
 
 func (c *Conn) Send(ctx context.Context, v any) error {
 	b, err := json.Marshal(v)
@@ -60,4 +61,9 @@ func (c *Conn) Send(ctx context.Context, v any) error {
 	return c.ws.Write(ctx, websocket.MessageText, b)
 }
 
-func (c *Conn) Close() { c.ws.Close(websocket.StatusNormalClosure, "bye") }
+func (c *Conn) Close() {
+	c.inbox.stop()
+	c.ws.Close(websocket.StatusNormalClosure, "bye")
+	<-c.readDone
+	<-c.inbox.stopped
+}

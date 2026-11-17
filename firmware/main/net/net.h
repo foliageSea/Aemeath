@@ -33,6 +33,9 @@ void net_forget_credentials(void);
 void server_start(void);
 // Pushes {"v":1,"type":"screen_state",...} to every connected agent.
 void server_broadcast_screen(void);
+// Nonblocking snapshot publication; page is a dashboard_page_t (0..2).
+// Safe while holding the LVGL lock. -1 invalidates unknown state; no HTTP work here.
+void server_publish_page(int page);
 // dns.c: answers every A query with the SoftAP address.
 void dns_hijack_start(void);
 void dns_hijack_stop(void);

@@ -83,7 +83,7 @@ func deviceTools(host Host) []tool.BaseTool {
 			if err := host.SetPage(ctx, input.Page); err != nil {
 				return "", errors.New("device page command failed")
 			}
-			return "切页指令已发送；协议没有当前页面回执，不能确认设备实际已切换。", nil
+			return "切页指令已发送；本次调用不等待设备确认，实际页面以设备状态回报为准，未收到回报不能声称已切换。", nil
 		}),
 		makeTool("set_screen", "按用户请求开关 ESP32 监控台的屏幕并设置 0 到 100 的亮度。", map[string]*schema.ParameterInfo{"on": {Type: schema.Boolean, Required: true}, "brightness": {Type: schema.Integer, Required: true, Desc: "屏幕亮度，0 到 100"}}, func(ctx context.Context, args string) (string, error) {
 			var input struct {

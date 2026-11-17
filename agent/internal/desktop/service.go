@@ -135,7 +135,7 @@ func newService(path string, settings Settings, deps dependencies) *Service {
 		panic("desktop: invalid normalized network settings")
 	}
 	ctx, cancel := context.WithCancel(netproxy.WithRouter(context.Background(), network))
-	s := &Service{path: path, deps: deps, ctx: ctx, network: network, cancel: cancel, state: State{Settings: settings, Status: "stopped", Page: "metrics", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), runWake: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
+	s := &Service{path: path, deps: deps, ctx: ctx, network: network, cancel: cancel, state: State{Settings: settings, Status: "stopped", ScreenOn: true, Brightness: 80}, updates: make(chan struct{}, 1), runWake: make(chan struct{}, 1), quotaWake: make(chan struct{}, 1), voiceUpdates: make(chan struct{}, 1)}
 	memoryPath := ""
 	longTermMemoryPath := ""
 	catalogPath := ""
@@ -226,6 +226,7 @@ func (s *Service) stop() {
 	s.state.Running, s.state.Connected, s.state.Status = false, false, "stopped"
 	s.state.Target, s.state.Error = "", ""
 	s.state.ScreenKnown = false
+	s.state.Page, s.state.PageKnown = "", false
 	state := s.state.Voice.Clone()
 	state.Connected, state.WakeReady, state.Phase = false, false, "stopped"
 	s.setVoiceLocked(state)
@@ -278,6 +279,7 @@ func (s *Service) SaveSettings(settings Settings) error {
 		}
 	}
 	if networkChanged || old.RunMode != normalized.RunMode || old.Address != normalized.Address || old.Voice != normalized.Voice {
+		s.state.Page, s.state.PageKnown = "", false
 		if s.attemptCancel != nil {
 			s.attemptCancel()
 			state := s.state.Voice.Clone()
@@ -286,6 +288,7 @@ func (s *Service) SaveSettings(settings Settings) error {
 		}
 		if old.RunMode != normalized.RunMode {
 			s.state.Connected, s.state.ScreenKnown = false, false
+			s.state.Page, s.state.PageKnown = "", false
 		}
 		signal(s.runWake)
 	}
@@ -319,7 +322,8 @@ type displayFrame struct {
 	Page string `json:"page"`
 }
 
-// SetPage sends a display command; it changes Page only after a successful send.
+// SetPage sends a display command. Only a device page_state report changes Page;
+// a successful send does not prove the display applied the request.
 func (s *Service) SetPage(page string) error {
 	return s.setPage(context.Background(), page)
 }
@@ -360,7 +364,7 @@ func (s *Service) setPage(request context.Context, page string) error {
 	}
 	s.mu.Lock()
 	if s.conn == conn {
-		s.state.Page, s.state.LastSent = page, time.Now().Unix()
+		s.state.LastSent = time.Now().Unix()
 	}
 	s.mu.Unlock()
 	return nil
@@ -548,6 +552,8 @@ func (s *Service) failConnection(conn connection, err error) {
 	defer s.mu.Unlock()
 	if s.conn == conn {
 		s.state.Connected, s.state.Error, s.state.Status = false, err.Error(), "reconnecting"
+		s.state.ScreenKnown = false
+		s.state.Page, s.state.PageKnown = "", false
 		if s.attemptCancel != nil {
 			s.attemptCancel()
 		}
@@ -569,6 +575,7 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 		standalone := s.state.Settings.RunMode == RunModeStandalone
 		address := s.state.Settings.Address
 		s.state.Status, s.state.Connected = "connecting", false
+		s.state.Page, s.state.PageKnown = "", false
 		if address == "" {
 			s.state.Status = "discovering"
 		}
@@ -577,6 +584,7 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 			s.mu.Lock()
 			s.state.Status, s.state.Target, s.state.Error = "standalone", "", ""
 			s.state.Connected, s.state.ScreenKnown = false, false
+			s.state.Page, s.state.PageKnown = "", false
 			s.mu.Unlock()
 			voiceDone := s.startVoiceSession(attempt, nil, "", true)
 			<-attempt.Done()
@@ -618,6 +626,7 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 		s.mu.Lock()
 		s.conn, s.connCtx, s.attemptCancel = nil, nil, nil
 		s.state.Connected, s.state.ScreenKnown = false, false
+		s.state.Page, s.state.PageKnown = "", false
 		if err != nil && ctx.Err() == nil {
 			s.state.Error, s.state.Status = err.Error(), "reconnecting"
 		}
@@ -644,18 +653,14 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 }
 
 func (s *Service) forward(ctx context.Context, conn connection) error {
-	s.sendMu.Lock()
-	// Screen state is owned by the device (persisted there and reported on
-	// connect), so only the page is pushed here.
-	err := conn.Send(ctx, displayFrame{1, "display", s.Snapshot().Page})
-	s.sendMu.Unlock()
-	if err != nil {
-		return err
-	}
+	// Connecting is not a request to change the device UI. Only setPage sends
+	// display commands; never push a default or replay one on reconnect. The
+	// device reports its actual page independently via page_state.
 	incoming := conn.Incoming()
 	var lastQuota *proto.QuotaFrame
 	var lastQuotaRevision uint64
 	for {
+		var err error
 		s.sendMu.Lock()
 		state := s.Snapshot()
 		if state.Metrics != nil {
@@ -718,19 +723,30 @@ type deviceFrame struct {
 	Type       string `json:"type"`
 	On         *bool  `json:"on"`
 	Brightness *int   `json:"brightness"`
+	Page       string `json:"page"`
 }
 
 // handleDeviceFrame applies reports from the device, which is the source of truth
-// for screen power and brightness.
+// for screen power, brightness, and the actual visible page. Reports never
+// trigger outgoing commands, and late reports from an old connection are ignored.
 func (s *Service) handleDeviceFrame(conn connection, msg []byte) {
 	var f deviceFrame
-	if json.Unmarshal(msg, &f) != nil || f.V != 1 || f.Type != "screen_state" || f.On == nil || f.Brightness == nil {
+	if json.Unmarshal(msg, &f) != nil || f.V != 1 {
 		return
 	}
-	brightness := min(max(*f.Brightness, 0), 100)
 	s.mu.Lock()
-	if s.conn == conn {
-		s.state.ScreenOn, s.state.Brightness, s.state.ScreenKnown = *f.On, brightness, true
+	defer s.mu.Unlock()
+	if conn == nil || s.conn != conn || !s.state.Connected || s.connCtx == nil || s.connCtx.Err() != nil {
+		return
 	}
-	s.mu.Unlock()
+	switch f.Type {
+	case "screen_state":
+		if f.On != nil && f.Brightness != nil {
+			s.state.ScreenOn, s.state.Brightness, s.state.ScreenKnown = *f.On, min(max(*f.Brightness, 0), 100), true
+		}
+	case "page_state":
+		if f.Page == "metrics" || f.Page == "quota" || f.Page == "voice" {
+			s.state.Page, s.state.PageKnown = f.Page, true
+		}
+	}
 }

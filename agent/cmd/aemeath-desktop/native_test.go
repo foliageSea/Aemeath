@@ -62,7 +62,6 @@ func (f *nativeFake) SetPage(page string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pages = append(f.pages, page)
-	f.state.Page = page
 	return nil
 }
 func (f *nativeFake) SetScreen(on bool, brightness int) error {
@@ -79,7 +78,7 @@ func (f *nativeFake) SetScreen(on bool, brightness int) error {
 func (f *nativeFake) RefreshQuotas() error { return nil }
 func nativeTest(t *testing.T) (*nativeUI, *nativeFake, chan func(), *ui.Tester) {
 	t.Helper()
-	f := &nativeFake{state: desktop.State{Settings: desktop.Settings{Address: "saved.local", MagpieEnabled: true, MagpieURL: "http://localhost:3425", Subscriptions: []desktop.Subscription{{Name: "A"}, {Name: "B"}, {Name: "C"}}}, Page: "metrics", ScreenOn: true, Brightness: 80, Status: "stopped", Quota: &proto.QuotaFrame{TS: time.Now().Unix(), Accounts: []proto.QuotaAccount{{Name: "A"}, {Name: "B"}, {Name: "C"}}}}}
+	f := &nativeFake{state: desktop.State{Settings: desktop.Settings{Address: "saved.local", MagpieEnabled: true, MagpieURL: "http://localhost:3425", Subscriptions: []desktop.Subscription{{Name: "A"}, {Name: "B"}, {Name: "C"}}}, Page: "metrics", PageKnown: true, ScreenOn: true, Brightness: 80, Status: "stopped", Quota: &proto.QuotaFrame{TS: time.Now().Unix(), Accounts: []proto.QuotaAccount{{Name: "A"}, {Name: "B"}, {Name: "C"}}}}}
 	a := nativeState(f)
 	a.themeWrite = func(mygo.ThemeSource) {} // Never change the real app appearance in headless tests.
 	// UI fixtures never inspect or install real user-cache models.

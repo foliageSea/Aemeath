@@ -5,7 +5,9 @@
 
 static unsigned active_page(void)
 {
-    return lv_obj_get_index(lv_tileview_get_tile_active(s_tiles));
+    unsigned page = lv_obj_get_index(lv_tileview_get_tile_active(s_tiles));
+    assert(host_published_page == (int)page);
+    return page;
 }
 
 static void assert_corner(uint32_t color)
@@ -62,8 +64,15 @@ static void background_checks(void)
 void dashboard_checks(void)
 {
     background_checks();
+    int previous = host_published_page;
     assert(!dashboard_show_page((dashboard_page_t)99));
+    assert(host_published_page == previous);
+    for (int page = 0; page < 3; ++page) {
+        assert(dashboard_show_page((dashboard_page_t)page));
+        assert(active_page() == (unsigned)page);
+    }
     assert(dashboard_show_page(DASHBOARD_PAGE_QUOTA));
+    assert(host_published_page == DASHBOARD_PAGE_QUOTA);
     dashboard_voice_begin();
     assert(dashboard_voice_active() && active_page() == DASHBOARD_PAGE_VOICE);
     unsigned finishes = host_screen_finishes;

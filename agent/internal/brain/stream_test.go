@@ -80,7 +80,7 @@ func TestReplyStreamFirstDeltaBeforeCompletion(t *testing.T) {
 				}
 				if tools {
 					toolResult := msgs[len(msgs)-1].(map[string]any)
-					if toolResult["role"] != "tool" || toolResult["tool_call_id"] != "p" || toolResult["content"] != "切页指令已发送；协议没有当前页面回执，不能确认设备实际已切换。" {
+					if toolResult["role"] != "tool" || toolResult["tool_call_id"] != "p" || toolResult["content"] != "切页指令已发送；本次调用不等待设备确认，实际页面以设备状态回报为准，未收到回报不能声称已切换。" {
 						t.Errorf("final stream lost exact tool result: %v", toolResult)
 					}
 				}

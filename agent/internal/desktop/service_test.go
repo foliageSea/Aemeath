@@ -57,6 +57,28 @@ func (c *fakeConn) hasAnyScreenCommand() bool {
 	}
 	return false
 }
+func (c *fakeConn) hasForwardedMetrics() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, b := range c.messages {
+		var frame map[string]any
+		_ = json.Unmarshal(b, &frame)
+		if frame["cpu"] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func assertNoPageCommand(t *testing.T, c *fakeConn) {
+	t.Helper()
+	for _, page := range []string{"metrics", "quota", "voice"} {
+		if c.hasCommand(page) {
+			t.Fatalf("connection unexpectedly sent page command %q", page)
+		}
+	}
+}
+
 func (c *fakeConn) hasCommand(page string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -229,7 +251,8 @@ func TestLifecyclePageReconnectAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := <-connections
-	eventually(t, func() bool { return s.Snapshot().Connected })
+	eventually(t, func() bool { return s.Snapshot().Connected && first.hasForwardedMetrics() })
+	assertNoPageCommand(t, first)
 	if s.Snapshot().ScreenKnown {
 		t.Fatal("screen state known before the device reported")
 	}
@@ -248,9 +271,11 @@ func TestLifecyclePageReconnectAndStop(t *testing.T) {
 	if err := s.SetPage("quota"); err != nil {
 		t.Fatal(err)
 	}
-	if !first.hasCommand("quota") || s.Snapshot().Page != "quota" {
-		t.Fatal("page command not sent")
+	if !first.hasCommand("quota") || s.Snapshot().PageKnown || s.Snapshot().Page != "" {
+		t.Fatal("page command missing or treated as a device report")
 	}
+	first.incoming <- []byte(`{"v":1,"type":"page_state","page":"quota"}`)
+	eventually(t, func() bool { return s.Snapshot().PageKnown && s.Snapshot().Page == "quota" })
 	if err := s.SetPage("invalid"); err == nil {
 		t.Fatal("invalid page accepted")
 	}
@@ -266,15 +291,18 @@ func TestLifecyclePageReconnectAndStop(t *testing.T) {
 	first.fail.Store(true)
 	eventually(t, func() bool { return dials.Load() >= 2 && s.Snapshot().Connected })
 	second := <-connections
-	eventually(t, func() bool { return second.hasCommand("quota") })
-	if s.Snapshot().ScreenKnown || second.hasAnyScreenCommand() {
+	eventually(t, func() bool { return second.hasForwardedMetrics() })
+	// The user may have swiped on the device; never replay our last request.
+	assertNoPageCommand(t, second)
+	if s.Snapshot().ScreenKnown || s.Snapshot().PageKnown || s.Snapshot().Page != "" || second.hasAnyScreenCommand() {
 		t.Fatal("reconnect kept stale screen state or overrode the device")
 	}
 	// A closed incoming stream means the device went away: reconnect.
 	close(second.incoming)
 	eventually(t, func() bool { return dials.Load() >= 3 && s.Snapshot().Connected })
 	third := <-connections
-	eventually(t, func() bool { return third.hasCommand("quota") })
+	eventually(t, func() bool { return third.hasForwardedMetrics() })
+	assertNoPageCommand(t, third)
 	if err := s.Stop(); err != nil {
 		t.Fatal(err)
 	}
@@ -290,10 +318,47 @@ func TestLifecyclePageReconnectAndStop(t *testing.T) {
 	if err := s.Start(); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, func() bool { return s.Snapshot().Connected })
+	fourth := <-connections
+	eventually(t, func() bool { return s.Snapshot().Connected && fourth.hasForwardedMetrics() })
+	assertNoPageCommand(t, fourth)
 	s.Close()
 	if closeCount.Load() != 1 {
 		t.Fatal("collector close count", closeCount.Load())
+	}
+}
+
+// Recreating the Service models an Agent process restart: its last requested
+// page is lost, but that must not reset the still-running monitor to metrics.
+func TestNewServiceDoesNotResetDevicePage(t *testing.T) {
+	settings, err := normalizeSettings(Settings{MagpieEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.json")
+	for _, page := range []string{"quota", "voice"} {
+		t.Run(page, func(t *testing.T) {
+			for restart := 0; restart < 2; restart++ {
+				conn := &fakeConn{}
+				deps := testDeps()
+				deps.dial = func(context.Context, string) (connection, error) { return conn, nil }
+				s := newService(path, settings, deps)
+				t.Cleanup(s.Close)
+				if err := s.Start(); err != nil {
+					t.Fatal(err)
+				}
+				eventually(t, func() bool { return s.Snapshot().Connected && conn.hasForwardedMetrics() })
+				assertNoPageCommand(t, conn)
+				if restart == 0 {
+					if err := s.SetPage(page); err != nil {
+						t.Fatal(err)
+					}
+					if !conn.hasCommand(page) {
+						t.Fatal("explicit page request was not sent")
+					}
+				}
+				s.Close()
+			}
+		})
 	}
 }
 

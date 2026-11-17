@@ -52,21 +52,40 @@ var (
 	screenMonitorOffIcon = sidebarSVG("<path d='M10.5 3H20a2 2 0 0 1 2 2v8.5'/><path d='M4.7 3.3A2 2 0 0 0 2 5v10a2 2 0 0 0 2 2h13'/><path d='M8 21h8M12 17v4'/><path d='M2 2l20 20'/>")
 )
 
+// pageSelector reflects only device-reported state. Independent buttons allow an
+// explicit request for every page, even when no page is known or it is current.
+func (a *nativeUI) pageSelector(c *ui.Context) {
+	t := c.Theme()
+	known := false
+	for _, page := range nativePageNames {
+		known = known || a.snapshot.Connected && a.snapshot.PageKnown && a.snapshot.Page == page
+	}
+	if !known {
+		ui.Text(c, "页面未知").FontSize(11).TextColor(t.TextMuted).SingleLine().Shrink(0)
+	}
+	disabled := !a.snapshot.Connected || a.busy["page"]
+	ui.Row(c.Key("device-page-selector")).Gap(2).Padding(3).Radius(8).Background(t.Surface).Border(1, t.Border).Shrink(0).Children(func() {
+		for i, label := range []string{"性能屏", "额度屏", "语音屏"} {
+			page := nativePageNames[i]
+			selected := known && a.snapshot.Page == page
+			button := ui.Button(c.Key("device-page-"+page), label).AccessSelected(selected).FontSize(12).Height(26).Padding(4, 10).Radius(5).BorderWidth(0).Background(ui.Color{}).Disabled(disabled)
+			if selected {
+				button.Background(t.Accent).TextColor(t.AccentText)
+			} else if !disabled && button.Hovered() {
+				button.Background(t.SurfaceHover)
+			}
+			button.OnClick(func() {
+				a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify(nativeNoticeSuccess, "切页指令已发送") })
+			})
+		}
+	})
+}
+
 func (a *nativeUI) header(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, a.page).FontSize(25).Bold().Grow(1).MinWidth(0)
-		pageIndex := 0
-		for i, page := range nativePageNames {
-			if a.snapshot.Page == page {
-				pageIndex = i
-			}
-		}
-		seg := ui.Segmented(c, &pageIndex, "性能屏", "额度屏", "语音屏").FontSize(12).Disabled(!a.snapshot.Connected || a.busy["page"])
-		if seg.Changed() {
-			page := nativePageNames[pageIndex]
-			a.run("page", func() error { return a.service.SetPage(page) }, func() { a.notify(nativeNoticeSuccess, "切页指令已发送") })
-		}
+		a.pageSelector(c)
 		screenLabel, screenIcon := "息屏", screenMonitorIcon
 		if !a.snapshot.ScreenOn {
 			screenLabel, screenIcon = "亮屏", screenMonitorOffIcon

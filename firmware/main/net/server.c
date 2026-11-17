@@ -11,6 +11,7 @@
 #include "net.h"
 #include "voice_ws.h"
 #include "background_http.h"
+#include "page_state.h"
 
 static const char *TAG = "server";
 
@@ -178,6 +179,8 @@ static esp_err_t ws_post_handshake(httpd_req_t *req)
     ESP_LOGI(TAG, "agent connected (fd %d)", fd);
     // The device owns screen state: tell the new agent what it is.
     httpd_queue_work(req->handle, screen_state_send, (void *)(intptr_t)fd);
+    // Only notify the sender here; HTTPD sends queued page work after this returns.
+    server_broadcast_page();
     return ESP_OK;
 }
 
@@ -230,6 +233,7 @@ void server_start(void)
     httpd_handle_t srv;
     ESP_ERROR_CHECK(httpd_start(&srv, &cfg));
     s_srv = srv;
+    server_page_state_start(srv);
     // An optional voice allocation must never take down metrics or provisioning.
     esp_err_t voice_err = voice_ws_register(srv);
     if (voice_err != ESP_OK) ESP_LOGE(TAG, "voice service unavailable: %s", esp_err_to_name(voice_err));
