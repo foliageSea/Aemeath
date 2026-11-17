@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"aemeath/agent/internal/replytext"
 )
 
 const (
@@ -81,6 +83,11 @@ func (text savedReplySpeech) Reply(context.Context, string) (string, error) { re
 func (savedReplySpeech) Clear()                                             {}
 
 func (s *session) respeak(text string) error {
+	if err := replytext.Validate(text); err != nil {
+		s.state.Notice = err.Error()
+		s.emitState()
+		return nil
+	}
 	if len(text) > MaxReplayTextBytes || !utf8.ValidString(text) || strings.TrimSpace(text) == "" {
 		s.state.Notice = "回复文本为空、无效或过长，无法重新合成语音。"
 		s.emitState()
@@ -116,6 +123,11 @@ func (s *session) replay(turn uint32) error {
 		// A queued command may race with clear/eviction. Do not cancel a newer
 		// operation or terminate the connection for a stale replay request.
 		s.state.Notice = "此回复的语音缓存已失效，无法重播。"
+		s.emitState()
+		return nil
+	}
+	if err := replytext.Validate(reply.text); err != nil {
+		s.state.Notice = err.Error()
 		s.emitState()
 		return nil
 	}

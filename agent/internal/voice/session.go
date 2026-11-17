@@ -12,6 +12,7 @@ import (
 
 	"aemeath/agent/internal/audioinput"
 	"aemeath/agent/internal/brain"
+	"aemeath/agent/internal/replytext"
 
 	"github.com/coder/websocket"
 )
@@ -615,6 +616,11 @@ func (s *session) command(c Command) error {
 		s.submit("clear", "", nil)
 		return s.phase("idle")
 	case "preview", "reference":
+		if err := replytext.Validate(c.Text); err != nil {
+			s.state.Notice = err.Error()
+			s.emitState()
+			return nil
+		}
 		if err := s.begin(); err != nil {
 			return err
 		}

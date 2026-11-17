@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"aemeath/agent/internal/replytext"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
@@ -32,6 +33,9 @@ func (m *finalStreamModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallin
 
 func (m *finalStreamModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	out, err := m.decision.Generate(ctx, input, opts...)
+	if err == nil && out != nil && len(out.ToolCalls) == 0 && replytext.Validate(out.Content) != nil {
+		return nil, &requestFailure{stage: "tool_decision", code: "tool_protocol"}
+	}
 	return out, safeRequestFailure(err, "tool_decision")
 }
 
@@ -54,6 +58,9 @@ func (m *finalStreamModel) Stream(ctx context.Context, input []*schema.Message, 
 		}
 		if selected.ResponseMeta != nil && selected.ResponseMeta.FinishReason == "length" {
 			return nil, &requestFailure{stage: "tool_decision", code: "decision_truncated"}
+		}
+		if len(selected.ToolCalls) == 0 && replytext.Validate(selected.Content) != nil {
+			return nil, &requestFailure{stage: "tool_decision", code: "tool_protocol"}
 		}
 		if len(selected.ToolCalls) > 0 || strings.EqualFold(strings.TrimSpace(selected.Content), "READY") {
 			break
@@ -108,6 +115,7 @@ func (e *Engine) streamReply(ctx context.Context, input []*schema.Message, onDel
 	}
 	defer sr.Close()
 	var content strings.Builder
+	var guard replytext.Guard
 	finished := false
 	for {
 		if err := ctx.Err(); err != nil {
@@ -142,15 +150,28 @@ func (e *Engine) streamReply(ctx context.Context, input []*schema.Message, onDel
 		if content.Len()+len(chunk.Content) > maxTextBytes {
 			return nil, &requestFailure{stage: "final_reply", code: "response_limit"}
 		}
+		clean, err := guard.Push(chunk.Content)
+		if err != nil {
+			return nil, &requestFailure{stage: "final_reply", code: "tool_protocol"}
+		}
 		content.WriteString(chunk.Content)
-		if onDelta != nil {
-			if err := onDelta(chunk.Content); err != nil {
+		if onDelta != nil && clean != "" {
+			if err := onDelta(clean); err != nil {
 				return nil, &deltaError{err: err}
 			}
 		}
 	}
 	if !finished {
 		return nil, &requestFailure{stage: "final_reply", code: "stream_protocol"}
+	}
+	tail, err := guard.Finish()
+	if err != nil {
+		return nil, &requestFailure{stage: "final_reply", code: "tool_protocol"}
+	}
+	if onDelta != nil && tail != "" {
+		if err := onDelta(tail); err != nil {
+			return nil, &deltaError{err: err}
+		}
 	}
 	return schema.AssistantMessage(content.String(), nil), nil
 }

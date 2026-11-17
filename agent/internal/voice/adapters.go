@@ -10,6 +10,7 @@ import (
 	"aemeath/agent/internal/audioinput"
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/hamcp"
+	"aemeath/agent/internal/replytext"
 	"aemeath/agent/internal/wake"
 )
 
@@ -173,6 +174,13 @@ func workerWithResponses(ctx context.Context, cfg Config, host Host, d dependenc
 			fail := func(stage string, err error) {
 				publish(w, result{phase: stage, err: err, millis: max(1, time.Since(stageStarted).Milliseconds())})
 			}
+			// Validate complete explicit speech inputs before display/audio or TTS setup.
+			if w.kind != "text" && w.kind != "utterance" {
+				if err := replytext.Validate(w.text); err != nil {
+					fail("synthesizing", err)
+					return
+				}
+			}
 			if w.kind == "reference" {
 				pcm, err := d.reference(cfg.ReferenceAudio)
 				if err != nil {
@@ -189,6 +197,12 @@ func workerWithResponses(ctx context.Context, cfg Config, host Host, d dependenc
 			if cfg.MiMoAPIKey == "" && (w.kind == "utterance" || cfg.TTSProvider != "fish") {
 				fail("configuration", errors.New("MiMo API key is missing"))
 				return
+			}
+			if cfg.TTSProvider == "fish" && cfg.FishReferenceID == "" {
+				if err := replytext.Validate(cfg.FishReferenceText); err != nil {
+					fail("synthesizing", err)
+					return
+				}
 			}
 			if speech == nil {
 				speech = d.newSpeech(cfg)

@@ -15,6 +15,7 @@ import (
 
 	"aemeath/agent/internal/hamcp"
 	"aemeath/agent/internal/netproxy"
+	"aemeath/agent/internal/replytext"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -316,6 +317,9 @@ func (e *Engine) reply(ctx context.Context, text string, onDelta func(string) er
 		return "", &requestFailure{stage: "final_reply", code: "empty_response"}
 	}
 	reply := strings.TrimSpace(out.Content)
+	if replytext.Validate(reply) != nil {
+		return "", &requestFailure{stage: "final_reply", code: "tool_protocol"}
+	}
 	if len(reply) > maxTextBytes {
 		return "", &requestFailure{stage: "final_reply", code: "response_limit"}
 	}

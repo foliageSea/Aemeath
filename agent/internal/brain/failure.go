@@ -59,6 +59,8 @@ func (e *requestFailure) Error() string {
 		message = "模型未返回有效的工具决策"
 	case "tool_execution":
 		message = "工具调用失败，请查看本轮工具记录"
+	case "tool_protocol":
+		message = "模型返回了工具协议文本，已停止输出；请检查模型接口兼容性"
 	case "stream_protocol":
 		message = "模型流式响应不完整或格式不兼容"
 	case "context_limit":

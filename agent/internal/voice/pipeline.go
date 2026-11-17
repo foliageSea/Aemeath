@@ -8,6 +8,7 @@ import (
 
 	"aemeath/agent/internal/brain"
 	"aemeath/agent/internal/hamcp"
+	"aemeath/agent/internal/replytext"
 )
 
 type streamingBrain interface {
@@ -56,6 +57,9 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 		var splitter sentenceSegmenter
 		var validated speechTextStream
 		var speechText speechTextFilter
+		var protocol replytext.Guard
+		var cleanedProtocol replytext.Guard
+		var protocolErr error
 		var full strings.Builder
 		var visible strings.Builder
 		send := func(chunks []string) error {
@@ -92,6 +96,15 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 			}
 			return send(chunks)
 		}
+		// Citation removal may join otherwise harmless bytes into a protocol marker.
+		pushClean := func(clean string) error {
+			clean, err := cleanedProtocol.Push(clean)
+			if err != nil {
+				protocolErr = err
+				return err
+			}
+			return push(clean)
+		}
 		delta := func(s string) error {
 			if err := agentCtx.Err(); err != nil {
 				return err
@@ -100,7 +113,13 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 				return errors.New("agent response too long")
 			}
 			full.WriteString(s)
-			return push(speechText.Push(s))
+			// Guard raw deltas before citation removal can hide protocol text.
+			clean, err := protocol.Push(s)
+			if err != nil {
+				protocolErr = err
+				return err
+			}
+			return pushClean(speechText.Push(clean))
 		}
 		var response string
 		var err error
@@ -112,11 +131,33 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 				err = delta(response)
 			}
 		}
+		if protocolErr != nil {
+			err = protocolErr
+		}
+		if err == nil {
+			// The returned final response is a separate display input from deltas.
+			err = replytext.Validate(response)
+		}
+		var finalResponse string
+		if err == nil {
+			finalResponse = cleanResponseText(response)
+			err = replytext.Validate(finalResponse)
+		}
 		if err == nil {
 			if strings.TrimSpace(response) == "" || len(response) > maxTextBytes {
 				err = errors.New("empty or oversized agent response")
 			} else {
-				err = push(speechText.Finish())
+				var tail string
+				tail, err = protocol.Finish()
+				if err == nil {
+					err = pushClean(speechText.Push(tail) + speechText.Finish())
+				}
+				if err == nil {
+					tail, err = cleanedProtocol.Finish()
+					if err == nil {
+						err = push(tail)
+					}
+				}
 				if err == nil {
 					err = validated.Finish()
 				}
@@ -127,7 +168,7 @@ func segmentedSpeech(parent context.Context, engine brainAPI, speech speechAPI, 
 						err = send(tail)
 					}
 				}
-				if err == nil && !emit(ctx, result{phase: "response", final: true, text: cleanResponseText(response), millis: time.Since(start).Milliseconds()}) {
+				if err == nil && !emit(ctx, result{phase: "response", final: true, text: finalResponse, millis: time.Since(start).Milliseconds()}) {
 					err = context.Canceled
 				}
 			}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"aemeath/agent/internal/replytext"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
@@ -87,9 +88,18 @@ func contextMessages(persona, summary string, history []*schema.Message, text st
 	input := []*schema.Message{schema.SystemMessage(persona)}
 	if summary != "" {
 		// Summary is historical assistant text, never elevated to system instructions.
-		input = append(input, schema.AssistantMessage(summaryLabel+summary, nil))
+		input = append(input, schema.AssistantMessage(summaryLabel+historicalReply(summary), nil))
 	}
-	input = append(input, history...)
+	for _, message := range history {
+		if message != nil && message.Role == schema.Assistant && replytext.Validate(message.Content) != nil {
+			// Isolate only the model-facing copy; keep the original archive intact.
+			copy := *message
+			copy.Content = historicalReply(message.Content)
+			input = append(input, &copy)
+		} else {
+			input = append(input, message)
+		}
+	}
 	if text != "" {
 		input = append(input, schema.UserMessage(text))
 	}
@@ -371,12 +381,12 @@ const summaryInstruction = "你是对话记忆整理器。只输出合并后的�
 func summaryInput(summary string, history []*schema.Message) []*schema.Message {
 	turns := make([]memoryTurn, 0, len(history)/2)
 	for i := 0; i+1 < len(history); i += 2 {
-		turns = append(turns, memoryTurn{User: history[i].Content, Assistant: history[i+1].Content})
+		turns = append(turns, memoryTurn{User: history[i].Content, Assistant: historicalReply(history[i+1].Content)})
 	}
 	data, _ := json.Marshal(struct {
 		Summary string       `json:"previous_summary"`
 		Turns   []memoryTurn `json:"older_turns"`
-	}{summary, turns})
+	}{historicalReply(summary), turns})
 	return []*schema.Message{schema.SystemMessage(summaryInstruction), schema.UserMessage(string(data))}
 }
 
@@ -413,7 +423,7 @@ func (e *Engine) startCompression(parent context.Context) <-chan struct{} {
 		defer stop()
 		ctx = context.WithValue(ctx, requestScopeKey{}, requestScope{generation: generation, epoch: epoch, summary: true})
 		out, err := e.model.Generate(ctx, summaryInput(previous, prefix), model.WithMaxTokens(768), model.WithToolChoice(schema.ToolChoiceForbidden))
-		valid := err == nil && ctx.Err() == nil && out != nil && len(out.ToolCalls) == 0 && strings.TrimSpace(out.Content) != "" && utf8.ValidString(out.Content) && len(out.Content) <= maxTextBytes && estimateTokens(out.Content) <= 1024 && (out.ResponseMeta == nil || out.ResponseMeta.FinishReason == "" || out.ResponseMeta.FinishReason == "stop")
+		valid := err == nil && ctx.Err() == nil && out != nil && len(out.ToolCalls) == 0 && strings.TrimSpace(out.Content) != "" && utf8.ValidString(out.Content) && replytext.Validate(out.Content) == nil && len(out.Content) <= maxTextBytes && estimateTokens(out.Content) <= 1024 && (out.ResponseMeta == nil || out.ResponseMeta.FinishReason == "" || out.ResponseMeta.FinishReason == "stop")
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		defer close(done)
