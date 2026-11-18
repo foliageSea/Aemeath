@@ -45,7 +45,7 @@ void voice_checks(const char *directory)
     voice_page_update("idle", "", 0);
     voice_page_tick();
     lv_font_glyph_dsc_t glyph;
-    const char *chinese = "爱弥斯我在听正在识别让我想想准备说话遇到问题唤醒取消清空静音你好小";
+    const char *chinese = "爱弥斯已唤醒我在听正在识别让我想想准备说话遇到问题唤醒取消清空静音你好小";
     while (*chinese) {
         const unsigned char *utf8 = (const unsigned char *)chinese;
         assert((utf8[0] & 0xf0) == 0xe0); // these UI characters all use three UTF-8 bytes
@@ -55,12 +55,15 @@ void voice_checks(const char *directory)
     }
     host_snapshot(directory, "voice-idle", s_root);
 
-    voice_page_update("wake", "你好，我在这里", 1);
+    voice_page_update("wake", "我在听，请继续说出问题", 1);
     voice_page_tick();
     assert(s_waving && s_sequence == AVATAR_WAVING);
+    assert(!strcmp(lv_label_get_text(s_status), "已唤醒") && !strcmp(s_caption, "已唤醒"));
+    assert(lv_obj_has_flag(s_bars[0], LV_OBJ_FLAG_HIDDEN));
     host_snapshot(directory, "voice-wake", s_root);
     voice_page_update("listening", NULL, 1);
     voice_page_tick();
+    assert(!strcmp(lv_label_get_text(s_status), "我在听") && !strcmp(s_caption, "我在听"));
     host_advance(560);
     voice_page_tick();
     assert(!s_waving && s_sequence == AVATAR_WAITING);

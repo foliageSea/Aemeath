@@ -85,8 +85,14 @@ func TestWakeKeywordRestartsEveryActiveStageWithWakeCue(t *testing.T) {
 			if len(s.capture.pcm) != 0 {
 				t.Fatal("audio before the cue finished leaked into capture")
 			}
-			for range cueTailFrames {
+			for i := range cueTailFrames {
 				recordFrame(t, s, 5)
+				if i < cueTailFrames-1 && s.state.Phase != "wake" {
+					t.Fatal("listening announced before the echo tail was drained")
+				}
+			}
+			if s.state.Phase != "listening" {
+				t.Fatal("listening not announced after the echo tail")
 			}
 			if len(s.capture.pcm) != 0 || s.capture.speech {
 				t.Fatal("cue echo tail reached capture")

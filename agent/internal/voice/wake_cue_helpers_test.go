@@ -30,7 +30,7 @@ func (d testDevice) completeWakeCue() (uint32, error) {
 	if err = d.send(message{Type: "played", Turn: start.Turn}); err != nil {
 		return 0, err
 	}
-	return start.Turn, d.untilPhase("listening")
+	return start.Turn, nil
 }
 
 // micFrames sends count frames with value starting at seq and returns the next seq.
@@ -54,8 +54,8 @@ func completeWakeCueDirect(t *testing.T, s *session) {
 	recordControl(t, s, message{Type: "credit", Turn: turn, Frames: maxCredits})
 	recordControl(t, s, message{Type: "playing", Turn: turn})
 	recordControl(t, s, message{Type: "played", Turn: turn})
-	if s.wakeCue || s.play != nil || s.capture == nil || s.state.Phase != "listening" || s.wireTurn != turn+1 {
-		t.Fatalf("wake cue did not open listening: cue=%v phase=%s wire=%d", s.wakeCue, s.state.Phase, s.wireTurn)
+	if s.wakeCue || s.play != nil || s.capture == nil || s.state.Phase != "wake" || s.cueTail != wakeCueTailSamples || s.wireTurn != turn+1 {
+		t.Fatalf("wake cue did not start echo-tail drain: cue=%v phase=%s wire=%d", s.wakeCue, s.state.Phase, s.wireTurn)
 	}
 }
 
@@ -82,6 +82,23 @@ func abs16(v int16) int {
 		return -int(v)
 	}
 	return int(v)
+}
+
+func TestWakeCueDoesNotFeedKeywordDetector(t *testing.T) {
+	s := recordTestSession(t)
+	d := &fakeDetector{hitAt: frameSamples, end: frameSamples}
+	s.detector = d
+	s.state.WakeReady = true
+	recordCommand(t, s, "wake")
+	turn := s.state.Turn
+	recordFrame(t, s, 9)
+	completeWakeCueDirect(t, s)
+	for range cueTailFrames {
+		recordFrame(t, s, 9)
+	}
+	if d.samples != 0 || s.state.Turn != turn || s.state.Phase != "listening" {
+		t.Fatalf("cue audio reached KWS or restarted the turn: samples=%d turn=%d phase=%s", d.samples, s.state.Turn, s.state.Phase)
+	}
 }
 
 func TestCancelDuringWakeCueStopsWithoutListening(t *testing.T) {

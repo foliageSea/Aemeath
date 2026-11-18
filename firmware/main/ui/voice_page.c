@@ -67,13 +67,15 @@ void voice_page_update(const char *state, const char *text, uint32_t turn)
 {
     phase_t phase = parse_phase(state);
     char caption[TEXT_BYTES];
-    if (text) copy_text(caption, text);
+    if (text && phase != PH_WAKE) copy_text(caption, text);
     portENTER_CRITICAL(&s_lock);
     if (phase == PH_WAKE && (s_pending.phase != PH_WAKE || s_pending.turn != turn))
         ++s_pending.wake_serial;
     s_pending.phase = phase;
     s_pending.turn = turn;
-    if (text) memcpy(s_pending.text, caption, strlen(caption) + 1);
+    // Wake is not ready for speech, even if an older agent sends a reprompt.
+    if (phase == PH_WAKE) s_pending.text[0] = 0;
+    else if (text) memcpy(s_pending.text, caption, strlen(caption) + 1);
     ++s_pending.revision;
     portEXIT_CRITICAL(&s_lock);
 }
@@ -120,7 +122,7 @@ static avatar_sequence_id_t sequence_for(phase_t phase)
 
 static const char *status_for(phase_t phase)
 {
-    static const char *const text[] = {"等你呼唤", "我在听", "我在听", "正在识别",
+    static const char *const text[] = {"等你呼唤", "已唤醒", "我在听", "正在识别",
         "让我想想", "正在准备", "正在说话", "遇到问题"};
     return text[phase];
 }

@@ -150,8 +150,8 @@ func TestStandaloneSpeechPathsUseLocalOutput(t *testing.T) {
 					h.feed(t, 9, 1)
 				}
 				h.until(t, func(s State) bool { return s.Phase == "wake" })
-				h.until(t, func(s State) bool { return s.Phase == "listening" })
 				h.feed(t, 5, cueTailFrames)
+				h.until(t, func(s State) bool { return s.Phase == "listening" })
 				h.feed(t, 7, 3)
 				h.feed(t, 0, endSilenceSamples/frameSamples)
 			case "fish":
@@ -309,5 +309,7 @@ func TestStandalonePlaybackCannotWakeItselfAndManualHoldInterrupts(t *testing.T)
 	h.until(t, func(s State) bool { return s.Phase == "idle" && s.Turn == 2 })
 	// Reset after playback restores automatic keyword spotting.
 	h.feed(t, 9, 1)
+	h.until(t, func(s State) bool { return s.Phase == "wake" && s.Turn == 3 })
+	h.feed(t, 0, cueTailFrames)
 	h.until(t, func(s State) bool { return s.Phase == "listening" && s.Turn == 3 })
 }

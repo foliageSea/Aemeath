@@ -709,8 +709,8 @@ func (s *session) microphone(b []byte) error {
 // microphonePCM is shared by native input and validated device frames.
 func (s *session) microphonePCM(pcm []int16) error {
 	var err error
-	// Without AEC, local speaker audio must never enter keyword spotting.
-	if s.standalone && s.play != nil {
+	// The cue must not wake itself. Without AEC, also ignore local reply audio.
+	if s.wakeCue || (s.standalone && s.play != nil) {
 		return nil
 	}
 	if s.muted {
@@ -722,6 +722,14 @@ func (s *session) microphonePCM(pcm []int16) error {
 		s.capture.pcm = append(s.capture.pcm, pcm[:min(remaining, len(pcm))]...)
 		if len(s.capture.pcm) >= maxUtteranceSamples {
 			return s.stopRecording()
+		}
+		return nil
+	}
+	if s.cueTail > 0 {
+		// Keep cue echo out of both keyword spotting and question capture.
+		s.cueTail = max(0, s.cueTail-len(pcm))
+		if s.cueTail == 0 {
+			return s.phase("listening", s.wakeCueNotice)
 		}
 		return nil
 	}
@@ -741,11 +749,6 @@ func (s *session) microphonePCM(pcm []int16) error {
 			// discarded: the question is captured only after the cue.
 			return s.command(Command{Kind: "wake"})
 		}
-	}
-	if s.capture != nil && s.cueTail > 0 {
-		// Skip the cue's echo tail before VAD/capture see microphone audio.
-		s.cueTail -= len(pcm)
-		return nil
 	}
 	if s.capture != nil {
 		var speech bool

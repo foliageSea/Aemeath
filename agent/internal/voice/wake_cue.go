@@ -83,13 +83,13 @@ func (s *session) startWakeCue(notice string) error {
 	s.cueTail = 0
 	s.play = &playback{pcm: wakeCuePCM}
 	s.deadline = time.Now().Add(time.Duration(len(wakeCuePCM))*time.Second/sampleRate + 15*time.Second)
-	if err := s.phase("wake", notice); err != nil {
+	if err := s.phase("wake"); err != nil {
 		return err
 	}
 	return s.startPlayback(false, len(wakeCuePCM))
 }
 
-// finishWakeCue opens the question capture once the cue has fully rendered.
+// finishWakeCue prepares question capture but keeps the wake state during the echo tail.
 func (s *session) finishWakeCue() error {
 	if !s.wakeCue {
 		return errors.New("wake cue is not active")
@@ -110,5 +110,5 @@ func (s *session) finishWakeCue() error {
 	}
 	s.cueTail = wakeCueTailSamples
 	s.deadline = time.Now().Add(40 * time.Second)
-	return s.phase("listening", s.wakeCueNotice)
+	return nil
 }

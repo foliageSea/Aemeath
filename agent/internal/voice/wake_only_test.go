@@ -105,8 +105,8 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 					if m.State == "error" {
 						return fmt.Errorf("wake-only became error: %+v", m)
 					}
-					if m.State == "wake" && m.Text != "" {
-						if m.Turn != cueTurn+1 || !strings.Contains(m.Text, "继续说出问题") {
+					if m.State == "wake" {
+						if m.Turn != cueTurn+1 || m.Text != "" {
 							return fmt.Errorf("bad reprompt: %+v", m)
 						}
 						break
@@ -118,6 +118,13 @@ func TestWakeOnlyRepromptsAndBoundsFurtherCapture(t *testing.T) {
 				}
 				if err := tail(); err != nil {
 					return err
+				}
+				listening, err := d.until("state")
+				if err != nil {
+					return err
+				}
+				if listening.State != "listening" || listening.Turn != cueTurn+2 || !strings.Contains(listening.Text, "继续说出问题") {
+					return fmt.Errorf("bad reprompt listening state: %+v", listening)
 				}
 				switch follow {
 				case "question":
