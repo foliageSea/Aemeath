@@ -158,7 +158,18 @@ struct audio_codec_if {
     int (*set_mic_gain)(const audio_codec_if_t *, float);
     int (*set_vol)(const audio_codec_if_t *, float);
 };
-typedef struct { int unused; } audio_codec_ctrl_if_t;
+typedef struct audio_codec_ctrl_if_t audio_codec_ctrl_if_t;
+struct audio_codec_ctrl_if_t {
+    int (*read_reg)(const audio_codec_ctrl_if_t *, int, int, void *, int);
+    int (*write_reg)(const audio_codec_ctrl_if_t *, int, int, void *, int);
+};
+#define ESP_CODEC_DEV_OK 0
+// ES7210 register file; MIC gain registers start with PGA bit 4 set.
+static int host_codec_regs[256] = {[0x43] = 0x1e, [0x44] = 0x1e};
+static int host_ctrl_read(const audio_codec_ctrl_if_t *ctrl, int reg, int reg_len, void *data, int data_len)
+{ (void)ctrl; assert(reg_len == 1 && data_len == 1 && reg >= 0 && reg < 256); *(int *)data = host_codec_regs[reg]; return ESP_CODEC_DEV_OK; }
+static int host_ctrl_write(const audio_codec_ctrl_if_t *ctrl, int reg, int reg_len, void *data, int data_len)
+{ (void)ctrl; assert(reg_len == 1 && data_len == 1 && reg >= 0 && reg < 256); host_codec_regs[reg] = *(int *)data & 0xff; return ESP_CODEC_DEV_OK; }
 typedef struct { int unused; } audio_codec_gpio_if_t;
 typedef struct { int port; void *bus_handle; int clock_speed_hz, addr; } audio_codec_i2c_cfg_t;
 typedef struct { const audio_codec_ctrl_if_t *ctrl_if; const audio_codec_gpio_if_t *gpio_if; int codec_mode, pa_pin; bool use_mclk; struct { float pa_voltage, codec_dac_voltage; } hw_gain; } es8311_codec_cfg_t;
@@ -174,7 +185,7 @@ static int host_codec_enable(const audio_codec_if_t *codec, bool enabled)
 { (void)codec; assert(enabled); return ESP_OK; }
 static int host_codec_gain(const audio_codec_if_t *codec, float gain) { (void)codec; (void)gain; return ESP_OK; }
 static const audio_codec_if_t host_codec = {host_codec_fs, host_codec_enable, host_codec_gain, host_codec_gain};
-static const audio_codec_ctrl_if_t host_ctrl = {0};
+static const audio_codec_ctrl_if_t host_ctrl = {host_ctrl_read, host_ctrl_write};
 static const audio_codec_gpio_if_t host_gpio = {0};
 static const audio_codec_ctrl_if_t *audio_codec_new_i2c_ctrl(const audio_codec_i2c_cfg_t *config)
 { assert(config->bus_handle); ++host_codec_ctrl_creates; return &host_ctrl; }

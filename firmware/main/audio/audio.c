@@ -120,6 +120,27 @@ static bool received(i2s_chan_handle_t handle, i2s_event_data_t *event, void *ct
 
 static void echo_process(void *ctx, int16_t *mic, int16_t *ref, int16_t *out);
 
+// ES7210 PGA gain for MIC1/MIC2. esp_codec_dev 1.6 maps a requested 33 dB to
+// its 30 dB step (the 33 dB code is unreachable through set_mic_gain), so set
+// the gain nibble of the two used microphone registers directly afterwards.
+#define MIC_GAIN_DB 33
+#define ES7210_MIC1_GAIN 0x43
+#define ES7210_MIC2_GAIN 0x44
+#define ES7210_GAIN_33DB 0x0b
+static esp_err_t mic_gain_33db(void)
+{
+    const int regs[]={ES7210_MIC1_GAIN,ES7210_MIC2_GAIN};
+    for (size_t i=0;i<sizeof(regs)/sizeof(regs[0]);i++) {
+        int value=0;
+        if (s_adc_ctrl->read_reg(s_adc_ctrl,regs[i],1,&value,1)!=ESP_CODEC_DEV_OK) return ESP_FAIL;
+        value=(value&~0x0f)|ES7210_GAIN_33DB;
+        if (s_adc_ctrl->write_reg(s_adc_ctrl,regs[i],1,&value,1)!=ESP_CODEC_DEV_OK) return ESP_FAIL;
+        int check=0;
+        if (s_adc_ctrl->read_reg(s_adc_ctrl,regs[i],1,&check,1)!=ESP_CODEC_DEV_OK || (check&0x0f)!=ES7210_GAIN_33DB) return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
 static esp_err_t echo_reset(void)
 {
     if (s_aec) aec_destroy(s_aec);
@@ -213,7 +234,8 @@ esp_err_t audio_init(void)
     esp_codec_dev_sample_info_t fs={.bits_per_sample=16,.channel=2,.sample_rate=VOICE_RATE,.mclk_multiple=256};
     if ((err=s_dac->set_fs(s_dac,&fs))!=ESP_OK || (err=s_adc->set_fs(s_adc,&fs))!=ESP_OK ||
         (err=s_dac->enable(s_dac,true))!=ESP_OK || (err=s_adc->enable(s_adc,true))!=ESP_OK ||
-        (err=s_adc->set_mic_gain(s_adc,24))!=ESP_OK || (err=s_dac->set_vol(s_dac,-6))!=ESP_OK) goto fail;
+        (err=s_adc->set_mic_gain(s_adc,MIC_GAIN_DB))!=ESP_OK || (err=mic_gain_33db())!=ESP_OK ||
+        (err=s_dac->set_vol(s_dac,-6))!=ESP_OK) goto fail;
     s_ready=true;
     ESP_LOGI("audio","16k duplex + FD AEC (%d samples), ES7210 MIC1/2 -> mono, ES8311 DAC; free internal %u, DMA free %u, DMA largest %u, PSRAM %u",
         aec_get_chunksize(s_aec),

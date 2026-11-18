@@ -37,7 +37,10 @@ static void fixture(size_t native_size)
     schedule_tick = 0; schedule_interval = 20000;
     schedule_no_tx = schedule_extra_tx = false;
     memset(dma, 0, sizeof(dma));
+    host_codec_regs[0x43] = host_codec_regs[0x44] = 0x1e;
     assert(audio_init() == ESP_OK);
+    /* 33 dB on both used microphones; the PGA enable bit is preserved. */
+    assert(host_codec_regs[0x43] == 0x1b && host_codec_regs[0x44] == 0x1b);
     assert(host_aec_creates == 1 && host_aec_destroys == 0);
     assert(!host_pa);
 }
