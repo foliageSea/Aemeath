@@ -73,6 +73,21 @@ void voice_checks(const char *directory)
         tall |= lv_obj_get_height(s_bars[i]) > 2;
     }
     assert(tall);
+    // Normal speech peaks (~-30 dBFS) must move the bars visibly; the
+    // microphone noise floor (<-60 dBFS) keeps them flat.
+    assert(wave_display(0) == 0 && wave_display(0.0005f) == 0 && wave_display(1.0f) == 1);
+    assert(wave_display(0.03f) > 0.5f && wave_display(0.03f) < 0.7f);
+    host_advance(1000);
+    voice_page_level(0.03f);
+    voice_page_tick();
+    host_advance(1);
+    int speech_tallest = 0;
+    for (int i = 0; i < WAVE_BARS; ++i)
+        if (lv_obj_get_height(s_bars[i]) > speech_tallest) speech_tallest = lv_obj_get_height(s_bars[i]);
+    assert(speech_tallest >= 10);
+    voice_page_level(1.0f);
+    voice_page_tick();
+    host_advance(1);
     host_snapshot(directory, "voice-listening", s_root);
     voice_page_level(NAN);
     voice_page_level(-1);

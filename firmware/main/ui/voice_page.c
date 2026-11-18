@@ -95,6 +95,18 @@ void voice_page_set_muted(bool muted)
     portEXIT_CRITICAL(&s_lock);
 }
 
+// Peak levels are linear: normal speech peaks around -30 dBFS (~0.03), which
+// would leave the bars visually flat. Map -60..-10 dBFS onto the bar range.
+#define WAVE_FLOOR_DB (-60.0f)
+#define WAVE_RANGE_DB 50.0f
+static float wave_display(float level)
+{
+    if (!(level > 0)) return 0;
+    float db = 20.0f * log10f(level);
+    float display = (db - WAVE_FLOOR_DB) / WAVE_RANGE_DB;
+    return display < 0 ? 0 : (display > 1 ? 1 : display);
+}
+
 static avatar_sequence_id_t sequence_for(phase_t phase)
 {
     switch (phase) {
@@ -268,13 +280,14 @@ void voice_page_tick(void)
         s_frame = frame;
     }
     s_level = fmaxf(snapshot.level, s_level * 0.65f);
+    float display = wave_display(s_level);
     static const uint8_t shape[WAVE_BARS] = {45, 70, 48, 90, 65, 100, 78, 50, 87, 65, 95, 55};
     for (int i = 0; i < WAVE_BARS; ++i) {
         if (s_phase != PH_SPEAKING && s_phase != PH_LISTENING) {
             lv_obj_add_flag(s_bars[i], LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_remove_flag(s_bars[i], LV_OBJ_FLAG_HIDDEN);
-            int height = 2 + (int)(s_level * shape[(i + now / 80) % WAVE_BARS] * 0.24f);
+            int height = 2 + (int)(display * shape[(i + now / 80) % WAVE_BARS] * 0.24f);
             lv_obj_set_height(s_bars[i], height);
             lv_obj_set_y(s_bars[i], 220 - height / 2);
         }
