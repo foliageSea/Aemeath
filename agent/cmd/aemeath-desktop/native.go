@@ -229,7 +229,8 @@ func (a *nativeUI) view(c *ui.Context) {
 		a.titleBar(c)
 		ui.Row(c.Key("app-body")).FillWidth().Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 			a.sidebar(c)
-			ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Background(t.Background).Padding(20).Gap(14).Children(func() {
+			// Round only the corner where the page meets the title bar and sidebar.
+			ui.Column(c.Key("main")).Grow(1).MinWidth(0).MinHeight(0).Background(t.Background).Radius(12, 0, 0, 0).Padding(20).Gap(14).Children(func() {
 				a.header(c)
 				if a.page == "订阅" {
 					a.quotaListView(c)
