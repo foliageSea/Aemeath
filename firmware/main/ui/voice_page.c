@@ -108,7 +108,7 @@ static avatar_sequence_id_t sequence_for(phase_t phase)
 
 static const char *status_for(phase_t phase)
 {
-    static const char *const text[] = {"等你呼唤", "我在这里", "我在听", "正在识别",
+    static const char *const text[] = {"等你呼唤", "我在听", "我在听", "正在识别",
         "让我想想", "正在准备", "正在说话", "遇到问题"};
     return text[phase];
 }

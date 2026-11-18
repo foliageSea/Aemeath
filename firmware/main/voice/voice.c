@@ -35,6 +35,10 @@ static voice_playback_t s_play;
 static bool s_start_pending;
 static int s_volume=70;
 static int64_t s_error_until, s_play_deadline;
+// After the wake cue the agent opens listening at once. Hold the wake display
+// meanwhile instead of flashing idle; fall back to idle if listening never comes.
+static int64_t s_cue_hold_until;
+#define CUE_HOLD_US 2000000
 static char s_phase[24]="idle";
 
 static void capture_snapshot(bool enabled, uint32_t epoch)
@@ -51,6 +55,7 @@ static void playback_activity(void)
 static void ui(const char *phase, const char *text)
 {
     strlcpy(s_phase,phase,sizeof(s_phase));
+    s_cue_hold_until=0;
     portENTER_CRITICAL(&s_lock); s_mic_meter=!strcmp(phase,"listening"); portEXIT_CRITICAL(&s_lock);
     if (!strcmp(phase,"wake") || !strcmp(phase,"listening")) dashboard_voice_begin();
     voice_page_update(phase,text,s_turn);
@@ -246,15 +251,26 @@ static void rendered(void)
         if (!s_play.active || render.epoch!=s_epoch || render.turn!=s_turn) return;
         bool first=!s_play.started;
         if (!voice_playback_render(&s_play,render.epoch,render.turn,render.seq,render.samples)) { fail_round("render_sequence","Playback completion mismatch"); return; }
-        if (first) { send_json("playing",s_turn,NULL); dashboard_voice_begin(); ui("speaking",NULL); }
+        if (first) {
+            send_json("playing",s_turn,NULL); dashboard_voice_begin();
+            // The wake cue keeps the wake display; only replies show speaking.
+            if (strcmp(s_phase,"wake")) ui("speaking",NULL);
+        }
         voice_page_level(render.level);
         send_json("credit",s_turn,",\"frames\":1");
         playback_activity();
     }
     if (voice_playback_done(&s_play)) {
         send_json("played",s_turn,NULL);
-        abort_round(true);
+        bool cue=!strcmp(s_phase,"wake");
+        abort_round(!cue);
+        if (cue) s_cue_hold_until=esp_timer_get_time()+CUE_HOLD_US;
     }
+}
+static void expire_display(int64_t now)
+{
+    if (s_error_until && now>=s_error_until) { s_error_until=0; ui("idle",""); }
+    if (s_cue_hold_until && now>=s_cue_hold_until) ui("idle","");
 }
 static void command(const event_t *event)
 {
@@ -345,7 +361,7 @@ static void worker(void *arg)
         poll_start();
         rendered(); // one completion per pass, after cancellation
         int64_t now=esp_timer_get_time();
-        if (s_error_until && now>=s_error_until) { s_error_until=0; ui("idle",""); }
+        expire_display(now);
         if (s_play.active && s_play_deadline && now>=s_play_deadline) fail_round("playback_timeout","Playback stalled before drain");
         event_t event;
         if (next_event(&event)) {

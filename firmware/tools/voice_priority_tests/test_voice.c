@@ -103,6 +103,31 @@ static void test_audio_order(void) {
     host_render=(audio_render_t){.epoch=17,.turn=6,.seq=0,.samples=320}; host_render_ready=true;
     rendered(); assert(host_played==1 && s_closed_turn==6);
 }
+static void test_wake_cue_display(void) {
+    setup();
+    text("{\"v\":1,\"type\":\"state\",\"epoch\":17,\"turn\":6,\"state\":\"wake\"}");
+    start(6); pcm(6);
+    text("{\"v\":1,\"type\":\"playback_end\",\"epoch\":17,\"turn\":6}");
+    priority_controls(); consume(); consume();
+    host_start_result=ESP_OK; poll_start(); consume(); consume();
+    assert(s_play.ended && !strcmp(s_phase,"wake"));
+    host_render=(audio_render_t){.epoch=17,.turn=6,.seq=0,.samples=320}; host_render_ready=true;
+    // Rendering and finishing the cue neither shows speaking nor flashes idle.
+    rendered(); assert(host_played==1 && s_closed_turn==6 && !strcmp(s_phase,"wake") && s_cue_hold_until);
+    expire_display(s_cue_hold_until-1); assert(!strcmp(s_phase,"wake"));
+    text("{\"v\":1,\"type\":\"state\",\"epoch\":17,\"turn\":7,\"state\":\"listening\"}");
+    priority_controls(); consume();
+    assert(s_turn==7 && !strcmp(s_phase,"listening") && !s_cue_hold_until);
+    // Without a following listening state the display falls back to idle.
+    s_cue_hold_until=5; strlcpy(s_phase,"wake",sizeof(s_phase));
+    expire_display(5); assert(!strcmp(s_phase,"idle") && !s_cue_hold_until);
+    // Replies still switch to speaking on their first rendered frame.
+    text("{\"v\":1,\"type\":\"state\",\"epoch\":17,\"turn\":8,\"state\":\"synthesizing\"}");
+    start(8); pcm(8); priority_controls(); consume(); consume();
+    poll_start(); consume(); assert(s_play.received==320);
+    host_render=(audio_render_t){.epoch=17,.turn=8,.seq=0,.samples=320}; host_render_ready=true;
+    rendered(); assert(!strcmp(s_phase,"speaking"));
+}
 static void test_validation(void) {
     const char *invalid[]={
         "{\"v\":2,\"type\":\"cancel\",\"epoch\":17,\"turn\":5}",
@@ -198,6 +223,6 @@ static void test_connection_error_state(void) {
     priority_controls(); consume(); assert(s_turn==1 && !strcmp(s_phase,"listening"));
 }
 int main(void) {
-    test_connection_error_state(); test_capture_revision(); test_scan_boundary(); test_remote_cancel(); test_audio_order(); test_validation(); test_local_barrier(); test_overflow();
+    test_connection_error_state(); test_capture_revision(); test_scan_boundary(); test_remote_cancel(); test_audio_order(); test_wake_cue_display(); test_validation(); test_local_barrier(); test_overflow();
     delete_events(); puts("voice priority: order, validation, stale epochs, barriers, async start and overflow passed");
 }
