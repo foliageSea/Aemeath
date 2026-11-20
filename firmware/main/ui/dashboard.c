@@ -65,8 +65,6 @@ static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h)
     lv_obj_set_style_bg_color(c, lv_color_hex(C_CARD), 0);
     lv_obj_add_style(c, &s_card_background, LV_PART_MAIN);
     lv_obj_set_style_radius(c, 14, 0);
-    lv_obj_set_style_border_color(c, lv_color_hex(C_BORDER), 0);
-    lv_obj_set_style_border_width(c, 1, 0);
     lv_obj_set_style_pad_all(c, 10, 0);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;

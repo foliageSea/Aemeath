@@ -144,9 +144,6 @@ static void add_account(const quota_account_t *a, uint32_t accent)
     lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
     lv_obj_add_style(card, s_card_background, LV_PART_MAIN);
     lv_obj_set_style_radius(card, 14, 0);
-    lv_obj_set_style_border_color(card, lv_color_hex(C_BORDER), 0);
-    lv_obj_set_style_border_width(card, 1, 0);
-    lv_obj_set_style_border_side(card, LV_BORDER_SIDE_FULL, 0);
     lv_obj_set_style_pad_all(card, 12, 0);
     lv_obj_set_style_pad_row(card, 8, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
