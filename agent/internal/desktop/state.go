@@ -23,10 +23,13 @@ type State struct {
 	Voice     voice.State `json:"voice"`
 	// Screen state as last reported by the device; ScreenKnown is false until the
 	// connected device reports (ScreenOn/Brightness are then only placeholders).
-	ScreenOn    bool  `json:"screenOn"`
-	Brightness  int   `json:"brightness"`
-	ScreenKnown bool  `json:"screenKnown"`
-	LastSent    int64 `json:"lastSent"`
+	ScreenOn    bool `json:"screenOn"`
+	Brightness  int  `json:"brightness"`
+	ScreenKnown bool `json:"screenKnown"`
+	// Older firmware reports screen power and brightness but not card transparency.
+	CardTransparency      int   `json:"cardTransparency"`
+	CardTransparencyKnown bool  `json:"cardTransparencyKnown"`
+	LastSent              int64 `json:"lastSent"`
 }
 
 // Clone returns a snapshot with independently owned nested values.

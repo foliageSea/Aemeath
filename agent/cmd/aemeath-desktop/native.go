@@ -19,6 +19,7 @@ type nativeService interface {
 	SaveSettings(desktop.Settings) error
 	SetPage(string) error
 	SetScreen(bool, int) error
+	SetCardTransparency(int) error
 	RefreshQuotas() error
 }
 
@@ -94,6 +95,8 @@ type nativeUI struct {
 	modelCatalogPicker       nativeModelCatalogPicker
 	background               nativeBackgroundState
 	backgroundOps            nativeBackgroundOps
+	cardTransparencyPending  *int
+	cardTransparencySending  bool
 	memories                 nativeMemoryState
 	haProbe                  func(context.Context, hamcp.Config) ([]hamcp.Tool, error)
 }
@@ -114,6 +117,9 @@ func copySettings(s desktop.Settings) desktop.Settings {
 // refresh runs on the UI thread and never replaces the user's draft.
 func (a *nativeUI) refresh() {
 	a.snapshot = a.service.Snapshot()
+	if !a.snapshot.Connected || !a.snapshot.CardTransparencyKnown {
+		a.cardTransparencyPending = nil
+	}
 	a.syncBackgroundConnection()
 	if a.snapshot.Error == "" {
 		a.details = false
@@ -392,6 +398,55 @@ func (a *nativeUI) screenSettingsView(c *ui.Context) {
 			}
 			return field
 		})
+		a.cardTransparencySlider(c)
 	})
 	a.backgroundSettingsView(c)
+}
+
+func (a *nativeUI) cardTransparencySlider(c *ui.Context) {
+	nativeSettingsField(c, "card-transparency-field", "卡片透明度", func() ui.Element {
+		available := a.snapshot.Connected && a.snapshot.CardTransparencyKnown
+		value := float64(a.snapshot.CardTransparency)
+		if a.cardTransparencyPending != nil {
+			value = float64(*a.cardTransparencyPending)
+		}
+		var field ui.Element
+		ui.Row(c).FillWidth().MinWidth(0).Gap(10).AlignItems(ui.Center).Children(func() {
+			field = ui.StepSlider(c.Key("card-transparency"), &value, 0, 100, 1).Label("卡片透明度").Disabled(!available).Grow(1).MinWidth(0)
+			if field.Changed() && available && a.update != nil {
+				percent := int(value)
+				a.cardTransparencyPending = &percent
+				a.sendCardTransparency()
+			}
+			label := "—"
+			if available {
+				label = fmt.Sprintf("%.0f%%", value)
+			}
+			ui.Text(c, label).Width(44).Shrink(0).FontSize(11).TextColor(c.Theme().TextMuted)
+		})
+		return field
+	})
+}
+
+// Keep one send in flight and coalesce pointer updates to the latest selection.
+func (a *nativeUI) sendCardTransparency() {
+	if a.cardTransparencySending || a.cardTransparencyPending == nil {
+		return
+	}
+	pending, dispatch := a.cardTransparencyPending, a.update
+	a.cardTransparencySending = true
+	go func() {
+		err := a.service.SetCardTransparency(*pending)
+		dispatch(func() {
+			a.cardTransparencySending = false
+			if err != nil {
+				a.cardTransparencyPending = nil
+				a.notify(nativeNoticeError, "卡片透明度指令发送失败："+err.Error())
+			} else if a.cardTransparencyPending != nil && *a.cardTransparencyPending == *pending {
+				a.cardTransparencyPending = nil
+			}
+			a.refresh()
+			a.sendCardTransparency()
+		})
+	}()
 }

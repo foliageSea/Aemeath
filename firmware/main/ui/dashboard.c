@@ -30,7 +30,7 @@
 #define C_HOT       0xF85149
 
 #define HIST_POINTS     60
-#define CARD_OPA        LV_OPA_70  // lets the background show through
+static lv_style_t s_card_background;
 
 // User background is optional. No factory image is embedded or loaded.
 static lv_obj_t *s_background;
@@ -63,7 +63,7 @@ static lv_obj_t *card(lv_obj_t *parent, int x, int y, int w, int h)
     lv_obj_set_pos(c, x, y);
     lv_obj_set_size(c, w, h);
     lv_obj_set_style_bg_color(c, lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_bg_opa(c, CARD_OPA, 0);
+    lv_obj_add_style(c, &s_card_background, LV_PART_MAIN);
     lv_obj_set_style_radius(c, 14, 0);
     lv_obj_set_style_border_color(c, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(c, 1, 0);
@@ -597,9 +597,26 @@ bool dashboard_set_background(const uint8_t *pixels, uint32_t timeout_ms)
     return true;
 }
 
+static void set_card_opacity(int transparency)
+{
+    lv_style_set_bg_opa(&s_card_background, ((100 - transparency) * LV_OPA_COVER + 50) / 100);
+}
+
+bool dashboard_set_card_transparency(int percent)
+{
+    if (percent < 0 || percent > 100 || !lvgl_port_lock(0)) return false;
+    if (!s_tiles) { lvgl_port_unlock(); return false; }
+    set_card_opacity(percent);
+    lv_obj_report_style_change(&s_card_background);
+    lvgl_port_unlock();
+    return true;
+}
+
 void dashboard_create(void)
 {
     lvgl_port_lock(0);
+    lv_style_init(&s_card_background);
+    set_card_opacity(display_get_card_transparency());
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
@@ -624,7 +641,7 @@ void dashboard_create(void)
     gauge_create(&s_gpu, pc, 324, "GPU", C_GPU);
     build_charts(pc);
     build_io(pc);
-    quota_page_create(quota);
+    quota_page_create(quota, &s_card_background);
     voice_page_create(voice);
 
     for (int i = 0; i < 3; i++) {

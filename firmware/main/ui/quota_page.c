@@ -31,6 +31,7 @@ typedef struct {
 } row_t;
 
 static lv_obj_t *s_usage, *s_updated, *s_list, *s_empty, *s_mode_lbl;
+static lv_style_t *s_card_background;
 static bool s_show_left;  // false: show used %, true: show remaining %
 static row_t s_rows[MAX_ROWS];
 static int s_nrows;
@@ -141,7 +142,7 @@ static void add_account(const quota_account_t *a, uint32_t accent)
     lv_obj_remove_style_all(card);
     lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(card, lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_70, 0);
+    lv_obj_add_style(card, s_card_background, LV_PART_MAIN);
     lv_obj_set_style_radius(card, 14, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(C_BORDER), 0);
     lv_obj_set_style_border_width(card, 1, 0);
@@ -243,8 +244,9 @@ static void mode_load(void)
     s_show_left = v;
 }
 
-void quota_page_create(lv_obj_t *parent)
+void quota_page_create(lv_obj_t *parent, lv_style_t *card_background)
 {
+    s_card_background = card_background;
     mode_load();
 
     lv_obj_t *t = label(parent, &lv_font_montserrat_20, C_TEXT, "AI QUOTA");

@@ -225,7 +225,7 @@ func (s *Service) stop() {
 	s.runCancel, s.runDone = nil, nil
 	s.state.Running, s.state.Connected, s.state.Status = false, false, "stopped"
 	s.state.Target, s.state.Error = "", ""
-	s.state.ScreenKnown = false
+	s.state.ScreenKnown, s.state.CardTransparencyKnown = false, false
 	s.state.Page, s.state.PageKnown = "", false
 	state := s.state.Voice.Clone()
 	state.Connected, state.WakeReady, state.Phase = false, false, "stopped"
@@ -287,7 +287,7 @@ func (s *Service) SaveSettings(settings Settings) error {
 			s.setVoiceLocked(state)
 		}
 		if old.RunMode != normalized.RunMode {
-			s.state.Connected, s.state.ScreenKnown = false, false
+			s.state.Connected, s.state.ScreenKnown, s.state.CardTransparencyKnown = false, false, false
 			s.state.Page, s.state.PageKnown = "", false
 		}
 		signal(s.runWake)
@@ -390,6 +390,26 @@ func (s *Service) setScreen(request context.Context, on bool, brightness int) er
 	if brightness < 0 || brightness > 100 {
 		return fmt.Errorf("invalid brightness %d: expected 0..100", brightness)
 	}
+	return s.sendScreenSetting(request, screenFrame{1, "screen", on, brightness}, "screen", false, func(state *State) {
+		state.ScreenOn, state.Brightness = on, brightness
+	})
+}
+
+type cardTransparencyFrame struct {
+	V       int    `json:"v"`
+	Type    string `json:"type"`
+	Percent int    `json:"percent"`
+}
+
+// SetCardTransparency sends a background-only command. The device report updates the snapshot.
+func (s *Service) SetCardTransparency(percent int) error {
+	if percent < 0 || percent > 100 {
+		return fmt.Errorf("invalid card transparency %d: expected 0..100", percent)
+	}
+	return s.sendScreenSetting(context.Background(), cardTransparencyFrame{1, "card_transparency", percent}, "card transparency", true, nil)
+}
+
+func (s *Service) sendScreenSetting(request context.Context, frame any, name string, needsCardSupport bool, onSent func(*State)) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -399,6 +419,10 @@ func (s *Service) setScreen(request context.Context, on bool, brightness int) er
 	if conn == nil || !s.state.Connected {
 		s.mu.Unlock()
 		return ErrOffline
+	}
+	if needsCardSupport && !s.state.CardTransparencyKnown {
+		s.mu.Unlock()
+		return errors.New("设备尚未报告卡片透明度")
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
@@ -411,15 +435,18 @@ func (s *Service) setScreen(request context.Context, on bool, brightness int) er
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := conn.Send(ctx, screenFrame{1, "screen", on, brightness}); err != nil {
+	if err := conn.Send(ctx, frame); err != nil {
 		if request.Err() == nil {
 			s.failConnection(conn, err)
 		}
-		return fmt.Errorf("set screen: %w", err)
+		return fmt.Errorf("set %s: %w", name, err)
 	}
 	s.mu.Lock()
 	if s.conn == conn {
-		s.state.ScreenOn, s.state.Brightness, s.state.LastSent = on, brightness, time.Now().Unix()
+		s.state.LastSent = time.Now().Unix()
+		if onSent != nil {
+			onSent(&s.state)
+		}
 	}
 	s.mu.Unlock()
 	return nil
@@ -552,7 +579,7 @@ func (s *Service) failConnection(conn connection, err error) {
 	defer s.mu.Unlock()
 	if s.conn == conn {
 		s.state.Connected, s.state.Error, s.state.Status = false, err.Error(), "reconnecting"
-		s.state.ScreenKnown = false
+		s.state.ScreenKnown, s.state.CardTransparencyKnown = false, false
 		s.state.Page, s.state.PageKnown = "", false
 		if s.attemptCancel != nil {
 			s.attemptCancel()
@@ -583,7 +610,7 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 		if standalone {
 			s.mu.Lock()
 			s.state.Status, s.state.Target, s.state.Error = "standalone", "", ""
-			s.state.Connected, s.state.ScreenKnown = false, false
+			s.state.Connected, s.state.ScreenKnown, s.state.CardTransparencyKnown = false, false, false
 			s.state.Page, s.state.PageKnown = "", false
 			s.mu.Unlock()
 			voiceDone := s.startVoiceSession(attempt, nil, "", true)
@@ -625,7 +652,7 @@ func (s *Service) connectionLoop(ctx context.Context, done chan struct{}) {
 		cancel()
 		s.mu.Lock()
 		s.conn, s.connCtx, s.attemptCancel = nil, nil, nil
-		s.state.Connected, s.state.ScreenKnown = false, false
+		s.state.Connected, s.state.ScreenKnown, s.state.CardTransparencyKnown = false, false, false
 		s.state.Page, s.state.PageKnown = "", false
 		if err != nil && ctx.Err() == nil {
 			s.state.Error, s.state.Status = err.Error(), "reconnecting"
@@ -719,15 +746,16 @@ func (s *Service) waitForUpdate(ctx context.Context, conn connection, incoming <
 }
 
 type deviceFrame struct {
-	V          int    `json:"v"`
-	Type       string `json:"type"`
-	On         *bool  `json:"on"`
-	Brightness *int   `json:"brightness"`
-	Page       string `json:"page"`
+	V                int    `json:"v"`
+	Type             string `json:"type"`
+	On               *bool  `json:"on"`
+	Brightness       *int   `json:"brightness"`
+	Page             string `json:"page"`
+	CardTransparency *int   `json:"card_transparency"`
 }
 
 // handleDeviceFrame applies reports from the device, which is the source of truth
-// for screen power, brightness, and the actual visible page. Reports never
+// for screen preferences and the actual visible page. Reports never
 // trigger outgoing commands, and late reports from an old connection are ignored.
 func (s *Service) handleDeviceFrame(conn connection, msg []byte) {
 	var f deviceFrame
@@ -741,8 +769,12 @@ func (s *Service) handleDeviceFrame(conn connection, msg []byte) {
 	}
 	switch f.Type {
 	case "screen_state":
-		if f.On != nil && f.Brightness != nil {
+		if f.On != nil && f.Brightness != nil && (f.CardTransparency == nil || (*f.CardTransparency >= 0 && *f.CardTransparency <= 100)) {
 			s.state.ScreenOn, s.state.Brightness, s.state.ScreenKnown = *f.On, min(max(*f.Brightness, 0), 100), true
+			s.state.CardTransparencyKnown = f.CardTransparency != nil
+			if f.CardTransparency != nil {
+				s.state.CardTransparency = *f.CardTransparency
+			}
 		}
 	case "page_state":
 		if f.Page == "metrics" || f.Page == "quota" || f.Page == "voice" {

@@ -144,9 +144,9 @@ static void screen_state_send(void *arg)
     bool on;
     int brightness;
     display_get_screen(&on, &brightness);
-    char msg[80];
-    int len = snprintf(msg, sizeof(msg), "{\"v\":1,\"type\":\"screen_state\",\"on\":%s,\"brightness\":%d}",
-                       on ? "true" : "false", brightness);
+    char msg[112];
+    int len = snprintf(msg, sizeof(msg), "{\"v\":1,\"type\":\"screen_state\",\"on\":%s,\"brightness\":%d,\"card_transparency\":%d}",
+                       on ? "true" : "false", brightness, display_get_card_transparency());
     httpd_ws_frame_t frame = {.type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t *)msg, .len = len, .final = true};
 
     int fds[CONFIG_LWIP_MAX_SOCKETS];

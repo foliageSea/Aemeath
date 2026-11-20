@@ -86,6 +86,15 @@ bool metrics_ingest(const char *json, size_t len)
                 accepted = display_set_screen(cJSON_IsTrue(on), percent) == ESP_OK;
                 server_broadcast_screen();  // report the applied state (also on failure)
             }
+        } else if (strcmp(type->valuestring, "card_transparency") == 0) {
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(root, "v");
+            const cJSON *percent = cJSON_GetObjectItemCaseSensitive(root, "percent");
+            accepted = false;
+            if (cJSON_IsNumber(v) && v->valuedouble == 1 && cJSON_IsNumber(percent) &&
+                percent->valueint >= 0 && percent->valueint <= 100 && percent->valuedouble == percent->valueint) {
+                accepted = display_set_card_transparency(percent->valueint);
+                server_broadcast_screen();
+            }
         }
         cJSON_Delete(root);
         return accepted;

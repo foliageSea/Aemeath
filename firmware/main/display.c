@@ -2,6 +2,7 @@
 #include "display.h"
 
 #include "board.h"
+#include "dashboard.h"
 #include "esp_check.h"
 #include "esp_lcd_panel_io_additions.h"
 #include "esp_lcd_panel_ops.h"
@@ -70,10 +71,13 @@ static int s_voice_saved_brightness;
 #define SCREEN_NVS_NS             "screen"
 #define SCREEN_NVS_ON             "on"
 #define SCREEN_NVS_BRI            "bri"
+#define SCREEN_NVS_CARD_TRANS     "card_trans"
 #define SCREEN_DEFAULT_BRIGHTNESS 80
+#define SCREEN_DEFAULT_CARD_TRANS 60
 #define SCREEN_SAVE_DELAY_US      (1000 * 1000)
 
 static int s_brightness_pct = SCREEN_DEFAULT_BRIGHTNESS;
+static int s_card_transparency = SCREEN_DEFAULT_CARD_TRANS;
 static esp_timer_handle_t s_save_timer;
 static bool s_save_timer_ready;
 
@@ -235,6 +239,10 @@ static void screen_load(void)
     if (nvs_get_u8(h, SCREEN_NVS_BRI, &bri) == ESP_OK && bri <= 100) {
         s_brightness_pct = bri;
     }
+    uint8_t card;
+    if (nvs_get_u8(h, SCREEN_NVS_CARD_TRANS, &card) == ESP_OK && card <= 100) {
+        s_card_transparency = card;
+    }
     nvs_close(h);
 }
 
@@ -248,9 +256,10 @@ static void screen_save(void *arg)
         ESP_LOGW(TAG, "screen save: nvs open failed");
         return;
     }
-    nvs_set_u8(h, SCREEN_NVS_ON, on ? 1 : 0);
-    nvs_set_u8(h, SCREEN_NVS_BRI, (uint8_t)bri);
-    esp_err_t err = nvs_commit(h);
+    esp_err_t err = nvs_set_u8(h, SCREEN_NVS_ON, on ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_u8(h, SCREEN_NVS_BRI, (uint8_t)bri);
+    if (err == ESP_OK) err = nvs_set_u8(h, SCREEN_NVS_CARD_TRANS, (uint8_t)display_get_card_transparency());
+    if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "screen save failed: %s", esp_err_to_name(err));
@@ -287,6 +296,15 @@ static esp_err_t screen_apply(bool on, int percent)
     return err;
 }
 
+// Caller holds s_screen_lock. Batch flash writes until slider changes settle.
+static void screen_schedule_save(void)
+{
+    if (s_save_timer_ready) {
+        esp_timer_stop(s_save_timer);
+        esp_timer_start_once(s_save_timer, SCREEN_SAVE_DELAY_US);
+    }
+}
+
 esp_err_t display_set_screen(bool on, int percent)
 {
     if (!s_panel || !s_screen_lock) {
@@ -300,13 +318,30 @@ esp_err_t display_set_screen(bool on, int percent)
     // Brightness is remembered while off so turning back on restores it.
     s_brightness_pct = percent;
     esp_err_t err = screen_apply(on, percent);
+    screen_schedule_save();
     xSemaphoreGive(s_screen_lock);
-    // Debounce flash writes: slider drags send many frames, persist once they settle.
-    if (s_save_timer_ready) {
-        esp_timer_stop(s_save_timer);
-        esp_timer_start_once(s_save_timer, SCREEN_SAVE_DELAY_US);
-    }
     return err;
+}
+
+bool display_set_card_transparency(int percent)
+{
+    // Do not hold the screen lock while taking the LVGL lock (voice uses the reverse order).
+    if (!s_screen_lock || !dashboard_set_card_transparency(percent)) return false;
+    xSemaphoreTake(s_screen_lock, portMAX_DELAY);
+    if (s_card_transparency != percent) {
+        s_card_transparency = percent;
+        screen_schedule_save();
+    }
+    xSemaphoreGive(s_screen_lock);
+    return true;
+}
+
+int display_get_card_transparency(void)
+{
+    xSemaphoreTake(s_screen_lock, portMAX_DELAY);
+    int percent = s_card_transparency;
+    xSemaphoreGive(s_screen_lock);
+    return percent;
 }
 
 void display_voice_begin(void)

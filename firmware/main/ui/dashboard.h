@@ -11,6 +11,8 @@ typedef enum {
 
 // Builds the dashboard and starts its refresh timer.
 void dashboard_create(void);
+// Updates the shared metrics and quota card background style under the LVGL lock.
+bool dashboard_set_card_transparency(int percent);
 
 // Complete immutable 480x480 RGB565_LE pixels, or NULL for the plain default.
 // Never takes ownership. On success the previous pixels may be freed by caller.

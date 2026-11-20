@@ -44,11 +44,12 @@ func newInbox() *inbox {
 // or future-version frames must not erase the last usable state.
 func stateKind(data []byte) string {
 	var f struct {
-		V          int    `json:"v"`
-		Type       string `json:"type"`
-		Page       string `json:"page"`
-		On         *bool  `json:"on"`
-		Brightness *int   `json:"brightness"`
+		V                int    `json:"v"`
+		Type             string `json:"type"`
+		Page             string `json:"page"`
+		On               *bool  `json:"on"`
+		Brightness       *int   `json:"brightness"`
+		CardTransparency *int   `json:"card_transparency"`
 	}
 	if json.Unmarshal(data, &f) != nil || f.V != 1 {
 		return ""
@@ -59,7 +60,7 @@ func stateKind(data []byte) string {
 			return f.Type
 		}
 	case "screen_state":
-		if f.On != nil && f.Brightness != nil {
+		if f.On != nil && f.Brightness != nil && (f.CardTransparency == nil || (*f.CardTransparency >= 0 && *f.CardTransparency <= 100)) {
 			return f.Type
 		}
 	}

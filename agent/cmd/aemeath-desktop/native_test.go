@@ -75,6 +75,12 @@ func (f *nativeFake) SetScreen(on bool, brightness int) error {
 	f.state.ScreenOn, f.state.Brightness = on, brightness
 	return nil
 }
+func (f *nativeFake) SetCardTransparency(percent int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.state.CardTransparency = percent
+	return nil
+}
 func (f *nativeFake) RefreshQuotas() error { return nil }
 func nativeTest(t *testing.T) (*nativeUI, *nativeFake, chan func(), *ui.Tester) {
 	t.Helper()
@@ -261,6 +267,36 @@ func TestNativeScreenControl(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.screens) != 3 || f.screens[2] != [2]int{0, 80} {
 		t.Fatalf("settings switch sent incorrect command: %+v", f.screens)
+	}
+}
+
+func TestNativeCardTransparencySlider(t *testing.T) {
+	a, f, updates, tt := nativeTest(t)
+	a.page, a.settingsTab = "设置", nativeSettingsScreenTab
+	f.state.Connected, f.state.ScreenKnown = true, true
+	f.state.ScreenOn = false
+	a.refresh()
+	tt.Frame()
+	slider, ok := tt.AccessByRole(ui.RoleSlider, "卡片透明度")
+	if !ok || !slider.Disabled {
+		t.Fatal("slider should be disabled for old firmware")
+	}
+	f.state.CardTransparencyKnown, f.state.CardTransparency = true, 60
+	a.refresh()
+	tt.Frame()
+	slider, ok = tt.AccessByRole(ui.RoleSlider, "卡片透明度")
+	if !ok || slider.Disabled || !tt.HasText("60%") {
+		t.Fatal("reported transparency should be editable even while the screen is off")
+	}
+	tt.ClickAt(slider.Bounds.X+slider.Bounds.W/2, slider.Bounds.Y+slider.Bounds.H/2)
+	tt.Key(0, ui.KeyHome)
+	tt.Key(0, ui.KeyEnd)
+	nativeComplete(t, updates, tt)
+	if a.cardTransparencySending {
+		nativeComplete(t, updates, tt)
+	}
+	if a.snapshot.CardTransparency != 100 || !tt.HasText("100%") || a.dirty || len(f.screens) != 0 {
+		t.Fatal("latest slider value should apply without changing backlight or the settings draft")
 	}
 }
 
